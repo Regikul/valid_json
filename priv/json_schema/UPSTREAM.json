@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/json-schema-org/json-schema-spec",
+  "drafts": {
+    "2020-12": {
+      "commit": "add836e705c9a07434c467b6b90946ba45258a73"
+    },
+    "2019-09": {
+      "commit": "38e1606d71ee848c6cf0490c3457681220c01663",
+      "output": {
+        "commit": "27f89d4b5760707a362565231f026eed1092b3d2"
+      }
+    }
+  }
+}
