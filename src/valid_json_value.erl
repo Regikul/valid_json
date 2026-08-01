@@ -5,7 +5,8 @@
 
 -include("valid_json_core.hrl").
 
--export([is_type/2, is_multiple_of/2]).
+-export([is_type/2, is_multiple_of/2,
+         is_length_at_most/2, is_length_at_least/2, is_unique/1]).
 
 %% type: "integer" принимает любой number с нулевой дробной частью, поэтому
 %% integer не сводится к is_integer/1.
@@ -17,6 +18,42 @@ is_type(array,   V) -> is_list(V);
 is_type(string,  V) -> is_binary(V);
 is_type(number,  V) -> is_number(V);
 is_type(integer, V) -> is_integer(V) orelse (is_float(V) andalso V == trunc(V)).
+
+%% minLength и maxLength считают Unicode code points, а не байты, UTF-16 units
+%% или grapheme clusters (validation.txt:385). Границы byte_size div 4 =< CP =<
+%% byte_size часто дают ответ, и тогда строку обходить не нужно.
+-spec is_length_at_most(binary(), non_neg_integer()) -> boolean().
+is_length_at_most(String, Bound) when byte_size(String) =< Bound ->
+    true;
+is_length_at_most(String, Bound) when byte_size(String) div 4 > Bound ->
+    false;
+is_length_at_most(String, Bound) ->
+    cp_length(String) =< Bound.
+
+-spec is_length_at_least(binary(), non_neg_integer()) -> boolean().
+is_length_at_least(String, Bound) when byte_size(String) div 4 >= Bound ->
+    true;
+is_length_at_least(String, Bound) when byte_size(String) < Bound ->
+    false;
+is_length_at_least(String, Bound) ->
+    cp_length(String) >= Bound.
+
+%% Обход тотален: декодер гарантирует корректный UTF-8.
+-spec cp_length(binary()) -> non_neg_integer().
+cp_length(String) ->
+    cp_length(String, 0).
+
+cp_length(<<>>, Count)                    -> Count;
+cp_length(<<_/utf8, Rest/binary>>, Count) -> cp_length(Rest, Count + 1).
+
+%% uniqueItems держится на той же JSON equality, что const и enum. Проверка
+%% квадратична; линейная допустима только через канонизацию чисел, не меняющую
+%% значения аннотаций.
+-spec is_unique([json()]) -> boolean().
+is_unique([]) ->
+    true;
+is_unique([Item | Rest]) ->
+    not lists:any(fun(Other) -> Other == Item end, Rest) andalso is_unique(Rest).
 
 %% Гибрид из validator-core.md, раздел «Точность чисел»: два целых считаются
 %% через rem, конечное частное сравнивается с round/1, а переполнение деления

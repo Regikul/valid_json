@@ -26,7 +26,10 @@
                 <<"multipleOf">>,
                 <<"maximum">>, <<"exclusiveMaximum">>,
                 <<"minimum">>, <<"exclusiveMinimum">>,
-                <<"pattern">>]).
+                <<"maxLength">>, <<"minLength">>, <<"pattern">>,
+                <<"maxItems">>, <<"minItems">>, <<"uniqueItems">>,
+                <<"maxProperties">>, <<"minProperties">>,
+                <<"required">>, <<"dependentRequired">>]).
 
 %% Полностью потребляются компилятором и собственного constraint не дают.
 -define(CONSUMED, [<<"$schema">>, <<"$comment">>]).
@@ -105,8 +108,49 @@ constraint(<<"pattern">>, Value) when is_binary(Value) ->
         {ok, Compiled}  -> {ok, {pattern, {Value, Compiled}}};
         {error, Reason} -> {error, {bad_pattern, Value, Reason}}
     end;
+constraint(<<"maxLength">> = Keyword, Value) ->
+    counted(max_length, Keyword, Value);
+constraint(<<"minLength">> = Keyword, Value) ->
+    counted(min_length, Keyword, Value);
+constraint(<<"maxItems">> = Keyword, Value) ->
+    counted(max_items, Keyword, Value);
+constraint(<<"minItems">> = Keyword, Value) ->
+    counted(min_items, Keyword, Value);
+constraint(<<"maxProperties">> = Keyword, Value) ->
+    counted(max_properties, Keyword, Value);
+constraint(<<"minProperties">> = Keyword, Value) ->
+    counted(min_properties, Keyword, Value);
+%% uniqueItems: false — написанный no-op: он остаётся в IR и выпускает
+%% собственный unit, поэтому компилятор его не выбрасывает.
+constraint(<<"uniqueItems">>, Value) when is_boolean(Value) ->
+    {ok, {unique_items, Value}};
+constraint(<<"required">> = Keyword, Value) ->
+    case is_list(Value) andalso lists:all(fun is_binary/1, Value) of
+        true  -> {ok, {required, Value}};
+        false -> {error, {bad_keyword_value, Keyword, Value}}
+    end;
+constraint(<<"dependentRequired">> = Keyword, Value) ->
+    Names = fun(List) -> is_list(List) andalso lists:all(fun is_binary/1, List) end,
+    case is_map(Value) andalso lists:all(Names, maps:values(Value)) of
+        true  -> {ok, {dependent_required, Value}};
+        false -> {error, {bad_keyword_value, Keyword, Value}}
+    end;
 constraint(Keyword, Value) ->
     {error, {bad_keyword_value, Keyword, Value}}.
+
+%% Метасхема требует здесь nonNegativeInteger, а `type: "integer"` принимает и
+%% десятичную форму: `2.0` — то же целое. Слот IR целочисленный, поэтому форма
+%% нормализуется на входе, а не размазывается по обработчикам.
+-spec counted(atom(), binary(), json()) -> {ok, constraint()} | {error, compile_error()}.
+counted(Tag, Keyword, Value) ->
+    case Value of
+        _ when is_integer(Value), Value >= 0 ->
+            {ok, {Tag, Value}};
+        _ when is_float(Value), Value >= 0.0, Value == trunc(Value) ->
+            {ok, {Tag, trunc(Value)}};
+        _ ->
+            {error, {bad_keyword_value, Keyword, Value}}
+    end.
 
 -spec type_names([json()] | invalid) -> {ok, [json_type()]} | error.
 type_names(invalid) ->

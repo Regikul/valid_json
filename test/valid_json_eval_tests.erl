@@ -75,6 +75,63 @@ pattern_test_() ->
      ?_assert(valid([{pattern, regex(<<"^a$">>)}], [<<"a">>])),
      ?_assert(valid([{pattern, regex(<<"^a$">>)}], #{<<"a">> => 1}))].
 
+%% Строковые границы считают code points, а не байты: суррогатная пара — один
+%% символ длиной в четыре байта.
+length_test_() ->
+    [?_assert(valid([{max_length, 2}], <<"ab">>)),
+     ?_assertNot(valid([{max_length, 2}], <<"abc">>)),
+     ?_assert(valid([{max_length, 2}], <<"💩💩"/utf8>>)),
+     ?_assertNot(valid([{max_length, 2}], <<"💩💩💩"/utf8>>)),
+     ?_assert(valid([{min_length, 2}], <<"💩💩"/utf8>>)),
+     ?_assertNot(valid([{min_length, 2}], <<"💩"/utf8>>)),
+     ?_assert(valid([{min_length, 0}], <<>>)),
+     ?_assert(valid([{max_length, 0}], 100)),
+     ?_assert(valid([{min_length, 5}], [<<"a">>]))].
+
+array_bounds_test_() ->
+    [?_assert(valid([{max_items, 2}], [1, 2])),
+     ?_assertNot(valid([{max_items, 2}], [1, 2, 3])),
+     ?_assert(valid([{min_items, 1}], [null])),
+     ?_assertNot(valid([{min_items, 1}], [])),
+     ?_assert(valid([{max_items, 0}], #{<<"a">> => 1, <<"b">> => 2}))].
+
+unique_items_test_() ->
+    [?_assert(valid([{unique_items, true}], [1, 2, 3])),
+     ?_assertNot(valid([{unique_items, true}], [1, 1])),
+     %% JSON equality: 1 и 1.0 — одно значение, а true и 1 — разные.
+     ?_assertNot(valid([{unique_items, true}], [1, 1.0])),
+     ?_assert(valid([{unique_items, true}], [true, 1])),
+     ?_assertNot(valid([{unique_items, true}],
+                       [#{<<"a">> => [1]}, #{<<"a">> => [1.0]}])),
+     ?_assert(valid([{unique_items, true}], [])),
+     %% Написанный no-op пропускает всё, но из IR не исчезает.
+     ?_assert(valid([{unique_items, false}], [1, 1])),
+     ?_assert(valid([{unique_items, true}], <<"aa">>))].
+
+object_bounds_test_() ->
+    [?_assert(valid([{max_properties, 2}], #{<<"a">> => 1, <<"b">> => 2})),
+     ?_assertNot(valid([{max_properties, 1}], #{<<"a">> => 1, <<"b">> => 2})),
+     ?_assert(valid([{max_properties, 0}], #{})),
+     ?_assert(valid([{min_properties, 1}], #{<<"a">> => 1})),
+     ?_assertNot(valid([{min_properties, 1}], #{})),
+     ?_assert(valid([{min_properties, 5}], [1, 2]))].
+
+required_test_() ->
+    [?_assert(valid([{required, [<<"a">>]}], #{<<"a">> => null})),
+     ?_assertNot(valid([{required, [<<"a">>]}], #{<<"b">> => 1})),
+     ?_assert(valid([{required, []}], #{})),
+     ?_assert(valid([{required, [<<"a">>]}], [<<"a">>]))].
+
+%% Зависимость включается только тогда, когда имя-триггер есть в instance.
+dependent_required_test_() ->
+    Constraint = {dependent_required, #{<<"bar">> => [<<"foo">>]}},
+    [?_assert(valid([Constraint], #{})),
+     ?_assert(valid([Constraint], #{<<"foo">> => 1})),
+     ?_assert(valid([Constraint], #{<<"bar">> => 1, <<"foo">> => 2})),
+     ?_assertNot(valid([Constraint], #{<<"bar">> => 1})),
+     ?_assert(valid([{dependent_required, #{<<"bar">> => []}}], #{<<"bar">> => 1})),
+     ?_assert(valid([Constraint], <<"bar">>))].
+
 %% Значение неприменимого типа проходит успешно, а не отвергается.
 inapplicable_test_() ->
     Constraints = [{multiple_of, 2}, {maximum, 3}, {exclusive_maximum, 3},

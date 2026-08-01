@@ -69,5 +69,29 @@ multiple_of_exact_test_() ->
 multiple_of_declared_gap_test() ->
     ?assertNot(valid_json_value:is_multiple_of(0.3, 0.1)).
 
+%% Границы byte_size сокращают часть случаев, поэтому ответ сверяется с прямым
+%% подсчётом code points на строках всех четырёх длин представления.
+length_shortcut_test_() ->
+    Strings = [<<>>, <<"a">>, <<"abc">>, <<"é"/utf8>>, <<"привет"/utf8>>,
+               <<"💩"/utf8>>, <<"💩💩"/utf8>>, <<"a💩é"/utf8>>],
+    [{lists:flatten(io_lib:format("~ts =~p= ~p", [String, Length, Bound])),
+      [?_assertEqual(Length =< Bound, valid_json_value:is_length_at_most(String, Bound)),
+       ?_assertEqual(Length >= Bound, valid_json_value:is_length_at_least(String, Bound))]}
+     || String <- Strings,
+        Length <- [length(unicode:characters_to_list(String))],
+        Bound  <- lists:seq(0, 9)].
+
+%% Уникальность — та же JSON equality, что у const и enum.
+unique_test_() ->
+    [?_assert(valid_json_value:is_unique([])),
+     ?_assert(valid_json_value:is_unique([1, 2, 3])),
+     ?_assertNot(valid_json_value:is_unique([1, 2, 1])),
+     ?_assert(valid_json_value:is_unique([true, 1, <<"1">>, null, [], #{}])),
+     ?_assertNot(valid_json_value:is_unique([1, 1.0])),
+     ?_assertNot(valid_json_value:is_unique([#{<<"a">> => [1]}, #{<<"a">> => [1.0]}])),
+     ?_assertNot(valid_json_value:is_unique([[0], [0.0]])),
+     ?_assert(valid_json_value:is_unique([0, false])),
+     ?_assert(valid_json_value:is_unique([null, <<"null">>]))].
+
 matching_types(Value) ->
     [Type || Type <- ?TYPES, valid_json_value:is_type(Type, Value)].

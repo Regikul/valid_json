@@ -27,7 +27,41 @@ check({minimum, Bound}, Instance, _Context) ->
 check({exclusive_minimum, Bound}, Instance, _Context) ->
     number(fun(Number) -> Number > Bound end, Instance);
 check({pattern, {_Source, Compiled}}, Instance, _Context) ->
-    string(fun(Text) -> re:run(Text, Compiled, [{capture, none}]) =:= match end, Instance).
+    string(fun(Text) -> re:run(Text, Compiled, [{capture, none}]) =:= match end, Instance);
+check({max_length, Bound}, Instance, _Context) ->
+    string(fun(Text) -> valid_json_value:is_length_at_most(Text, Bound) end, Instance);
+check({min_length, Bound}, Instance, _Context) ->
+    string(fun(Text) -> valid_json_value:is_length_at_least(Text, Bound) end, Instance);
+check({max_items, Bound}, Instance, _Context) ->
+    array(fun(Items) -> length(Items) =< Bound end, Instance);
+check({min_items, Bound}, Instance, _Context) ->
+    array(fun(Items) -> length(Items) >= Bound end, Instance);
+%% uniqueItems: false остаётся в IR и выпускает собственный unit, поэтому
+%% no-op вычисляется, а не выбрасывается компилятором.
+check({unique_items, false}, _Instance, _Context) ->
+    result(true);
+check({unique_items, true}, Instance, _Context) ->
+    array(fun valid_json_value:is_unique/1, Instance);
+check({max_properties, Bound}, Instance, _Context) ->
+    object(fun(Object) -> map_size(Object) =< Bound end, Instance);
+check({min_properties, Bound}, Instance, _Context) ->
+    object(fun(Object) -> map_size(Object) >= Bound end, Instance);
+check({required, Names}, Instance, _Context) ->
+    object(fun(Object) -> present(Names, Object) end, Instance);
+check({dependent_required, Dependencies}, Instance, _Context) ->
+    object(fun(Object) -> dependencies_met(Dependencies, Object) end, Instance).
+
+%% Требование включается только для имён, которые в instance действительно есть.
+-spec dependencies_met(#{binary() => [binary()]}, #{binary() => json()}) -> boolean().
+dependencies_met(Dependencies, Object) ->
+    Met = fun(Name, Names) ->
+              not is_map_key(Name, Object) orelse present(Names, Object)
+          end,
+    lists:all(fun({Name, Names}) -> Met(Name, Names) end, maps:to_list(Dependencies)).
+
+-spec present([binary()], #{binary() => json()}) -> boolean().
+present(Names, Object) ->
+    lists:all(fun(Name) -> is_map_key(Name, Object) end, Names).
 
 %% Keyword ограничивает только свой тип instance: значение другого типа проходит
 %% успешно, а не отвергается. Сравнение чисел в Erlang точно и через границу
@@ -44,6 +78,18 @@ number(_Check, _Instance) ->
 string(Check, Instance) when is_binary(Instance) ->
     result(Check(Instance));
 string(_Check, _Instance) ->
+    result(true).
+
+-spec array(fun(([json()]) -> boolean()), json()) -> #eval_result{}.
+array(Check, Instance) when is_list(Instance) ->
+    result(Check(Instance));
+array(_Check, _Instance) ->
+    result(true).
+
+-spec object(fun((#{binary() => json()}) -> boolean()), json()) -> #eval_result{}.
+object(Check, Instance) when is_map(Instance) ->
+    result(Check(Instance));
+object(_Check, _Instance) ->
     result(true).
 
 %% Чистые assertions не вносят покрытия. Units не собираются, пока не появилась

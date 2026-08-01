@@ -44,12 +44,11 @@
   списка непокрытых индексов ждёт своего потребителя в P4.
 - [x] Покрыть маску тестами на `all`, префикс, разреженные индексы и
   независимость результата от порядка слияния.
-- [~] Реализовать модель JSON-значения: `is_type/2` и `is_multiple_of/2`
-  сделаны; `type_of/1` ждёт сообщений об ошибках в units, `cp_length/1` —
-  `maxLength` и `minLength` в P1.
-- [~] Покрыть модель значения тестами на integer/number, все семь JSON types и
-  три ветви кратности; тесты на Unicode code points появятся вместе с
-  `cp_length/1`.
+- [~] Реализовать модель JSON-значения: `is_type/2`, `is_multiple_of/2`,
+  подсчёт code points и `is_unique/1` сделаны; `type_of/1` ждёт сообщений об
+  ошибках в units.
+- [x] Покрыть модель значения тестами на integer/number, все семь JSON types,
+  три ветви кратности, Unicode code points и JSON equality в уникальности.
 - [ ] Зафиксировать в runner ожидаемое число групп и test cases, чтобы пустой
   прогон не мог быть зелёным.
 - [ ] Приёмка P0: все core fixtures и `boolean_schema.json` обоих dialects
@@ -58,33 +57,36 @@
 ## P1 — чистые assertions
 
 - [ ] **Фаза P1 завершена**
-- [~] Добавить компиляцию schema object в `#node{}` без подключения registry:
-  сделана для `type`, `enum`, `const`, числовых keywords и `pattern`; остальные
-  assertion keywords добавляются вместе со своими обработчиками ниже.
+- [x] Добавить компиляцию schema object в `#node{}` без подключения registry:
+  сделана для всех assertion keywords фазы; адресация дочерних schemas — уже
+  задача P2.
 - [x] Реализовать общий dispatcher constraints и объединение `valid`,
   `evaluated` и `units` внутри node.
 - [x] Реализовать `type`, `enum` и `const` с JSON equality.
 - [x] Реализовать `multipleOf`, включая гибридную проверку integer/float.
 - [x] Реализовать `maximum`, `exclusiveMaximum`, `minimum` и
   `exclusiveMinimum`.
-- [ ] Реализовать `maxLength`, `minLength` и подсчёт Unicode code points.
+- [x] Реализовать `maxLength`, `minLength` и подсчёт Unicode code points.
 - [x] Компилировать `pattern` через `re`, сохраняя исходный pattern рядом с
   `re:mp()` и возвращая compile error для неподдержанного выражения.
-- [ ] Реализовать `maxItems`, `minItems` и `uniqueItems`.
-- [ ] Реализовать `maxProperties`, `minProperties`, `required` и
+- [x] Реализовать `maxItems`, `minItems` и `uniqueItems`.
+- [x] Реализовать `maxProperties`, `minProperties`, `required` и
   `dependentRequired`.
-- [ ] Сохранять написанные no-op assertions в IR и выпускать для них output
-  unit.
-- [~] Добавить точные compiler fixtures для IR каждого assertion: сделано для
-  `type`, `enum`, `const`, числовых keywords и `pattern`.
-- [~] Добавить evaluator fixtures для применимого и неприменимого типа
-  instance каждого assertion: сделано для числовых keywords и `pattern`.
+- [~] Сохранять написанные no-op assertions в IR и выпускать для них output
+  unit: `uniqueItems: false` и `minLength: 0` доходят до IR и вычисляются,
+  выпуск units ждёт проекции `basic`.
+- [x] Добавить точные compiler fixtures для IR каждого assertion, включая
+  нормализацию десятичной формы `nonNegativeInteger`.
+- [x] Добавить evaluator fixtures для применимого и неприменимого типа
+  instance каждого assertion.
 - [~] Подключить к runner одноимённые validation files обоих dialects:
   подключены `type.json`, `const.json`, `multipleOf.json`, `maximum.json`,
-  `exclusiveMaximum.json`, `minimum.json`, `exclusiveMinimum.json` и
-  `pattern.json`. `enum.json`, `required.json` и `uniqueItems.json` содержат
-  группы со схемами `properties`, `prefixItems` и `items`, поэтому целиком
-  подключаются только после P2.
+  `exclusiveMaximum.json`, `minimum.json`, `exclusiveMinimum.json`,
+  `maxLength.json`, `minLength.json`, `pattern.json`, `maxItems.json`,
+  `minItems.json`, `maxProperties.json`, `minProperties.json` и
+  `dependentRequired.json`. `enum.json`, `required.json` и `uniqueItems.json`
+  содержат группы со схемами `properties`, `prefixItems` и `items`, поэтому
+  целиком подключаются только после P2.
 - [x] Научить runner исключать группы, объявленные расхождениями в
   conformance-policy: сейчас это `^\p{Letter}+$` в `pattern.json`.
 - [ ] Приёмка P1: все обязательные assertion files проходят с учётом

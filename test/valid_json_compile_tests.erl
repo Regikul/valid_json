@@ -78,14 +78,62 @@ bad_pattern_test_() ->
      ?_assertEqual({error, {bad_keyword_value, <<"pattern">>, 1}},
                    compile(#{<<"pattern">> => 1}))].
 
+counted_test_() ->
+    [?_assertEqual({ok, artifact(schema_node([{max_length, 2}]))},
+                   compile(#{<<"maxLength">> => 2})),
+     ?_assertEqual({ok, artifact(schema_node([{min_items, 1}]))},
+                   compile(#{<<"minItems">> => 1})),
+     ?_assertEqual({ok, artifact(schema_node([{max_properties, 0}]))},
+                   compile(#{<<"maxProperties">> => 0})),
+     %% Десятичная форма — то же целое, и в IR попадает целым.
+     ?_assertEqual({ok, artifact(schema_node([{min_length, 2}]))},
+                   compile(#{<<"minLength">> => 2.0})),
+     ?_assertEqual({ok, artifact(schema_node([{max_items, 2}]))},
+                   compile(#{<<"maxItems">> => 2.0}))].
+
+collections_test_() ->
+    [?_assertEqual({ok, artifact(schema_node([{unique_items, true}]))},
+                   compile(#{<<"uniqueItems">> => true})),
+     %% Написанный no-op сохраняется в IR, а не выбрасывается.
+     ?_assertEqual({ok, artifact(schema_node([{unique_items, false}]))},
+                   compile(#{<<"uniqueItems">> => false})),
+     ?_assertEqual({ok, artifact(schema_node([{required, [<<"a">>, <<"b">>]}]))},
+                   compile(#{<<"required">> => [<<"a">>, <<"b">>]})),
+     ?_assertEqual({ok, artifact(schema_node([{required, []}]))},
+                   compile(#{<<"required">> => []})),
+     ?_assertEqual({ok, artifact(schema_node([{dependent_required,
+                                               #{<<"bar">> => [<<"foo">>]}}]))},
+                   compile(#{<<"dependentRequired">> => #{<<"bar">> => [<<"foo">>]}}))].
+
+bad_counted_test_() ->
+    [?_assertEqual({error, {bad_keyword_value, <<"maxLength">>, -1}},
+                   compile(#{<<"maxLength">> => -1})),
+     ?_assertEqual({error, {bad_keyword_value, <<"minItems">>, 1.5}},
+                   compile(#{<<"minItems">> => 1.5})),
+     ?_assertEqual({error, {bad_keyword_value, <<"maxProperties">>, <<"2">>}},
+                   compile(#{<<"maxProperties">> => <<"2">>})),
+     ?_assertEqual({error, {bad_keyword_value, <<"uniqueItems">>, 1}},
+                   compile(#{<<"uniqueItems">> => 1})),
+     ?_assertEqual({error, {bad_keyword_value, <<"required">>, [1]}},
+                   compile(#{<<"required">> => [1]})),
+     ?_assertEqual({error, {bad_keyword_value, <<"required">>, null}},
+                   compile(#{<<"required">> => null})),
+     ?_assertEqual({error, {bad_keyword_value, <<"dependentRequired">>,
+                            #{<<"bar">> => <<"foo">>}}},
+                   compile(#{<<"dependentRequired">> => #{<<"bar">> => <<"foo">>}}))].
+
 %% Порядок constraints задан компилятором и не зависит от порядка ключей.
 order_test() ->
     Schema = #{<<"exclusiveMinimum">> => 0, <<"const">> => 1, <<"enum">> => [1],
                <<"maximum">> => 4, <<"type">> => <<"number">>,
-               <<"multipleOf">> => 1, <<"pattern">> => <<"a">>},
+               <<"multipleOf">> => 1, <<"pattern">> => <<"a">>,
+               <<"required">> => [<<"a">>], <<"uniqueItems">> => true,
+               <<"maxLength">> => 5},
     Expected = schema_node([{type, [number]}, {enum, [1]}, {const, 1},
                             {multiple_of, 1}, {maximum, 4},
-                            {exclusive_minimum, 0}, {pattern, regex(<<"a">>)}]),
+                            {exclusive_minimum, 0}, {max_length, 5},
+                            {pattern, regex(<<"a">>)}, {unique_items, true},
+                            {required, [<<"a">>]}]),
     ?assertEqual({ok, artifact(Expected)}, compile(Schema)).
 
 %% Потребляются компилятором и собственного constraint не дают.

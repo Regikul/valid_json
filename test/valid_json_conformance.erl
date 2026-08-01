@@ -13,7 +13,10 @@
                 "multipleOf.json",
                 "maximum.json", "exclusiveMaximum.json",
                 "minimum.json", "exclusiveMinimum.json",
-                "pattern.json"]).
+                "maxLength.json", "minLength.json", "pattern.json",
+                "maxItems.json", "minItems.json",
+                "maxProperties.json", "minProperties.json",
+                "dependentRequired.json"]).
 
 %% Объявленные расхождения основного набора: okf/testing/conformance-policy.md,
 %% раздел «Известные расхождения». Группа исключается поимённо, чтобы остальные
