@@ -79,7 +79,8 @@ Schema object — конъюнкция ограничений: они незав
 | Составное ограничение | Поглощает |
 | --- | --- |
 | `properties` | `properties`, `patternProperties`, `additionalProperties` |
-| `items` | `prefixItems` и `items` (2020-12); `items` и `additionalItems` (2019-09) |
+| `prefix_items` | `prefixItems` и `items` (2020-12) |
+| `items_array` | `items` в форме массива и `additionalItems` (2019-09) |
 | `contains` | `contains`, `minContains`, `maxContains` |
 | `if_then_else` | `if`, `then`, `else` |
 
@@ -258,7 +259,7 @@ re:compile(Pattern, [unicode, dollar_endonly])
 | Base URI | `$id` | относительные ссылки внутри считаются от него |
 | Диалект | `$schema`, допустимый только в корне ресурса ([core.txt:797](../references/json-schema/draft-2020-12/core.txt)); при отсутствии — диалект объемлющего ресурса | набор тегов выбирается на границе ресурса |
 | Пространство `$anchor` | якорь виден в пределах своего ресурса | индекс якорей строится на ресурс |
-| Звено динамического стека | `$dynamicAnchor` | на стек кладутся ресурсы, индекс динамических якорей живёт в ресурсе |
+| Звено динамического стека | `$dynamicAnchor`, в 2019-09 `$recursiveAnchor` | на стек кладутся ресурсы, индексы и флаг рекурсии живут в ресурсе |
 
 Встретив `$id` в подсхеме, компилятор отрезает её в отдельный ресурс. Поэтому встроенный и вынесенный в отдельный файл варианты дают одинаковую скомпилированную форму — то поведенческое тождество, которого требует [core.txt:1965](../references/json-schema/draft-2020-12/core.txt).
 
@@ -281,11 +282,12 @@ re:compile(Pattern, [unicode, dollar_endonly])
 -type schema_node() :: boolean() | #node{}.
 
 -record(resource, {
-    id              :: uri() | undefined,   % undefined только у анонимного корня
-    dialect         :: dialect(),
-    anchors         :: #{binary() => pointer()},
-    dynamic_anchors :: #{binary() => pointer()},
-    nodes           :: #{pointer() => schema_node()}
+    id                       :: uri() | undefined,   % undefined только у анонимного корня
+    dialect                  :: dialect(),
+    anchors                  :: #{binary() => pointer()},
+    dynamic_anchors          :: #{binary() => pointer()},
+    recursive_anchor = false :: boolean(),           % 2019-09: $recursiveAnchor в корне ресурса
+    nodes                    :: #{pointer() => schema_node()}
 }).
 
 -record(node, {
@@ -328,7 +330,7 @@ re:compile(Pattern, [unicode, dollar_endonly])
 
     %% assertions над массивом
     | {max_items, non_neg_integer()} | {min_items, non_neg_integer()}
-    | unique_items
+    | {unique_items, boolean()}
 
     %% assertions над объектом
     | {max_properties, non_neg_integer()} | {min_properties, non_neg_integer()}
@@ -347,16 +349,22 @@ re:compile(Pattern, [unicode, dollar_endonly])
     | {dependent_schemas, #{binary() => addr()}}
 
     %% child applicators
-    | {properties, #{binary() => addr()},      % properties
-                   [{regex(), addr()}],        % patternProperties
-                   addr() | undefined}         % additionalProperties
+    | {properties, #{binary() => addr()} | undefined,   % properties
+                   [{regex(), addr()}] | undefined,     % patternProperties
+                   addr() | undefined}                  % additionalProperties
     | {property_names, addr()}
-    | {items, [addr()], addr() | undefined}    % prefixItems + items | items + additionalItems
-    | {contains, addr(), non_neg_integer(), non_neg_integer() | infinity}
+    | {items, addr()}                          % одна подсхема на все элементы
+    | {prefix_items, [addr()], addr() | undefined}   % prefixItems + items
+    | {items_array,  [addr()], addr() | undefined}   % items-массив + additionalItems, 2019-09
+    | {contains, addr(),
+                 Min :: non_neg_integer() | undefined,  % minContains
+                 Max :: non_neg_integer() | undefined,  % maxContains
+                 MarksEvaluated :: boolean()}
 
     %% аннотации и format
     | {annotation, binary(), json()}           % title, default, contentSchema, неизвестные
-    | {format, atom()}                         % только при format-assertion vocabulary
+    | {format, binary(),                       % имя как написано в схеме
+               Assert :: boolean()}            % false — только аннотация
 
     %% annotation-dependent, живут в #node.unevaluated
     | {unevaluated_properties, addr()}
@@ -367,11 +375,27 @@ re:compile(Pattern, [unicode, dollar_endonly])
 
 Единственная непрозрачная составляющая — `re:mp()` внутри `regex()`: при печати она нечитаема, но детерминирована и сравнима, поэтому эталон с ней строится тем же вызовом компиляции и сличается напрямую.
 
-Три следствия читаются прямо из типа.
+Следствия читаются прямо из типа.
 
-`{items, [addr()], addr() | undefined}` обслуживает оба диалекта одной формой. В 2020-12 первый элемент — `prefixItems`, второй — `items`. В 2019-09 `items` в форме массива даёт первый, `additionalItems` — второй, а `items` в форме схемы даёт `{items, [], Addr}`. Различается только имя keyword'а в output unit, и обработчик берёт его из `#resource.dialect`.
+**Различие диалектов разрешается на компиляции и выражается в самом ограничении**: разными тегами, если различается раскладка keywords или их имена в локациях; явным полем, если различается только поведение. Читать `#resource.dialect` на вычислении нельзя — см. «Диалект». Прецедент уже в типе: `dynamic_ref` и `recursive_ref` разведены по диалектам, а не сведены в одну форму с флагом.
 
-`unique_items` — атом без аргумента, и появляется он только при `"uniqueItems": true`. При `false` компилятор не порождает ничего: ограничения, не ограничивающего ничего, в терме нет.
+Ограничения над элементами массива режутся по раскладке, а не по диалекту, — тогда совпадающие случаи не дублируются:
+
+| Тег | Из чего собран | Сегменты локации |
+| --- | --- | --- |
+| `{items, addr()}` | 2020-12 `items` без `prefixItems`; 2019-09 `items` в форме схемы | `/items` |
+| `{prefix_items, …}` | 2020-12 `prefixItems` и `items` | `/prefixItems/N`, `/items` |
+| `{items_array, …}` | 2019-09 `items` в форме массива и `additionalItems` | `/items/N`, `/additionalItems` |
+
+Первая строка — не частный случай второй: в обоих диалектах одна подсхема применяется ко всем элементам и печатается одинаково, поэтому разделять их нечем и незачем. `additionalItems` без `items` ограничения не даёт вовсе: «if `items` is absent or its annotation result is the boolean true, `additionalItems` MUST be ignored» ([core.txt:2288](../references/json-schema/draft-2019-09/core.txt)). Семантика у `prefix_items` и `items_array` буквально одна, различаются только имена в локациях, поэтому обработчик у них общий, а пара имён приходит от тега.
+
+`contains` разными тегами не выражается: раскладка и имена совпадают, различается вклад в покрытие. В 2020-12 `unevaluatedItems` определён через аннотации `prefixItems`, `items`, `contains` и себя ([core.txt:2718](../references/json-schema/draft-2020-12/core.txt)), в 2019-09 — через `items`, `additionalItems` и себя, а `contains` там аннотации не производит ([core.txt:2087](../references/json-schema/draft-2019-09/core.txt)). Поэтому вклад вычисляется компилятором и лежит в ограничении явным полем `MarksEvaluated`.
+
+`format` разрешается тем же полем: `Assert` считает компилятор, знающий и vocabulary, и опцию `assert_format`. Имя при этом остаётся бинарником по норме, а не ради экономии атомов: «An implementation MUST NOT fail to collect unknown formats as annotations» ([validation.txt:713](../references/json-schema/draft-2020-12/validation.txt)) — множество имён открыто, в аннотацию идёт написанный литерал, и `binary_to_existing_atom` здесь не вариант формы, а нарушение. Разрешать имя ещё и в атом проверки незачем: соответствие один к одному, атом вышел бы транслитерацией соседнего поля, а таблиц стало бы две вместо одной.
+
+**Написанный keyword всегда даёт ограничение, даже вырожденное**: `"uniqueItems": false` компилируется в `{unique_items, false}`, `"minLength": 0` — в `{min_length, 0}`. Пропуск разрешён только там, где его предписывает спецификация: `$comment`, `$defs`, `$id`, `$schema`, `$anchor` и `$vocabulary` потребляются компилятором и не производят ни assertion, ни аннотации; `additionalItems` без `items` игнорируется; неизвестный keyword в Draft 2019-09 игнорируется. Обратное правило — «не порождать ограничения, ничего не ограничивающего» — экономит одно сравнение на схемах, где автор написал вырожденное значение, и ценой этому служит потеря присутствия, которую нечем восстановить; см. «Присутствие keyword'а сохраняется по построению».
+
+Отсюда же `undefined` в слотах составных ограничений. Отсутствующий keyword и написанный с пустым значением — разные вещи: `properties` производит аннотацию «множество совпавших имён» безусловно ([core.txt:2569](../references/json-schema/draft-2020-12/core.txt)), поэтому `"properties": {}` обязан дать пустую аннотацию, а отсутствующий `properties` — не дать никакой. Различие видно уже в `basic`. Правило одно и без исключений: **`undefined` в слоте составного ограничения значит «keyword не написан»**, а умолчание из спецификации применяет обработчик — у `contains` это `1` для `Min` и отсутствие верхней границы для `Max`. Отдельной формы «нет верхней границы» у `maxContains` не заводится: она отличала бы присутствие только по совпадению — умолчание этого keyword'а невыразимо в JSON, — тогда как у `minContains` значение `1` выразимо, и одной формой оба слота уже не покрыть. Цена правила — умолчания применяются на вычислении, а не нормализуются компилятором; нормализация стёрла бы присутствие.
 
 У корня ресурса `constraints` вполне может быть пуст при непустом JSON — например у `{"$id": …, "$defs": {…}}`, где оба keyword'а потребляются компилятором.
 
@@ -420,6 +444,10 @@ resolve({Rid, Ptr}, #{resources := Rs}) ->
 Проверено по обоим обязательным наборам: внутридокументные `$ref` целятся только в `#`, `#/$defs/…`, `#/properties/…`, `#/items/N`, `#/prefixItems/N`. Ни одна обязательная ссылка не смотрит в позицию, не являющуюся схемой.
 
 **Висячая ссылка отвергается, а не угадывается.** После сборки ресурса множество его узлов известно, поэтому `$ref` с указателем в несуществующий узел уже скомпилированного ресурса — ошибка компиляции; её форма и локация заданы в «Ошибках компиляции». Междокументная ссылка проверяется там же: компиляция втягивает замыкание из `store()`, поэтому и незарегистрированный документ, и несуществующий указатель внутри него обнаруживаются на компиляции. Выбор поддержан примечанием самой спецификации: интерпретировать не-схему как схему «has security implications and may produce unpredictable results».
+
+**`$recursiveAnchor` хранится флагом ресурса, а не индексом.** У этого якоря нет имени — значение булево ([core.txt:1814](../references/json-schema/draft-2019-09/core.txt)), и на вычислении задаётся один вопрос: помечен ли ресурс. Флага хватает и по существу: `$recursiveRef` определён только для значения `"#"` ([core.txt:1780](../references/json-schema/draft-2019-09/core.txt)), поэтому лексическая цель — всегда корень ресурса, а результат поиска в dynamic scope — base URI, меняющийся только на `$id`. Отсюда вычисление `{recursive_ref, {Rid, <<"">>}}`: ресурс не помечен — переход по адресу, как у `{ref, …}`; помечен — переход в корень самого внешнего помеченного ресурса в `#eval_context.dynamic_scope` ([core.txt:1821](../references/json-schema/draft-2019-09/core.txt)). Оговорка «если такого нет, база не меняется» отдельной веткой не становится: `Rid` сам лежит в стеке и сам помечен.
+
+Флаг ставится по корню ресурса, и `"$recursiveAnchor"` в некорневой подсхеме компилятором не читается. Спецификация говорит «schema», а не «resource root», но её эффект — base URI, свой у ресурса, и вопрос она числит открытым за собой: CREF1 обсуждает случай, «where `$recursiveAnchor` is only allowed in the root schema» ([core.txt:747](../references/json-schema/draft-2019-09/core.txt)). В закреплённом снапшоте все 13 вхождений — в корне рядом с `$id`, включая обе метасхемы `remotes/draft2019-09/`. Отвергать ли некорневой якорь компиляцией — часть открытого пункта про строгость компилятора, здесь не решается.
 
 ## Примеры
 
@@ -482,11 +510,11 @@ T = <<"https://example.com/tree">>,
        <<"/$defs/node">> => #node{unevaluated = [], constraints = [
           {type, [object]},
           {properties, #{<<"children">> => {T, <<"/$defs/node/properties/children">>}},
-                       [], undefined}]},
+                       undefined, undefined}]},
 
        <<"/$defs/node/properties/children">> => #node{unevaluated = [], constraints = [
           {type, [array]},
-          {items, [], {T, <<"/$defs/node/properties/children/items">>}}]},
+          {items, {T, <<"/$defs/node/properties/children/items">>}}]},
 
        <<"/$defs/node/properties/children/items">> =>
           #node{constraints = [{ref, {T, <<"/$defs/node">>}}], unevaluated = []}}} }
@@ -504,12 +532,13 @@ T = <<"https://example.com/tree">>,
 ```erlang
 #{ <<"https://example.com/foo">> => #resource{id = <<"https://example.com/foo">>, …,
      nodes = #{<<"">> => #node{unevaluated = [],
-        constraints = [{items, [], {<<"https://example.com/bar">>, <<"">>}}]}}},
+        constraints = [{items, {<<"https://example.com/bar">>, <<"">>}}]}}},
 
    <<"https://example.com/bar">> => #resource{id = <<"https://example.com/bar">>, …,
      nodes = #{
        <<"">> => #node{unevaluated = [], constraints = [
-          {properties, #{}, [], {<<"https://example.com/bar">>, <<"/additionalProperties">>}}]},
+          {properties, undefined, undefined,
+                       {<<"https://example.com/bar">>, <<"/additionalProperties">>}}]},
        <<"/additionalProperties">> => #node{constraints = [], unevaluated = []}}} }
 ```
 
@@ -588,6 +617,14 @@ Schema object с ложным assertion result аннотаций не прои�
 * `absoluteKeywordLocation` — канонический URI ресурса, `#`, тот же указатель, и **дополнительно** percent-encoding символов, недопустимых во фрагменте по RFC 3986. Фикстурами это не покрыто и держится на решении; всплывает на первом же имени свойства с пробелом.
 
 Когда абсолютная локация печатается: спецификация разрешает опускать её, если dynamic scope не проходил через ссылку или у схемы нет абсолютного `$id` ([core.txt:2920](../references/json-schema/draft-2020-12/core.txt)), но output-схема требует её при `/$ref/` или `/$dynamicRef/` в `keywordLocation`, а [`content/readOnly.json`](../../test/fixtures/json-schema-test-suite/output-tests/draft2020-12/content/readOnly.json) ждёт её и вовсе без ссылок. Правило одно и оба условия покрывает: печатаем всегда, когда `#resource.id =/= undefined`, опускаем только у анонимного ресурса.
+
+## Присутствие keyword'а сохраняется по построению
+
+`verbose` описан как «fully realized hierarchy that exactly matches that of the schema» ([core.txt:3239](../references/json-schema/draft-2020-12/core.txt)), то есть unit полагается и keyword'у, который ничего не нарушил и ничего не аннотировал. Правило вывода одно: **unit порождает каждое ограничение**, а сегменты его локации приходят от тега — статической таблицей, без обращения к тексту схемы. Ни presence-маски, ни отдельного дерева keyword nodes, ни исходного schema object в терме нет; всё это оказалось не нужно ровно потому, что написанный keyword всегда компилируется — см. «Ограничения».
+
+Обратный порядок рассуждения — сузить обязательства `verbose` и разрешить компилятору выбрасывать вырожденное — отвергнут, и не из-за самого `verbose`. Формат необязателен: «An implementation SHOULD provide at least one of the "flag", "basic", or "detailed" format and MAY provide the "verbose" format» ([core.txt:3060](../references/json-schema/draft-2020-12/core.txt)), §12.3 тоже `SHOULD`, фикстур на него в снапшоте нет вовсе — `verbose` встречается только в `output-schema.json` обоих диалектов и ни в одном content-тесте, — а единственный пример §12.4.4 внутренне противоречив: у узла `/properties` стоит `valid: true` без поля `annotation`, хотя аннотацию этот keyword производит, а вложенного unit'а для `/properties/validProp` нет, хотя подсхема применялась. Пинить границу таким примером нельзя. Решает другое: часть присутствия видна уже в `basic`, который фикстурами закреплён, — `"properties": {}` обязан дать пустую аннотацию. Сужение `verbose` этот случай не покрывает, а разделять хранение присутствия на «то, что нужно `basic`» и «то, что нужно `verbose`» дороже, чем не терять его вообще.
+
+Отступления от напечатанного в спецификации примера у выбранного правила нет: все три keyword'а его схемы — `type`, `properties`, `additionalProperties` — компилируются в ограничения.
 
 ## Формат задаёт режим
 
@@ -670,7 +707,7 @@ fetch(Uri, Store) ->
 
 -spec validate(compiled(), json(), [option()]) -> {ok, output()} | {error, term()}.
 
-%% copt()   :: {default_dialect, dialect()}
+%% copt()   :: {default_dialect, dialect()} | {assert_format, boolean()}
 %% option() :: {output, format()} — см. «Результат вычисления и вывод»
 ```
 
@@ -683,6 +720,8 @@ fetch(Uri, Store) ->
 Если терм, переданный в `compile/3`, объявляет корневой `$id`, уже занятый в реестре, — это ошибка, а не переопределение. Правило то же, что в `add/3`, и по той же причине.
 
 `default_dialect` — диалект корня документа, у которого нет `$schema`; умолчание умолчания — URI Draft 2020-12. Опция компиляции, а не поле реестра и не отдельная точка входа: `store()` держит документ значением, и пара «документ плюс диалект» ломает и один хоп `fetch/2`, и инвариант единственной копии, а `compile/3` работает с термом, которого в реестре нет вовсе. Отдельная точка входа для conformance-раннера хуже параметра тем, что раннеру нужны оба диалекта, то есть точек будет две, и приёмка пойдёт не тем API, каким ходит приложение.
+
+`assert_format` включает проверку `format` там, где спецификация оставляет её на усмотрение реализации: по умолчанию keyword даёт только аннотацию ([validation.txt:608](../references/json-schema/draft-2020-12/validation.txt)), опция обязана быть и обязана быть выключена ([validation.txt:623](../references/json-schema/draft-2020-12/validation.txt)), а метасхема с Format-Assertion vocabulary требует проверки независимо от опции ([validation.txt:651](../references/json-schema/draft-2020-12/validation.txt)); в Draft 2019-09 такой vocabulary нет, там доступна только опция. Опция компиляционная потому, что меняет `valid`: артефакт, не определяющий валидность своих данных, хуже артефакта, который приложению с двумя режимами придётся собрать дважды. Неизвестное имя формата под опцией остаётся валидным и даёт `{format, <<"unknown">>, false}`, а под Format-Assertion vocabulary становится отказом компиляции ([validation.txt:714](../references/json-schema/draft-2020-12/validation.txt)).
 
 ## Ошибки компиляции
 
@@ -874,7 +913,7 @@ Base URI у анонимного корня взять неоткуда, поэ�
 
 Уровни хранилища и владельца в фазы не входят: приёмочного набора у них нет — conformance suite обращается к ядру напрямую. Их место определяется потребностью приложения, а не планом.
 
-`format` в annotation-режиме относится к P2, в assertion-режиме — к P8, поскольку это отдельная vocabulary.
+`format` в P2 компилируется и производит аннотацию, но ничего не проверяет — обязательные `format.json` обоих диалектов требуют именно этого. Обе проверяющие формы относятся к P8: опция `assert_format` (`optional/format`) и Format-Assertion vocabulary (`optional/format-assertion`).
 
 `multipleOf` в P1 требует гибридного алгоритма — см. «Где двоичные дроби проступают наружу».
 
@@ -914,17 +953,9 @@ Base URI у анонимного корня взять неоткуда, поэ�
 
 ## Архитектурные решения
 
-* **`{items, …}` требует диалект на вычислении.** *(до заморозки IR)* Форма `{items, [addr()], addr() | undefined}` едина для обоих диалектов, а имя keyword'а для output unit обработчик берёт из `#resource.dialect` («Ограничения») — то есть ветвится по диалекту на вычислении, что противоречит решению «evaluator диалекта не читает» («Диалект»). Различие `prefixItems`/`items` против `items`/`additionalItems` известно на компиляции, значит имя должно нестись самим ограничением. Вопрос в форме: третий элемент кортежа, отдельный тег на диалект или общий механизм «какими keywords порождено» для всех составных ограничений — `properties`, `contains`, `if`/`then`/`else` свёрнуты так же и тоже обязаны восстанавливать `keywordLocation`. Смежно с «Решить, хранится ли присутствие keyword'а»: обе задачи упираются в то, сколько исходного текста схемы несёт скомпилированный терм.
-
-* **Решить, хранится ли присутствие keyword'а.** *(до заморозки IR)* Скомпилированная форма необратимо теряет сведения о явно присутствовавших keywords: `"uniqueItems": false` не даёт ограничения и неотличим от отсутствия; `{contains, Addr, 1, infinity}` не различает отсутствующий `minContains` и явный `"minContains": 1`; поглощённые составным ограничением пустые `properties` и `patternProperties` неразличимы; исходный schema object не хранится. `verbose` описан как «fully realized hierarchy that exactly matches that of the schema» ([core.txt:3239](../references/json-schema/draft-2020-12/core.txt)), но структурных fixtures, способных решить спор о его границах, в снапшоте нет. Решать приходится до фиксации формы терма: после неё восстановить присутствие будет нечем. Варианты — presence-mask и исходный keyword location у каждого скомпилированного keyword'а, отдельное дерево keyword nodes, либо явное сужение обязательств `verbose`.
-
-* **Добавить состояние `$recursiveAnchor`.** *(до заморозки IR)* В Draft 2019-09 `$recursiveRef` ведёт себя как `$ref`, кроме случая, когда его цель содержит `"$recursiveAnchor": true` ([core.txt:1762](../references/json-schema/draft-2019-09/core.txt)). В `#resource{}` есть только `anchors` и `dynamic_anchors`, такого поля нет, поэтому P6 в описанной форме нереализуем. Вместе с полем фиксируется алгоритм: допустимое значение `"#"`, лексическая цель и поиск внешнего ресурса в dynamic scope.
-
 * **Решить, насколько компилятор проверяет схему.** *(до P3)* Сейчас отвергаются битый `pattern` и висячая ссылка; про `maxLength: -1`, `maxLength: 2.5`, `type: "wrong"`, `$id` с фрагментом и невалидный `$anchor` не сказано ничего. Позиции: не проверять ничего сверх нужного для компиляции; проверять синтаксис каждого известного keyword'а; валидировать схему целиком против её метасхемы. Требования к разбору `$vocabulary` и отказу на нераспознанном словаре перечислены в «Диалекте» и здесь не дублируются; открытым в этой части остаётся одно — состав явного списка признаваемых URI словарей, то есть таблицы внутри вывода набора тегов.
 
 * **Зафиксировать позицию по `multipleOf` и десятичным значениям.** *(до снятия `draft`)* Гибрид проходит все одиннадцать обязательных сценариев обоих диалектов и `optional/float-overflow`, но `0.3` при `multipleOf: 0.1` даёт `false`, тогда как спецификация определяет keyword через целочисленный результат деления ([validation.txt:341](../references/json-schema/draft-2020-12/validation.txt)). Расхождение принадлежит модели значения, а не алгоритму: к моменту проверки оба числа уже double, десятичные литералы потеряны декодером, и ближайший к `0.3` double не кратен ближайшему к `0.1`. Два выхода неравны по цене. Расширить оговорку «Границ точности» на `multipleOf` и сузить заявление о соответствии — одно предложение. Ввести точные десятичные — переписывание L0: собственный декодер, хранение исходного литерала при каждом числе и ручное сравнение вместо `==`, на котором держатся `const`, `enum` и `uniqueItems`. Выбранный вариант записывается решением, второй — отвергнутым, с ценой, чтобы вопрос не открывался заново.
-
-* **Решить форму `format`.** *(до заморозки IR)* `{format, atom()}` превращает имя формата из текста схемы в атом, а схемы перезаливаются на ходу — это внешние данные в таблице атомов. Нужен либо `binary()`, либо `binary_to_existing_atom` с определённым поведением на неизвестном имени. Там же не сказано, во что компилируется `format` в annotation-режиме.
 
 * **Определить API изменения реестра.** *(до слоя владельца)* `add/3` на занятое имя даёт ошибку, `replace` и `remove` в API отсутствуют, при этом `remove/2` упоминается в тексте «Реестра». Либо эти функции появляются, либо принимается правило «владелец собирает новый `store()` целиком», и упоминание убирается. Смежное: чем ключуется таблица артефактов — только каноническим именем или алиасами тоже; где живут безымянные артефакты `compile/3`; как таблица возвращается от `heir` перезапущенному владельцу.
 
