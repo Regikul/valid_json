@@ -177,7 +177,7 @@ Boolean schema хранится значением `true` или `false` и не
 | `contains` | `contains`, `minContains`, `maxContains` | по имени фактического keyword |
 | `if_then_else` | `if`, `then`, `else` | по выбранным фактическим keywords |
 
-`additionalItems` без `items` игнорируется по спецификации. `contains.MarksEvaluated` равен true в Draft 2020-12 и false в Draft 2019-09. `format.Assert` вычисляет compiler из vocabulary и compile options; binary format name сохраняется открытым значением и всегда доступен для annotation.
+`additionalItems` без `items` игнорируется по спецификации. `contains.MarksEvaluated` равен true в Draft 2020-12 и false в Draft 2019-09; при false разреженная часть маски покрытия всегда пуста, поэтому в Draft 2019-09 маска вырождается в непрерывный prefix. `format.Assert` вычисляет compiler из vocabulary и compile options; binary format name сохраняется открытым значением и всегда доступен для annotation.
 
 ## Контракт handler'а
 
@@ -295,11 +295,16 @@ Resource boundary определяется target `rid`, а не синтакс�
     units     :: [#output_unit{}]
 }).
 
--type evaluated() :: #{properties => sets:set(binary()),
-                       items      => non_neg_integer() | all}.
+-type evaluated() :: #{properties := sets:set(binary()),
+                       items      := items_mask()}.
+
+-type items_mask() :: all
+                    | {Prefix :: non_neg_integer(), Sparse :: sets:set(non_neg_integer())}.
 ```
 
-Поле `items` пока не заморожено: integer подходит для непрерывного prefix, но успешный `contains` может отметить разреженные indexes. До P4 требуется выбрать set/ranges или доказать иной эквивалентный инвариант; это явно вынесено в аудит overview и не должно быть молча реализовано как «максимальный индекс».
+Маска массива канонична: `Sparse` не содержит индексов меньше `Prefix` и не содержит сам `Prefix`. Нейтральный элемент — `{0, sets:new()}`.
+
+Разделение на префикс и разреженную часть обязательно, потому что «максимальный покрытый индекс» неверен. `prefixItems`, `items` и `additionalItems` покрывают непрерывный префикс либо весь массив, но успешный `contains` отмечает произвольные indexes: на схеме `{"allOf": [{"contains": {"multipleOf": 2}}, {"contains": {"multipleOf": 3}}], "unevaluatedItems": {"multipleOf": 5}}` и инстансе `[2, 3, 4, 7, 8]` покрыты индексы 0, 1, 2 и 4, а индекс 3 обязан дойти до `unevaluatedItems`. Максимум дал бы 4 и признал массив покрытым целиком. При этом хранить одно множество всех индексов нельзя: `items` на массиве в сто тысяч элементов материализовал бы сто тысяч целых. Разреженную часть порождает только `contains`, и по спецификации при совпадении со всеми элементами его аннотация равна `true`, поэтому `Sparse` всегда меньше длины массива.
 
 `evaluated` собирается во всех форматах; `units` — во всех, кроме `flag`. При провале schema object его `evaluated` очищается, но `units` сохраняются.
 
@@ -311,7 +316,45 @@ Resource boundary определяется target `rid`, а не синтакс�
 | `if`/`then`/`else` | вклад `if` плюс выбранная ветвь |
 | `$ref` | покрытие цели |
 
-Annotations, нужные `unevaluated*`, не смешиваются с output details. `evaluated()` — специализированная маска: property names и верхняя граница покрытых array indexes (`all` при полном покрытии). Единственная операция объединения — union/max; единственное правило отбрасывания — пустая маска провалившегося schema object.
+Annotations, нужные `unevaluated*`, не смешиваются с output details. `evaluated()` — специализированная маска: property names и покрытые array indexes. Единственное правило отбрасывания — пустая маска провалившегося schema object.
+
+Вклад в маску массива дают только эти constraints, каждый при собственном успехе:
+
+| Constraint | Вклад |
+| --- | --- |
+| `prefix_items` без хвостового `items`, N схем на массив длины L | `all` при `N >= L`, иначе `{N, ∅}` |
+| `items`, хвостовой `items` внутри `prefix_items`, `additionalItems` | `all` |
+| `items_array` | как `prefix_items` |
+| `contains` при `MarksEvaluated = true` | `all`, если совпали все элементы, иначе `{0, MatchedIndexes}` |
+| `unevaluated_items` | `all` |
+
+Обработчик `contains` и без того обходит весь массив ради `minContains` и `maxContains`, поэтому возврат совпавших indexes не добавляет стоимости.
+
+Объединение масок — union по множествам и max по префиксу с последующей нормализацией:
+
+```erlang
+merge_items(all, _) -> all;
+merge_items(_, all) -> all;
+merge_items({P1, S1}, {P2, S2}) ->
+    normalize(max(P1, P2), sets:union(S1, S2)).
+
+normalize(P, S) ->
+    case sets:is_element(P, S) of
+        true  -> normalize(P + 1, sets:del_element(P, S));
+        false -> {P, sets:filter(fun(I) -> I > P end, S)}
+    end.
+```
+
+Нормализация нужна не ради компактности: без неё одно и то же покрытие получает разные представления в зависимости от порядка обхода ветвей, и от этого порядка начинают зависеть fixtures. Соседний `prefixItems` при нормализации поглощает индексы `contains`, а не хранит их рядом.
+
+`unevaluated*` читают маску так:
+
+```erlang
+unevaluated_indexes(all, _L)                -> [];
+unevaluated_indexes({P, _S}, L) when P >= L -> [];
+unevaluated_indexes({P, S}, L) ->
+    [I || I <- lists:seq(P, L - 1), not sets:is_element(I, S)].
+```
 
 Это разделение обязательно для `not`: успешная внутренняя schema попадает в diagnostic units, потому что `verbose` показывает все результаты, но никогда не вносит effective coverage. Аналогично annotation-only keyword внутри провалившегося schema object остаётся виден в diagnostic tree и не выходит эффективной annotation в `basic`.
 
@@ -332,8 +375,8 @@ Annotations, нужные `unevaluated*`, не смешиваются с output 
 
 Сериализация разделена явно:
 
-- `keywordLocation` и `instanceLocation` — JSON Pointer с `~0`/`~1`, без percent-encoding;
-- `absoluteKeywordLocation` — resource URI, `#`, pointer escaping и затем percent-encoding недопустимых во fragment символов;
+- `keywordLocation` и `instanceLocation` — JSON Pointer с `~0`/`~1`, без percent-encoding ([rfc6901.txt:95](../references/rfc/rfc6901.txt));
+- `absoluteKeywordLocation` — resource URI, `#`, pointer escaping и затем percent-encoding недопустимых во fragment символов; это URI fragment identifier form указателя ([rfc6901.txt:261](../references/rfc/rfc6901.txt)) поверх грамматики fragment ([rfc3986.txt:1308](../references/rfc/rfc3986.txt));
 - empty segment stack печатается пустым pointer; anonymous resource не синтезирует URI.
 
 Draft 2019-09 prose требует fragment-encoded `instanceLocation`, но закреплённые output fixtures и output schema требуют обычный JSON Pointer. Внутренняя форма от выбора не зависит; compatibility policy остаётся открытой.
@@ -373,18 +416,19 @@ Draft 2019-09 prose требует fragment-encoded `instanceLocation`, но з�
 
 Guard — множество активных кадров, не глобальный visited set. Кадр добавляется на входе в node и удаляется на выходе: повтор пары schema/instance внутри собственного поддерева означает цикл, тот же повтор в соседней ветви допустим. Если P5 выявит зависимость от dynamic scope, он добавляется третьим элементом frame без изменения остального контракта.
 
-Само обнаружение цикла не задаёт validation verdict автоматически. Для direct self-ref без progress evaluator должен прекратить бесконечный обход согласованным result/error; точная политика связывается с `infinite-loop-detection` в P3 и будущим общим budget. Guard гарантирует termination, а не подменяет семантику applicator'а.
+Обнаружение цикла не даёт validation verdict. Ложных срабатываний у guard'а не бывает: вернуться к той же паре schema/instance, не покидая текущей ветви, можно только по цепочке in-place applicators, а они не сдвигают позицию в инстансе. Значит на повторном заходе не изменилось ничего и обход повторил бы себя дословно. У такой схемы вердикта нет, и `validate/3` возвращает `{error, {no_progress, addr()}}`. Guard гарантирует termination, а не подменяет семантику applicator'а.
 
 # Публичный результат
 
 ```erlang
 -type option() :: {output, format()}.
 -type output() :: json().
+-type eval_error() :: {no_progress, addr()}.
 
 -spec validate(compiled(), json(), [option()]) ->
-    {ok, output()} | {error, term()}.
+    {ok, output()} | {error, eval_error()}.
 ```
 
-По умолчанию запрашивается `flag`. `{ok, Output}` возвращается и при `valid = false`; это нормальный результат, не ошибка. `{error, term()}` означает невозможность провести вычисление, например исчерпанный бюджет. Формат входит в вызов evaluator'а, потому что определяет сбор units и возможность short-circuit.
+По умолчанию запрашивается `flag`. `{ok, Output}` возвращается и при `valid = false`; это нормальный результат, а не ошибка. Единственная причина отказа — сработавший cycle guard. Собственных лимитов глубины, памяти и времени валидатор не вводит, поэтому других вариантов ошибки у вычисления нет. Формат входит в вызов evaluator'а, потому что определяет сбор units и возможность short-circuit.
 
 Output всегда является JSON value, уже соответствующим выбранному standard format. Conformance runner может сразу проверять его `output-schema.json`; прикладной caller читает то же поле `valid`. Отдельный wrapper с внутренними records наружу не выходит.

@@ -1,7 +1,7 @@
 ---
 type: Architecture Note
 title: Validator compiled examples
-description: Полные Erlang-термы compiled schema и fixture evidence для resources, refs, aliases и dialect inheritance.
+description: Полные Erlang-термы compiled schema и fixture evidence для resources, refs, имён документов и dialect inheritance.
 tags: [json-schema, erlang, compiled-schema, examples, evidence]
 status: draft
 ---
@@ -232,7 +232,7 @@ Draft 2020-12:
 - 2 содержат embedded `$id`;
 - у 6 нет `$schema` (`nested-absolute-ref-to-string`, `urn-ref-string`, `different-id-ref-string` в обоих dialects).
 
-Все refs из tests используют retrieval URI. Cases с отличающимся `$id` проверяют, что retrieval alias не потерян. Embedded `$id` чужого, ещё не достигнутого document снаружи не адресуется; чтобы его обнаружить, compiler сначала должен иметь причину загрузить сам document.
+Все refs из tests используют retrieval URI. Cases с отличающимся `$id` проверяют, что адрес загрузки остался вторым ключом реестра и по нему документ по-прежнему находится. Embedded `$id` чужого, ещё не достигнутого document снаружи не адресуется; чтобы его обнаружить, compiler сначала должен иметь причину загрузить сам document.
 
 ## Vocabularies
 

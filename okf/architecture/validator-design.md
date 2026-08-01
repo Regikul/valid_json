@@ -90,6 +90,8 @@ L6  output builder
 L7  dialect и vocabularies          параметризуют L2
 ```
 
+Нормативные тексты уровня L1 хранятся локально: [RFC 3986](../references/rfc/rfc3986.txt) для URI и [RFC 6901](../references/rfc/rfc6901.txt) для JSON Pointer. Карта секций, которые действительно нужны валидатору, собрана в [rfc overview](../references/rfc/overview.md).
+
 Schema object есть конъюнкция независимых ограничений. Все статические зависимости снимаются компилятором:
 
 | Constraint | Поглощает |
@@ -119,31 +121,40 @@ Schema object есть конъюнкция независимых ограни�
 | P1 | чистые assertions, включая гибридный `multipleOf` и regex-контракт — одноимённые validation files |
 | P2 | applicators, составные constraints и аннотации, включая `default` и content annotations — соответствующие обязательные files |
 | P3 | resources, `store()`, `$id`, `$anchor`, `$ref`, remotes и cycle guard — `ref`, `defs`, `anchor`, `refRemote`, `infinite-loop-detection`, `optional/id`, `optional/unknownKeyword` |
-| P4 | `unevaluatedProperties`, `unevaluatedItems` |
+| P4 | `unevaluatedProperties`, `unevaluatedItems`; обязательны группы `unevaluatedItems.json` про вложенные `contains` и про `minContains = 0` |
 | P5 | `$dynamicRef`, `$dynamicAnchor`; после этого включается проверка ресурсов метасхемой 2020-12 |
 | P6 | vocabularies и Draft 2019-09: `additionalItems`, recursive keywords, cross-draft; включается проверка метасхемой 2019-09 |
 | P7 | `basic`, `detailed`, `verbose` и официальные output tests; недостающее покрытие — собственными golden tests |
 | P8 | `format` assertion, content processing и остальные выбранные optional profiles |
 
+Маска покрытия массива живёт сразу в трёх фазах: тип замораживается в P0 вместе с остальным контрактом `#eval_result{}`, разреженную часть начинает заполнять `contains` в P2, а читают её `unevaluated*` только в P4. Поэтому решение о её форме нельзя откладывать до фазы-потребителя.
+
 Runtime-слой не входит в conformance-фазы. `pattern` компилируется через `re` без ECMA-262 rewrite; адаптация описана отдельно. Вне профиля остаются `optional/refOfUnknownKeyword`, два high-precision float cases и объявленные [conformance-расхождения](../testing/conformance-policy.md).
 
 # Открытые вопросы и аудит
 
-Локальные ошибки прежнего текста исправлены при переносе: fragment-only ссылки анонимного корня разрешены; `dependentSchemas` исключён из пользователей JSON equality; отказ на плохом `pattern` назван политикой реализации, а не MUST спецификации; обязательные `default`/content annotations поставлены в P2. Остальные пункты не закрыты.
+Локальные ошибки прежнего текста исправлены при переносе: fragment-only ссылки анонимного корня разрешены, `dependentSchemas` исключён из пользователей JSON equality, отказ на плохом `pattern` назван политикой реализации, а не MUST спецификации, обязательные `default` и content annotations поставлены в P2.
+
+Отдельными решениями закрыты следующие пункты прежнего списка:
+
+- Покрытие массива. `evaluated.items` стал непрерывным prefix плюс разреженное множество индексов от `contains`; форма маски и правило слияния описаны в [validator-core](validator-core.md#два-результата).
+- Слой URI. Уровень L1 построен на stdlib `uri_string`, каноническое имя даёт scheme-based normalization, fragment декодируется целиком и однократно, а plain-name anchor не проверяется грамматикой на стороне ссылки. Основания собраны в [validator-resources-runtime](validator-resources-runtime.md#слой-uri).
+- Заявление об output tests. Официальный suite закрепляет только `basic` восемью кейсами, поэтому [conformance policy](../testing/conformance-policy.md#output-tests) теперь прямо требует собственных golden tests для остальных трёх форматов.
+- Жизненный цикл документов и артефактов. Документ проходит через upsert и удаление, обе операции принимают список; артефакт заводится на каждый документ реестра, поэтому множество ключей таблицы всегда совпадает с множеством канонических ключей хранилища. Перекомпиляция затрагивает артефакты, чьи `sources` пересекаются с изменениями, и выполняется как транзакция всё-или-ничего. Подробности — в [validator-resources-runtime](validator-resources-runtime.md#артефакт-на-документ).
+- Имена документов. Их ровно два, адрес загрузки и канонический URI, и понятие alias отменено: два ключа реестра указывают на один терм документа. Всё, что дальше разрешения имени, оперирует только каноническим. Разбор — в [разделе про имена](validator-resources-runtime.md#имена).
+- Встроенные метасхемы. Метасхемы двух канонических диалектов вынесены из хранилища в отдельную неизменяемую область, а их скомпилированная форма лежит в `persistent_term`. При этом они остаются обычной целью `$ref`, чего требует обязательный набор. Описание — во [встроенных метасхемах](validator-resources-runtime.md#встроенные-метасхемы).
+- Владение таблицей. Процессов два: хранитель, который держит таблицу между воплощениями, и управляющий, который забирает её через `ets:give_away/3` и единственный в неё пишет. Storage сведён к `lookup`, `put` и `delete` над переданной таблицей. Разбор — в [ETS и процессах](validator-resources-runtime.md#ets-и-процессы).
+- Лимиты. Валидатор не ограничивает ни глубину обхода, ни размер замыкания, ни число output units, ни время работы. Мы исходим из того, что схема обрабатывается за разумное время и в разумной памяти, а бюджет исполнения принадлежит вызывающему. От бесконечного обхода защищает cycle guard, описанный в [validator-core](validator-core.md#контекст-и-cycle-guard), и его срабатывание остаётся единственной причиной, по которой `validate/3` возвращает ошибку.
+
+Остальные пункты не закрыты.
 
 | Владелец | Срок | Вопрос |
 | --- | --- | --- |
-| `runtime` | до слоя владельца | Определить `add`/`replace`/`remove`, ключи алиасов, судьбу anonymous artifacts и возврат ETS от `heir`. |
-| `runtime` | до слоя владельца | Согласовать write-side storage API: сборка должна вернуть владельцу набор артефактов для одного `ets:insert/2`; унифицировать порядок аргументов с `lookup`. |
 | `resources` | до P3 | Решить parent-pointer адресацию встроенных ресурсов: location aliases либо явное исключение из профиля. |
-| `resources` | до P3 | Выбрать L1: RFC 3986 normalization/resolve, percent-decoding, fragment/Pointer order, URN, anchors и URI aliases. |
 | `resources` | до P6 | Решить строгость некорневого `$recursiveAnchor`: игнорировать либо отвергать схемой/компилятором. |
 | `core` | до P6 | Определить compatibility profile для legacy `definitions`, `dependencies` и recursive keywords из корневых meta-schemas. |
-| `core` | до P7 | Зафиксировать Draft 2019-09 `instanceLocation`: локальная спецификация требует URI-fragment form, fixtures — JSON Pointer. |
+| `core` | до P7 | Зафиксировать Draft 2019-09 `instanceLocation`: локальная спецификация требует URI-fragment form ([rfc6901.txt:261](../references/rfc/rfc6901.txt)), fixtures — обычный JSON Pointer. |
 | `core` | до P7 | Добавить собственные structure/golden tests для `flag`, `detailed`, `verbose`, `$ref`, no-op keywords и отброшенных annotations. |
-| `core` | до P4 | Уточнить `evaluated.items`: один integer не выражает разреженные indexes, отмеченные успешными `contains`; нужен set/ranges либо доказанный другой инвариант. |
-| `core` | до P7 | Исправить завышенное утверждение conformance-policy: официальные fixtures закрепляют только `basic`. |
 | `core` | до P8 | Для Format-Assertion выбрать алгоритмы и полную таблицу поддержанных стандартных format attributes. |
-| `runtime` | до слоя владельца | Определить лимиты глубины, closure, output units, regex time и общего бюджета либо явно делегировать их вызывающему. |
 
 Статус остаётся `draft`, пока открыты пункты, влияющие на заявленный профиль или публичный runtime-контракт.
