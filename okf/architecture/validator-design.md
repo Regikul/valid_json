@@ -14,7 +14,7 @@ status: draft
 | --- | --- | --- |
 | `core` | модель JSON-значения, constraint IR, evaluator, аннотации и output formats | вручную собранные `compiled()` fixtures |
 | `resources` | документы и schema resources, URI, dialect, компиляция и ошибки | compiler fixtures поверх чистого `store()` |
-| `runtime` | хранение готовых артефактов, lookup, reload и invalidation | тесты владельца и ETS без evaluator'а |
+| `runtime` | хранение готовых артефактов, lookup, reload и invalidation | тесты управляющего и ETS без evaluator'а |
 
 Общие типы и вычислительный контракт определены в [validator-core](validator-core.md). Загрузка и эксплуатация определены в [validator-resources-runtime](validator-resources-runtime.md). Экспериментальные основания вынесены в supporting notes и не являются production-зависимостями.
 
