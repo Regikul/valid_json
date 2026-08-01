@@ -36,6 +36,35 @@ enum_test_() ->
      %% Пустой enum не проходит ни одно значение.
      ?_assertNot(valid([{enum, []}], null))].
 
+%% Числовые keywords ограничивают только number. Каждый проверяется на границе
+%% и на неприменимом типе instance.
+bounds_test_() ->
+    [?_assert(valid([{maximum, 3.0}], 3.0)),
+     ?_assert(valid([{maximum, 300}], 300.0)),
+     ?_assertNot(valid([{maximum, 3.0}], 3.5)),
+     ?_assertNot(valid([{exclusive_maximum, 3.0}], 3.0)),
+     ?_assert(valid([{exclusive_maximum, 3.0}], 2.2)),
+     ?_assert(valid([{minimum, -2}], -2.0)),
+     ?_assertNot(valid([{minimum, -2}], -2.0001)),
+     ?_assertNot(valid([{exclusive_minimum, 1.1}], 1.1)),
+     ?_assert(valid([{exclusive_minimum, 1.1}], 1.2)),
+     %% Точность не теряется на целых, не представимых double.
+     ?_assertNot(valid([{maximum, 9007199254740992.0}], 9007199254740993))].
+
+multiple_of_test_() ->
+    [?_assert(valid([{multiple_of, 2}], 10)),
+     ?_assertNot(valid([{multiple_of, 2}], 7)),
+     ?_assert(valid([{multiple_of, 0.0001}], 0.0075)),
+     ?_assertNot(valid([{multiple_of, 0.123456789}], 1.0e308))].
+
+%% Значение неприменимого типа проходит успешно, а не отвергается.
+inapplicable_test_() ->
+    Constraints = [{multiple_of, 2}, {maximum, 3}, {exclusive_maximum, 3},
+                   {minimum, 3}, {exclusive_minimum, 3}],
+    [?_assert(valid([Constraint], Instance))
+     || Constraint <- Constraints,
+        Instance <- [<<"x">>, null, true, [], #{}, [1], <<>>]].
+
 %% Schema object — конъюнкция: достаточно одного провалившегося constraint.
 conjunction_test_() ->
     Constraints = [{type, [integer]}, {enum, [1, 2, <<"a">>]}],

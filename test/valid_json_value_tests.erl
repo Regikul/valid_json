@@ -1,4 +1,5 @@
-%% Модель значения. Проверяются все семь json types и особая семантика integer.
+%% Модель значения. Проверяются все семь json types, особая семантика integer
+%% и три ветви кратности.
 -module(valid_json_value_tests).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -31,6 +32,42 @@ integer_test_() ->
      ?_assert(valid_json_value:is_type(integer, -0.0)),
      ?_assertNot(valid_json_value:is_type(integer, 0.5)),
      ?_assertNot(valid_json_value:is_type(integer, 1.0e-8))].
+
+%% Первая ветвь гибрида: оба целых, точный rem без участия float.
+multiple_of_integer_test_() ->
+    [?_assert(valid_json_value:is_multiple_of(10, 2)),
+     ?_assertNot(valid_json_value:is_multiple_of(7, 2)),
+     ?_assert(valid_json_value:is_multiple_of(0, 7)),
+     ?_assert(valid_json_value:is_multiple_of(-10, 2)),
+     %% Точность не теряется на величинах, не представимых double.
+     ?_assert(valid_json_value:is_multiple_of(1 bsl 2000, 1 bsl 1000)),
+     ?_assertNot(valid_json_value:is_multiple_of((1 bsl 2000) + 1, 1 bsl 1000))].
+
+%% Вторая ветвь: частное представимо, ответ даёт сравнение с round/1.
+multiple_of_quotient_test_() ->
+    [?_assert(valid_json_value:is_multiple_of(4.5, 1.5)),
+     ?_assert(valid_json_value:is_multiple_of(-4.5, 1.5)),
+     ?_assert(valid_json_value:is_multiple_of(0, 1.5)),
+     ?_assertNot(valid_json_value:is_multiple_of(35, 1.5)),
+     ?_assert(valid_json_value:is_multiple_of(0.0075, 0.0001)),
+     ?_assertNot(valid_json_value:is_multiple_of(0.00751, 0.0001)),
+     %% Частное больше 2^53 остаётся целым и не теряет ответа.
+     ?_assert(valid_json_value:is_multiple_of(12391239123, 1.0e-8))].
+
+%% Третья ветвь: частное не представимо double, поэтому деление уходит в
+%% badarith и ответ считается на точных дробях.
+multiple_of_exact_test_() ->
+    [?_assertNot(valid_json_value:is_multiple_of(1.0e308, 0.123456789)),
+     %% Субнормальный делитель: дробь строится по другой ветви представления.
+     ?_assert(valid_json_value:is_multiple_of(1.0e308, 5.0e-324)),
+     ?_assert(valid_json_value:is_multiple_of(1 bsl 2000, 0.5)),
+     ?_assertNot(valid_json_value:is_multiple_of(1 bsl 2000, 1.5))].
+
+%% Объявленное расхождение профиля: декодер уже округлил оба литерала, поэтому
+%% десятично верный ответ здесь недостижим. Тест фиксирует границу, а не идеал;
+%% см. validator-core.md, раздел «Точность чисел».
+multiple_of_declared_gap_test() ->
+    ?assertNot(valid_json_value:is_multiple_of(0.3, 0.1)).
 
 matching_types(Value) ->
     [Type || Type <- ?TYPES, valid_json_value:is_type(Type, Value)].

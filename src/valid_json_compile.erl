@@ -17,7 +17,10 @@
 %% Порядок constraints в node задан статически. Наблюдаемое дерево units не
 %% должно зависеть от порядка обхода map, поэтому обход идёт по этому списку,
 %% а не по maps:keys/1.
--define(ORDER, [<<"type">>, <<"enum">>, <<"const">>]).
+-define(ORDER, [<<"type">>, <<"enum">>, <<"const">>,
+                <<"multipleOf">>,
+                <<"maximum">>, <<"exclusiveMaximum">>,
+                <<"minimum">>, <<"exclusiveMinimum">>]).
 
 %% Полностью потребляются компилятором и собственного constraint не дают.
 -define(CONSUMED, [<<"$schema">>, <<"$comment">>]).
@@ -73,10 +76,22 @@ constraint(<<"type">> = Keyword, Value) ->
     end;
 constraint(<<"enum">>, Values) when is_list(Values) ->
     {ok, {enum, Values}};
-constraint(<<"enum">> = Keyword, Value) ->
-    {error, {bad_keyword_value, Keyword, Value}};
 constraint(<<"const">>, Value) ->
-    {ok, {const, Value}}.
+    {ok, {const, Value}};
+%% Неположительный multipleOf запрещён метасхемой и отвергается компилятором:
+%% иначе делитель 0 дошёл бы до вычисления.
+constraint(<<"multipleOf">>, Value) when is_number(Value), Value > 0 ->
+    {ok, {multiple_of, Value}};
+constraint(<<"maximum">>, Value) when is_number(Value) ->
+    {ok, {maximum, Value}};
+constraint(<<"exclusiveMaximum">>, Value) when is_number(Value) ->
+    {ok, {exclusive_maximum, Value}};
+constraint(<<"minimum">>, Value) when is_number(Value) ->
+    {ok, {minimum, Value}};
+constraint(<<"exclusiveMinimum">>, Value) when is_number(Value) ->
+    {ok, {exclusive_minimum, Value}};
+constraint(Keyword, Value) ->
+    {error, {bad_keyword_value, Keyword, Value}}.
 
 -spec type_names([json()] | invalid) -> {ok, [json_type()]} | error.
 type_names(invalid) ->

@@ -44,10 +44,12 @@
   списка непокрытых индексов ждёт своего потребителя в P4.
 - [x] Покрыть маску тестами на `all`, префикс, разреженные индексы и
   независимость результата от порядка слияния.
-- [~] Реализовать модель JSON-значения: `is_type/2` сделан; `type_of/1` ждёт
-  сообщений об ошибках в units, `cp_length/1` — `maxLength` и `minLength` в P1.
-- [~] Покрыть модель значения тестами на integer/number и все семь JSON types;
-  тесты на Unicode code points появятся вместе с `cp_length/1`.
+- [~] Реализовать модель JSON-значения: `is_type/2` и `is_multiple_of/2`
+  сделаны; `type_of/1` ждёт сообщений об ошибках в units, `cp_length/1` —
+  `maxLength` и `minLength` в P1.
+- [~] Покрыть модель значения тестами на integer/number, все семь JSON types и
+  три ветви кратности; тесты на Unicode code points появятся вместе с
+  `cp_length/1`.
 - [ ] Зафиксировать в runner ожидаемое число групп и test cases, чтобы пустой
   прогон не мог быть зелёным.
 - [ ] Приёмка P0: все core fixtures и `boolean_schema.json` обоих dialects
@@ -57,13 +59,13 @@
 
 - [ ] **Фаза P1 завершена**
 - [~] Добавить компиляцию schema object в `#node{}` без подключения registry:
-  сделана для `type`, `enum` и `const`; остальные assertion keywords
-  добавляются вместе со своими обработчиками ниже.
+  сделана для `type`, `enum`, `const` и числовых keywords; остальные assertion
+  keywords добавляются вместе со своими обработчиками ниже.
 - [x] Реализовать общий dispatcher constraints и объединение `valid`,
   `evaluated` и `units` внутри node.
 - [x] Реализовать `type`, `enum` и `const` с JSON equality.
-- [ ] Реализовать `multipleOf`, включая гибридную проверку integer/float.
-- [ ] Реализовать `maximum`, `exclusiveMaximum`, `minimum` и
+- [x] Реализовать `multipleOf`, включая гибридную проверку integer/float.
+- [x] Реализовать `maximum`, `exclusiveMaximum`, `minimum` и
   `exclusiveMinimum`.
 - [ ] Реализовать `maxLength`, `minLength` и подсчёт Unicode code points.
 - [ ] Компилировать `pattern` через `re`, сохраняя исходный pattern рядом с
@@ -74,13 +76,15 @@
 - [ ] Сохранять написанные no-op assertions в IR и выпускать для них output
   unit.
 - [~] Добавить точные compiler fixtures для IR каждого assertion: сделано для
-  `type`, `enum` и `const`.
-- [ ] Добавить evaluator fixtures для применимого и неприменимого типа
-  instance каждого assertion.
+  `type`, `enum`, `const` и числовых keywords.
+- [~] Добавить evaluator fixtures для применимого и неприменимого типа
+  instance каждого assertion: сделано для числовых keywords.
 - [~] Подключить к runner одноимённые validation files обоих dialects:
-  подключены `type.json` и `const.json`. `enum.json`, `required.json` и
-  `uniqueItems.json` содержат группы со схемами `properties`, `prefixItems` и
-  `items`, поэтому целиком подключаются только после P2.
+  подключены `type.json`, `const.json`, `multipleOf.json`, `maximum.json`,
+  `exclusiveMaximum.json`, `minimum.json` и `exclusiveMinimum.json`.
+  `enum.json`, `required.json` и `uniqueItems.json` содержат группы со схемами
+  `properties`, `prefixItems` и `items`, поэтому целиком подключаются только
+  после P2.
 - [ ] Приёмка P1: все обязательные assertion files проходят с учётом
   объявленных regex- и high-precision-расхождений.
 

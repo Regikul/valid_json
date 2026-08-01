@@ -32,10 +32,41 @@ enum_and_const_test_() ->
      ?_assertEqual({ok, artifact(schema_node([{const, null}]))},
                    compile(#{<<"const">> => null}))].
 
+numeric_test_() ->
+    [?_assertEqual({ok, artifact(schema_node([{multiple_of, 2}]))},
+                   compile(#{<<"multipleOf">> => 2})),
+     ?_assertEqual({ok, artifact(schema_node([{multiple_of, 0.0001}]))},
+                   compile(#{<<"multipleOf">> => 0.0001})),
+     ?_assertEqual({ok, artifact(schema_node([{maximum, 3.0}]))},
+                   compile(#{<<"maximum">> => 3.0})),
+     ?_assertEqual({ok, artifact(schema_node([{exclusive_maximum, 3}]))},
+                   compile(#{<<"exclusiveMaximum">> => 3})),
+     ?_assertEqual({ok, artifact(schema_node([{minimum, -2}]))},
+                   compile(#{<<"minimum">> => -2})),
+     ?_assertEqual({ok, artifact(schema_node([{exclusive_minimum, 1.1}]))},
+                   compile(#{<<"exclusiveMinimum">> => 1.1}))].
+
+%% Неположительный делитель запрещён метасхемой, поэтому не доходит до IR.
+bad_multiple_of_test_() ->
+    [?_assertEqual({error, {bad_keyword_value, <<"multipleOf">>, 0}},
+                   compile(#{<<"multipleOf">> => 0})),
+     ?_assertEqual({error, {bad_keyword_value, <<"multipleOf">>, -1.5}},
+                   compile(#{<<"multipleOf">> => -1.5})),
+     ?_assertEqual({error, {bad_keyword_value, <<"multipleOf">>, <<"2">>}},
+                   compile(#{<<"multipleOf">> => <<"2">>})),
+     ?_assertEqual({error, {bad_keyword_value, <<"maximum">>, null}},
+                   compile(#{<<"maximum">> => null})),
+     ?_assertEqual({error, {bad_keyword_value, <<"minimum">>, true}},
+                   compile(#{<<"minimum">> => true}))].
+
 %% Порядок constraints задан компилятором и не зависит от порядка ключей.
 order_test() ->
-    Schema = #{<<"const">> => 1, <<"enum">> => [1], <<"type">> => <<"number">>},
-    Expected = schema_node([{type, [number]}, {enum, [1]}, {const, 1}]),
+    Schema = #{<<"exclusiveMinimum">> => 0, <<"const">> => 1, <<"enum">> => [1],
+               <<"maximum">> => 4, <<"type">> => <<"number">>,
+               <<"multipleOf">> => 1},
+    Expected = schema_node([{type, [number]}, {enum, [1]}, {const, 1},
+                            {multiple_of, 1}, {maximum, 4},
+                            {exclusive_minimum, 0}]),
     ?assertEqual({ok, artifact(Expected)}, compile(Schema)).
 
 %% Потребляются компилятором и собственного constraint не дают.

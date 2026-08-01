@@ -9,7 +9,10 @@
 
 %% Файл подключается целиком и только когда его схемы компилируются полностью.
 %% enum.json, required.json и uniqueItems.json ждут applicators фазы P2.
--define(FILES, ["boolean_schema.json", "type.json", "const.json"]).
+-define(FILES, ["boolean_schema.json", "type.json", "const.json",
+                "multipleOf.json",
+                "maximum.json", "exclusiveMaximum.json",
+                "minimum.json", "exclusiveMinimum.json"]).
 
 validation_test_() ->
     [file_tests(Dir, Dialect, File)

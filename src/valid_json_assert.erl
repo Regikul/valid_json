@@ -15,7 +15,26 @@ check({type, Types}, Instance, _Context) ->
 check({enum, Values}, Instance, _Context) ->
     result(lists:any(fun(Value) -> Value == Instance end, Values));
 check({const, Value}, Instance, _Context) ->
-    result(Value == Instance).
+    result(Value == Instance);
+check({multiple_of, Divisor}, Instance, _Context) ->
+    number(fun(Number) -> valid_json_value:is_multiple_of(Number, Divisor) end, Instance);
+check({maximum, Bound}, Instance, _Context) ->
+    number(fun(Number) -> Number =< Bound end, Instance);
+check({exclusive_maximum, Bound}, Instance, _Context) ->
+    number(fun(Number) -> Number < Bound end, Instance);
+check({minimum, Bound}, Instance, _Context) ->
+    number(fun(Number) -> Number >= Bound end, Instance);
+check({exclusive_minimum, Bound}, Instance, _Context) ->
+    number(fun(Number) -> Number > Bound end, Instance).
+
+%% Keyword ограничивает только свой тип instance: значение другого типа проходит
+%% успешно, а не отвергается. Сравнение чисел в Erlang точно и через границу
+%% integer/float, поэтому 300 и 300.0 остаются одной точкой.
+-spec number(fun((number()) -> boolean()), json()) -> #eval_result{}.
+number(Check, Instance) when is_number(Instance) ->
+    result(Check(Instance));
+number(_Check, _Instance) ->
+    result(true).
 
 %% Чистые assertions не вносят покрытия. Units не собираются, пока не появилась
 %% проекция basic; тогда каждый handler начнёт строить свой unit сам.
