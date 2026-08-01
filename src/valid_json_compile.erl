@@ -10,8 +10,13 @@
 
 -export_type([compile_error/0]).
 
+%% Каталог причин дизайна называет keyword через location, а её пока нет:
+%% единственный anonymous node адресовать нечем. Поэтому обе записи временно
+%% несут опознавательный элемент сами и схлопнутся до формы дизайна вместе с
+%% появлением addr().
 -type compile_error() :: {not_implemented, {keyword, binary()}}
                        | {bad_keyword_value, binary(), json()}
+                       | {bad_pattern, binary(), term()}
                        | {not_a_schema, json()}.
 
 %% Порядок constraints в node задан статически. Наблюдаемое дерево units не
@@ -20,7 +25,8 @@
 -define(ORDER, [<<"type">>, <<"enum">>, <<"const">>,
                 <<"multipleOf">>,
                 <<"maximum">>, <<"exclusiveMaximum">>,
-                <<"minimum">>, <<"exclusiveMinimum">>]).
+                <<"minimum">>, <<"exclusiveMinimum">>,
+                <<"pattern">>]).
 
 %% Полностью потребляются компилятором и собственного constraint не дают.
 -define(CONSUMED, [<<"$schema">>, <<"$comment">>]).
@@ -90,6 +96,15 @@ constraint(<<"minimum">>, Value) when is_number(Value) ->
     {ok, {minimum, Value}};
 constraint(<<"exclusiveMinimum">>, Value) when is_number(Value) ->
     {ok, {exclusive_minimum, Value}};
+%% Опции и запрет на неявное якорение заданы в validator-core.md, раздел
+%% «Регулярные выражения». Исходный текст остаётся рядом с re:mp() ради
+%% диагностики, а некомпилируемое выражение останавливает компиляцию: это одна
+%% из проверок, которые остаются за компилятором и после включения метасхемы.
+constraint(<<"pattern">>, Value) when is_binary(Value) ->
+    case re:compile(Value, [unicode, dollar_endonly]) of
+        {ok, Compiled}  -> {ok, {pattern, {Value, Compiled}}};
+        {error, Reason} -> {error, {bad_pattern, Value, Reason}}
+    end;
 constraint(Keyword, Value) ->
     {error, {bad_keyword_value, Keyword, Value}}.
 

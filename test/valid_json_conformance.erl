@@ -12,7 +12,15 @@
 -define(FILES, ["boolean_schema.json", "type.json", "const.json",
                 "multipleOf.json",
                 "maximum.json", "exclusiveMaximum.json",
-                "minimum.json", "exclusiveMinimum.json"]).
+                "minimum.json", "exclusiveMinimum.json",
+                "pattern.json"]).
+
+%% Объявленные расхождения основного набора: okf/testing/conformance-policy.md,
+%% раздел «Известные расхождения». Группа исключается поимённо, чтобы остальные
+%% группы файла продолжали проверяться, а сам список оставался читаемым.
+-define(EXCLUDED,
+        [{"pattern.json",
+          <<"pattern with Unicode property escape requires unicode mode">>}]).
 
 validation_test_() ->
     [file_tests(Dir, Dialect, File)
@@ -21,7 +29,10 @@ validation_test_() ->
 file_tests(Dir, Dialect, File) ->
     Path = filename:join([suite_dir(), Dir, File]),
     {filename:join(Dir, File),
-     [group_tests(Dialect, Group) || Group <- read_groups(Path)]}.
+     [group_tests(Dialect, Group) || Group <- read_groups(Path), included(File, Group)]}.
+
+included(File, #{<<"description">> := Description}) ->
+    not lists:member({File, Description}, ?EXCLUDED).
 
 group_tests(Dialect, #{<<"description">> := Description,
                        <<"schema">> := Schema,

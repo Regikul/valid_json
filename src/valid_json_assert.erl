@@ -25,7 +25,9 @@ check({exclusive_maximum, Bound}, Instance, _Context) ->
 check({minimum, Bound}, Instance, _Context) ->
     number(fun(Number) -> Number >= Bound end, Instance);
 check({exclusive_minimum, Bound}, Instance, _Context) ->
-    number(fun(Number) -> Number > Bound end, Instance).
+    number(fun(Number) -> Number > Bound end, Instance);
+check({pattern, {_Source, Compiled}}, Instance, _Context) ->
+    string(fun(Text) -> re:run(Text, Compiled, [{capture, none}]) =:= match end, Instance).
 
 %% Keyword ограничивает только свой тип instance: значение другого типа проходит
 %% успешно, а не отвергается. Сравнение чисел в Erlang точно и через границу
@@ -34,6 +36,14 @@ check({exclusive_minimum, Bound}, Instance, _Context) ->
 number(Check, Instance) when is_number(Instance) ->
     result(Check(Instance));
 number(_Check, _Instance) ->
+    result(true).
+
+%% То же правило применимости для строк. Instance приходит из json:decode/1 и
+%% потому является корректным UTF-8, что и требует unicode-режим движка.
+-spec string(fun((binary()) -> boolean()), json()) -> #eval_result{}.
+string(Check, Instance) when is_binary(Instance) ->
+    result(Check(Instance));
+string(_Check, _Instance) ->
     result(true).
 
 %% Чистые assertions не вносят покрытия. Units не собираются, пока не появилась

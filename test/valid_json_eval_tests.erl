@@ -57,6 +57,24 @@ multiple_of_test_() ->
      ?_assert(valid([{multiple_of, 0.0001}], 0.0075)),
      ?_assertNot(valid([{multiple_of, 0.123456789}], 1.0e308))].
 
+%% Паттерн ищет подстроку: неявное якорение запрещено MUST (core.txt:709).
+pattern_test_() ->
+    [?_assert(valid([{pattern, regex(<<"a+">>)}], <<"xaay">>)),
+     ?_assertNot(valid([{pattern, regex(<<"a+">>)}], <<"xyz">>)),
+     ?_assert(valid([{pattern, regex(<<"^a+$">>)}], <<"aaa">>)),
+     ?_assertNot(valid([{pattern, regex(<<"^a+$">>)}], <<"baaa">>)),
+     ?_assertNot(valid([{pattern, regex(<<"a+">>)}], <<>>)),
+     %% dollar_endonly: $ не совпадает перед завершающим переводом строки.
+     ?_assertNot(valid([{pattern, regex(<<"^a$">>)}], <<"a\n">>)),
+     %% unicode: и паттерн, и субъект читаются как UTF-8, а не как байты.
+     ?_assert(valid([{pattern, regex(<<"^.$">>)}], <<"ф"/utf8>>)),
+     ?_assert(valid([{pattern, regex(<<"^ф$"/utf8>>)}], <<"ф"/utf8>>)),
+     %% Значение неприменимого типа проходит успешно.
+     ?_assert(valid([{pattern, regex(<<"^a$">>)}], 1)),
+     ?_assert(valid([{pattern, regex(<<"^a$">>)}], null)),
+     ?_assert(valid([{pattern, regex(<<"^a$">>)}], [<<"a">>])),
+     ?_assert(valid([{pattern, regex(<<"^a$">>)}], #{<<"a">> => 1}))].
+
 %% Значение неприменимого типа проходит успешно, а не отвергается.
 inapplicable_test_() ->
     Constraints = [{multiple_of, 2}, {maximum, 3}, {exclusive_maximum, 3},
@@ -112,6 +130,11 @@ neutral() -> {[], 0, []}.
 
 schema_node(Constraints) ->
     #node{constraints = Constraints, unevaluated = []}.
+
+%% Опции повторяют validator-core.md: якорения нет, режим Unicode включён.
+regex(Source) ->
+    {ok, Compiled} = re:compile(Source, [unicode, dollar_endonly]),
+    {Source, Compiled}.
 
 artifact(Node) ->
     #{root      => anonymous,

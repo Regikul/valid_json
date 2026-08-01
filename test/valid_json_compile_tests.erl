@@ -59,14 +59,33 @@ bad_multiple_of_test_() ->
      ?_assertEqual({error, {bad_keyword_value, <<"minimum">>, true}},
                    compile(#{<<"minimum">> => true}))].
 
+%% Скомпилированный re:mp() попадает прямо в IR, поэтому точное равенство
+%% артефактов должно сохраниться: одинаковый исходный текст даёт равные термы.
+pattern_test_() ->
+    [?_assertEqual({ok, artifact(schema_node([{pattern, regex(<<"^a+$">>)}]))},
+                   compile(#{<<"pattern">> => <<"^a+$">>})),
+     ?_assertEqual({ok, artifact(schema_node([{pattern, regex(<<"[0-9]">>)}]))},
+                   compile(#{<<"pattern">> => <<"[0-9]">>}))].
+
+%% Некомпилируемое выражение останавливает компиляцию схемы. Причина от re
+%% проверяется по форме: её текст принадлежит библиотеке и может меняться.
+bad_pattern_test_() ->
+    [?_assertMatch({error, {bad_pattern, <<"(">>, _}},
+                   compile(#{<<"pattern">> => <<"(">>})),
+     ?_assertMatch({error, {bad_pattern, <<"[z-a]">>, _}},
+                   compile(#{<<"pattern">> => <<"[z-a]">>})),
+     %% Нестроковое значение — обычная ошибка значения keyword, не regex.
+     ?_assertEqual({error, {bad_keyword_value, <<"pattern">>, 1}},
+                   compile(#{<<"pattern">> => 1}))].
+
 %% Порядок constraints задан компилятором и не зависит от порядка ключей.
 order_test() ->
     Schema = #{<<"exclusiveMinimum">> => 0, <<"const">> => 1, <<"enum">> => [1],
                <<"maximum">> => 4, <<"type">> => <<"number">>,
-               <<"multipleOf">> => 1},
+               <<"multipleOf">> => 1, <<"pattern">> => <<"a">>},
     Expected = schema_node([{type, [number]}, {enum, [1]}, {const, 1},
                             {multiple_of, 1}, {maximum, 4},
-                            {exclusive_minimum, 0}]),
+                            {exclusive_minimum, 0}, {pattern, regex(<<"a">>)}]),
     ?assertEqual({ok, artifact(Expected)}, compile(Schema)).
 
 %% Потребляются компилятором и собственного constraint не дают.
@@ -104,6 +123,11 @@ compile(Schema) ->
 
 schema_node(Constraints) ->
     #node{constraints = Constraints, unevaluated = []}.
+
+%% Опции повторяют validator-core.md: без них терм не совпал бы с компиляторным.
+regex(Source) ->
+    {ok, Compiled} = re:compile(Source, [unicode, dollar_endonly]),
+    {Source, Compiled}.
 
 artifact(Node) ->
     #{root      => anonymous,

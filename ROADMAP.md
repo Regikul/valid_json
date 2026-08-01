@@ -59,8 +59,8 @@
 
 - [ ] **Фаза P1 завершена**
 - [~] Добавить компиляцию schema object в `#node{}` без подключения registry:
-  сделана для `type`, `enum`, `const` и числовых keywords; остальные assertion
-  keywords добавляются вместе со своими обработчиками ниже.
+  сделана для `type`, `enum`, `const`, числовых keywords и `pattern`; остальные
+  assertion keywords добавляются вместе со своими обработчиками ниже.
 - [x] Реализовать общий dispatcher constraints и объединение `valid`,
   `evaluated` и `units` внутри node.
 - [x] Реализовать `type`, `enum` и `const` с JSON equality.
@@ -68,7 +68,7 @@
 - [x] Реализовать `maximum`, `exclusiveMaximum`, `minimum` и
   `exclusiveMinimum`.
 - [ ] Реализовать `maxLength`, `minLength` и подсчёт Unicode code points.
-- [ ] Компилировать `pattern` через `re`, сохраняя исходный pattern рядом с
+- [x] Компилировать `pattern` через `re`, сохраняя исходный pattern рядом с
   `re:mp()` и возвращая compile error для неподдержанного выражения.
 - [ ] Реализовать `maxItems`, `minItems` и `uniqueItems`.
 - [ ] Реализовать `maxProperties`, `minProperties`, `required` и
@@ -76,15 +76,17 @@
 - [ ] Сохранять написанные no-op assertions в IR и выпускать для них output
   unit.
 - [~] Добавить точные compiler fixtures для IR каждого assertion: сделано для
-  `type`, `enum`, `const` и числовых keywords.
+  `type`, `enum`, `const`, числовых keywords и `pattern`.
 - [~] Добавить evaluator fixtures для применимого и неприменимого типа
-  instance каждого assertion: сделано для числовых keywords.
+  instance каждого assertion: сделано для числовых keywords и `pattern`.
 - [~] Подключить к runner одноимённые validation files обоих dialects:
   подключены `type.json`, `const.json`, `multipleOf.json`, `maximum.json`,
-  `exclusiveMaximum.json`, `minimum.json` и `exclusiveMinimum.json`.
-  `enum.json`, `required.json` и `uniqueItems.json` содержат группы со схемами
-  `properties`, `prefixItems` и `items`, поэтому целиком подключаются только
-  после P2.
+  `exclusiveMaximum.json`, `minimum.json`, `exclusiveMinimum.json` и
+  `pattern.json`. `enum.json`, `required.json` и `uniqueItems.json` содержат
+  группы со схемами `properties`, `prefixItems` и `items`, поэтому целиком
+  подключаются только после P2.
+- [x] Научить runner исключать группы, объявленные расхождениями в
+  conformance-policy: сейчас это `^\p{Letter}+$` в `pattern.json`.
 - [ ] Приёмка P1: все обязательные assertion files проходят с учётом
   объявленных regex- и high-precision-расхождений.
 
