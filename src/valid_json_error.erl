@@ -20,6 +20,14 @@ location({anonymous, Pointer}) -> ["#", Pointer];
 location({Uri, Pointer})       -> [Uri, "#", Pointer].
 
 -spec reason(reason()) -> unicode:chardata().
+reason(invalid_uri) ->
+    "URI is invalid";
+reason(invalid_percent_encoding) ->
+    "URI contains invalid percent-encoding";
+reason(relative_uri_without_base) ->
+    "relative URI has no base URI";
+reason({name_taken, Uri}) ->
+    ["URI is already used by another document: ", Uri];
 reason({bad_keyword_value, Value}) ->
     ["value is not allowed here: ", json:encode(Value)];
 %% Причина от re принадлежит библиотеке и структуры не имеет, поэтому печатается

@@ -132,7 +132,11 @@
 %% то, что компилятор умеет производить сейчас. `not_implemented` в каталог не
 %% входит: это временная причина, которая исчезнет вместе с последним
 %% нереализованным keyword.
--type reason() :: {bad_keyword_value, json()}
+-type reason() :: invalid_uri
+                | invalid_percent_encoding
+                | relative_uri_without_base
+                | {name_taken, uri()}
+                | {bad_keyword_value, json()}
                 | {bad_pattern, term()}
                 | {not_implemented, binary()}.
 

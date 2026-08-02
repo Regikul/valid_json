@@ -26,6 +26,13 @@ format_test_() ->
 without_location_test() ->
     ?assert(contains(format({not_implemented, <<"$ref">>}, undefined), <<"$ref">>)).
 
+store_reason_test_() ->
+    [?_assert(contains(format(invalid_uri, undefined), <<"URI">>)),
+     ?_assert(contains(format(invalid_percent_encoding, undefined), <<"percent">>)),
+     ?_assert(contains(format(relative_uri_without_base, undefined), <<"base">>)),
+     ?_assert(contains(format({name_taken, <<"https://example.com/schema">>}, undefined),
+                       <<"https://example.com/schema">>))].
+
 format(Reason, Location) ->
     iolist_to_binary(
       valid_json_error:format_error(#schema_error{reason = Reason, location = Location})).

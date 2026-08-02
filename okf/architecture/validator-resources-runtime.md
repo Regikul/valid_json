@@ -39,10 +39,20 @@ Schema resource — схема с каноническим абсолютным 
     json      :: json()
 }).
 
--type store() :: #{uri() => #document{}}.
+-record(store, {
+    base      :: uri() | anonymous,
+    documents :: #{uri() => #document{}}
+}).
 
-fetch(Uri, Store) -> maps:get(Uri, Store, undefined).
+-type store() :: #store{}.
+
+fetch(Uri, #store{documents = Documents}) ->
+    maps:get(Uri, Documents, undefined).
 ```
+
+`base` принадлежит самому значению реестра: иначе выбранный в `new/1`
+`base_uri` потерялся бы до следующего вызова `add`. Пустым реестром считается
+`documents = #{}`; служебное поле базы документом и именем реестра не является.
 
 У документа ровно два имени: адрес загрузки и канонический URI. Если они различаются, документ доступен под обоими ключами, но лежит при этом один раз — два ключа map указывают на один и тот же терм, и внутри кучи процесса это ничего не стоит. Промежуточных записей-указателей нет, поэтому нет ни цепочек, ни циклов, ни отдельного шага разыменования при чтении.
 
@@ -237,8 +247,9 @@ Dispatcher компилятора — функция `(active vocabularies, keyw
 }).
 
 -type reason() ::
-      {dangling_ref, addr()} | {non_schema_target, addr()}
-    | {unknown_document, uri()} | relative_uri_without_base
+      invalid_uri | invalid_percent_encoding | relative_uri_without_base
+    | {dangling_ref, addr()} | {non_schema_target, addr()}
+    | {unknown_document, uri()}
     | {bad_pattern, term()} | {bad_keyword_value, json()}
     | {unknown_dialect, uri()} | {unrecognized_vocabulary, uri()}
     | core_vocabulary_missing | {misplaced_keyword, binary()}
