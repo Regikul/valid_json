@@ -147,8 +147,12 @@ scan([Addr | Rest], Index, Keyword, Instance, Context, Stop,
 finish({Matched, Seen, Evaluated, Units}) ->
     {Matched, Seen, Evaluated, lists:reverse(Units)}.
 
+%% Обрыв разрешён только там, где покрытия уже никто не ждёт: `anyOf`
+%% останавливается на первом успехе, а аннотации остальных ветвей могут
+%% понадобиться `unevaluated*` выше по обходу.
 -spec stopped(stop(), tuple(), #eval_context{}) -> boolean().
-stopped(Stop, {Matched, Seen, _Evaluated, _Units}, #eval_context{mode = flag}) ->
+stopped(Stop, {Matched, Seen, _Evaluated, _Units},
+        #eval_context{mode = flag, coverage = false}) ->
     Stop(Matched, Seen);
 stopped(_Stop, _Acc, #eval_context{}) ->
     false.

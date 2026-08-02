@@ -662,7 +662,7 @@ array_short_circuit_test_() ->
     Artifact = prefix_items([false, tripwire()], undefined),
     [?_assertMatch({ok, #eval_result{valid = false}},
                    valid_json_eval:run(Artifact, [1, 2], flag)),
-     ?_assertError({not_implemented, _}, valid_json_eval:run(Artifact, [1, 2], basic))].
+     ?_assertError({badkey, _}, valid_json_eval:run(Artifact, [1, 2], basic))].
 
 %% Вердикт `contains` — хотя бы одно совпадение, и снимает это требование только
 %% `minContains: 0`. Границы считают совпадения и отвечают за свои вердикты сами.
@@ -730,6 +730,185 @@ contains_coverage_test_() ->
      ?_assertEqual(neutral(), coverage_of(contains(Integer, undefined, undefined, false),
                                           [1, <<"a">>, 2]))].
 
+%% `unevaluated*` применяются к тому, чего не коснулся ни один сосед. Покрытие
+%% берётся от constraints того же node, включая достигнутые по ссылке.
+unevaluated_test_() ->
+    Properties = unevaluated_properties([{type, [integer]}]),
+    Items = unevaluated_items([{type, [integer]}]),
+    [?_assert(verdict(Properties, #{<<"foo">> => <<"x">>, <<"bar">> => 1})),
+     ?_assertNot(verdict(Properties, #{<<"bar">> => <<"x">>})),
+     %% Непокрытых свойств нет — подсхеме применяться не к чему.
+     ?_assert(verdict(Properties, #{<<"foo">> => <<"x">>})),
+     ?_assert(verdict(Properties, 1)),
+     ?_assert(verdict(Items, [<<"x">>, 1])),
+     ?_assertNot(verdict(Items, [<<"x">>, <<"y">>])),
+     ?_assert(verdict(Items, [<<"x">>])),
+     ?_assert(verdict(Items, 1)),
+     %% Покрытие цели `$ref` считается покрытием самого node.
+     ?_assert(verdict(referenced_coverage(), #{<<"foo">> => 1})),
+     ?_assertNot(verdict(referenced_coverage(), #{<<"bar">> => 1}))].
+
+%% Ветви in-place applicators обходятся целиком, пока покрытия ждут: успех
+%% первой ветви `anyOf` не отменяет аннотаций остальных, и обрыв в режиме flag
+%% дал бы другой вердикт. Ловушка стоит в невлияющей ветви и показывает, что
+%% обход дошёл и до неё.
+unevaluated_branches_test_() ->
+    [?_assert(verdict(nested_coverage(), #{<<"foo">> => 1})),
+     ?_assertNot(verdict(nested_coverage(), #{<<"bar">> => 1})),
+     ?_assertError({badkey, _},
+                   valid_json_eval:run(nested_coverage(tripwire()), #{<<"foo">> => 1}, flag))].
+
+%% Аннотации собираются и внутри `not`: у внутренней схемы свой
+%% `unevaluatedProperties`, и его вердикт зависит от покрытия соседей, хотя
+%% наружу это покрытие не выйдет (suite, `not.json`).
+unevaluated_inside_not_test_() ->
+    [?_assertNot(verdict(unevaluated_inside_not(), #{<<"foo">> => 1})),
+     ?_assert(verdict(unevaluated_inside_not(), #{<<"bar">> => 1}))].
+
+%% Разреженное покрытие от `contains`: пример из validator-core. Совпадения
+%% отмечают индексы 0, 1, 2 и 4, а индекс 3 обязан дойти до `unevaluatedItems`.
+unevaluated_sparse_test_() ->
+    [?_assert(verdict(sparse_coverage(), [2, 3, 4, 5, 8])),
+     ?_assertNot(verdict(sparse_coverage(), [2, 3, 4, 7, 8]))].
+
+%% Граница resource: node с unevaluated лежит в другом документе, и покрытие
+%% считается там же, где написаны его constraints.
+unevaluated_boundary_test_() ->
+    [?_assert(verdict(boundary_coverage(), #{<<"foo">> => 1})),
+     ?_assertNot(verdict(boundary_coverage(), #{<<"bar">> => 1}))].
+
+%% Аннотация `unevaluatedProperties` называет имена, к которым keyword
+%% применился, а `unevaluatedItems` — всегда `true`: применившись хоть куда-то,
+%% он покрыл весь остаток массива.
+unevaluated_annotation_test_() ->
+    Details = fun(Artifact, Instance) ->
+                      [{valid_json_location:pointer(Keywords), Detail}
+                       || #output_unit{keyword_location = Keywords, detail = Detail}
+                              <- own(collect(Artifact, Instance, basic))]
+              end,
+    Properties = unevaluated_properties(true),
+    Items = unevaluated_items(true),
+    [?_assertEqual([{<<"/properties">>, {annotation, [<<"foo">>]}},
+                    {<<"/unevaluatedProperties">>, {annotation, [<<"bar">>]}}],
+                   Details(Properties, #{<<"foo">> => 1, <<"bar">> => 2})),
+     %% Непокрытых свойств не нашлось — аннотация остаётся пустой.
+     ?_assertEqual([{<<"/properties">>, {annotation, [<<"foo">>]}},
+                    {<<"/unevaluatedProperties">>, {annotation, []}}],
+                   Details(Properties, #{<<"foo">> => 1})),
+     %% Не-объект: unit успешный, но аннотации нет.
+     ?_assertEqual([{<<"/properties">>, none}, {<<"/unevaluatedProperties">>, none}],
+                   Details(Properties, 1)),
+     ?_assertEqual([{<<"/prefixItems">>, {annotation, 0}},
+                    {<<"/unevaluatedItems">>, {annotation, true}}],
+                   Details(Items, [1, 2])),
+     %% Непокрытых элементов не нашлось — применяться было нечему.
+     ?_assertEqual([{<<"/prefixItems">>, {annotation, true}},
+                    {<<"/unevaluatedItems">>, none}],
+                   Details(Items, [1]))].
+
+%% Покрытие вносит и сам `unevaluated*`: свойства, к которым он применился, и
+%% весь остаток массива.
+unevaluated_coverage_test_() ->
+    [?_assertEqual({[<<"bar">>, <<"foo">>], 0, []},
+                   coverage_of(unevaluated_properties(true), #{<<"foo">> => 1, <<"bar">> => 2})),
+     ?_assertEqual({[], all, []}, coverage_of(unevaluated_items(true), [1, 2])),
+     %% Провалившийся node покрытия не отдаёт вовсе.
+     ?_assertEqual(neutral(),
+                   coverage_of(unevaluated_properties(false), #{<<"bar">> => 1}))].
+
+%% `{"properties": {"foo": true}, "unevaluatedProperties": Child}`.
+unevaluated_properties(Child) ->
+    unevaluated_tree([{properties, #{<<"foo">> => addr(<<"/properties/foo">>)},
+                       undefined, undefined}],
+                     [{unevaluated_properties, addr(<<"/unevaluatedProperties">>)}],
+                     #{<<"/properties/foo">> => true,
+                       <<"/unevaluatedProperties">> => child(Child)}).
+
+%% `{"prefixItems": [true], "unevaluatedItems": Child}`.
+unevaluated_items(Child) ->
+    unevaluated_tree([{prefix_items, [addr(<<"/prefixItems/0">>)], undefined}],
+                     [{unevaluated_items, addr(<<"/unevaluatedItems">>)}],
+                     #{<<"/prefixItems/0">> => true,
+                       <<"/unevaluatedItems">> => child(Child)}).
+
+%% Покрытие приходит из цели ссылки, а не от соседнего keyword.
+referenced_coverage() ->
+    unevaluated_tree([{ref, addr(<<"/$defs/base">>)}],
+                     [{unevaluated_properties, addr(<<"/unevaluatedProperties">>)}],
+                     #{<<"/$defs/base">> =>
+                           schema_node([{properties, #{<<"foo">> => addr(<<"/$defs/base/properties/foo">>)},
+                                        undefined, undefined}]),
+                       <<"/$defs/base/properties/foo">> => true,
+                       <<"/unevaluatedProperties">> => false}).
+
+nested_coverage() ->
+    nested_coverage(true).
+
+%% Покрытие поднимается через цепочку in-place applicators: `foo` покрывает
+%% вторая ветвь `anyOf`, лежащая под `allOf`.
+nested_coverage(First) ->
+    unevaluated_tree([{all_of, [addr(<<"/allOf/0">>)]}],
+                     [{unevaluated_properties, addr(<<"/unevaluatedProperties">>)}],
+                     #{<<"/allOf/0">> =>
+                           schema_node([{any_of, [addr(<<"/allOf/0/anyOf/0">>),
+                                                  addr(<<"/allOf/0/anyOf/1">>)]}]),
+                       <<"/allOf/0/anyOf/0">> => child(First),
+                       <<"/allOf/0/anyOf/1">> =>
+                           schema_node([{properties, #{<<"foo">> => addr(<<"/allOf/0/anyOf/1/properties/foo">>)},
+                                        undefined, undefined}]),
+                       <<"/allOf/0/anyOf/1/properties/foo">> => true,
+                       <<"/unevaluatedProperties">> => false}).
+
+unevaluated_inside_not() ->
+    tree(#{<<>> => schema_node([{'not', addr(<<"/not">>)}]),
+           <<"/not">> =>
+               #node{constraints = [{any_of, [addr(<<"/not/anyOf/0">>),
+                                              addr(<<"/not/anyOf/1">>)]}],
+                     unevaluated = [{unevaluated_properties,
+                                     addr(<<"/not/unevaluatedProperties">>)}]},
+           <<"/not/anyOf/0">> => true,
+           <<"/not/anyOf/1">> =>
+               schema_node([{properties, #{<<"foo">> => addr(<<"/not/anyOf/1/properties/foo">>)},
+                            undefined, undefined}]),
+           <<"/not/anyOf/1/properties/foo">> => true,
+           <<"/not/unevaluatedProperties">> => false}).
+
+%% Две ветви `allOf` с `contains`, каждая отмечает свои индексы; непокрытым
+%% остаётся тот, что не совпал ни с одной.
+sparse_coverage() ->
+    Branch = fun(Index, Divisor) ->
+                     Pointer = <<"/allOf/", (integer_to_binary(Index))/binary>>,
+                     {Pointer,
+                      schema_node([{contains, addr(<<Pointer/binary, "/contains">>),
+                                    undefined, undefined, true}]),
+                      <<Pointer/binary, "/contains">>,
+                      schema_node([{multiple_of, Divisor}])}
+             end,
+    {First, FirstNode, FirstChild, FirstChildNode} = Branch(0, 2),
+    {Second, SecondNode, SecondChild, SecondChildNode} = Branch(1, 3),
+    unevaluated_tree([{all_of, [addr(First), addr(Second)]}],
+                     [{unevaluated_items, addr(<<"/unevaluatedItems">>)}],
+                     #{First => FirstNode, FirstChild => FirstChildNode,
+                       Second => SecondNode, SecondChild => SecondChildNode,
+                       <<"/unevaluatedItems">> => schema_node([{multiple_of, 5}])}).
+
+unevaluated_tree(Constraints, Unevaluated, Children) ->
+    tree(Children#{<<>> => #node{constraints = Constraints, unevaluated = Unevaluated}}).
+
+%% Ссылка ведёт в другой resource, и node с unevaluated целиком принадлежит ему.
+boundary_coverage() ->
+    Target = <<"https://example.com/target">>,
+    Nodes = #{<<>> => #node{constraints = [{properties, #{<<"foo">> => {Target, <<"/properties/foo">>}},
+                                            undefined, undefined}],
+                            unevaluated = [{unevaluated_properties,
+                                            {Target, <<"/unevaluatedProperties">>}}]},
+              <<"/properties/foo">> => true,
+              <<"/unevaluatedProperties">> => false},
+    #{root      => ?RESOURCE,
+      sources   => [],
+      resources => #{?RESOURCE => resource(?RESOURCE, #{<<>> => schema_node([{ref, {Target, <<>>}}])}),
+                     Target    => resource(Target, Nodes)}}.
+
 %% Обрыв разрешён только в режиме flag. Ветвь-ловушка при вычислении падает,
 %% поэтому её достижение видно прямо в результате.
 short_circuit_test_() ->
@@ -748,7 +927,7 @@ short_circuit_test_() ->
      ?_assertMatch({ok, #eval_result{valid = false}},
                    valid_json_eval:run(Second, 1, flag)),
      %% В basic дерево units должно быть полным, поэтому обходятся все ветви.
-     ?_assertError({not_implemented, _}, valid_json_eval:run(Failing, 1, basic))].
+     ?_assertError({badkey, _}, valid_json_eval:run(Failing, 1, basic))].
 
 %% Applicator выпускает собственный unit написанного keyword, а units ветвей
 %% стоят под ним и несут в локации индекс ветви.
@@ -1034,8 +1213,10 @@ addr(Pointer) ->
     {anonymous, Pointer}.
 
 %% Node, вычисление которого падает: он показывает, дошёл ли обход до ветви.
+%% Падение даёт ссылка в никуда: разрешение адреса в готовом артефакте тотально,
+%% и до вычисления такой node не доживает.
 tripwire() ->
-    #node{constraints = [], unevaluated = [{unevaluated_items, addr(<<>>)}]}.
+    schema_node([{ref, addr(<<"/missing">>)}]).
 
 absolute(Artifact, Instance) ->
     {ok, #eval_result{units = Units}} = valid_json_eval:run(Artifact, Instance, basic),
@@ -1119,10 +1300,13 @@ named_tree(Nodes) ->
 tree(Rid, Id, Nodes) ->
     #{root      => Rid,
       sources   => [],
-      resources => #{Rid =>
-          #resource{id               = Id,
-                    dialect          = ?DIALECT,
-                    anchors          = #{},
-                    dynamic_anchors  = #{},
-                    recursive_anchor = false,
-                    nodes            = Nodes}}}.
+      resources => #{Rid => resource(Id, Nodes)}}.
+
+%% Отдельный resource: артефакту из нескольких документов их нужно несколько.
+resource(Id, Nodes) ->
+    #resource{id               = Id,
+              dialect          = ?DIALECT,
+              anchors          = #{},
+              dynamic_anchors  = #{},
+              recursive_anchor = false,
+              nodes            = Nodes}.

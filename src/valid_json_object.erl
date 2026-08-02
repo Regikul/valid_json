@@ -163,11 +163,14 @@ apply_all([{Tail, Name, Addr} | Rest], Instance, Context, Valid, Names, Units) -
 
 %% Локация keyword следует схеме, локация инстанса — значению: имя свойства
 %% двигает второй стек, а сегменты первого зависят от применившегося keyword.
+%% Ожидание покрытия сюда не наследуется: покрытие дочерней schema принадлежит
+%% ей самой, и обрывать её обход ради чужих аннотаций незачем.
 -spec branch(addr(), [binary()], binary(), json(), #eval_context{}) -> #eval_result{}.
 branch(Addr, Tail, Name, Value, Context) ->
     #eval_context{keyword_location = Keywords, instance_location = Instance} = Context,
     Nested = Context#eval_context{keyword_location  = Tail ++ Keywords,
-                                  instance_location = [Name | Instance]},
+                                  instance_location = [Name | Instance],
+                                  coverage          = false},
     valid_json_eval:eval(Addr, Value, Nested).
 
 %% Units применённых подсхем лежат внутри unit'а того keyword, который их

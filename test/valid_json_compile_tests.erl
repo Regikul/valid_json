@@ -453,6 +453,36 @@ order_test() ->
                                  <<"/dependentSchemas/a">> => true})},
                  compile(Schema)).
 
+%% `unevaluated*` лежат в собственном поле node: они читают общее покрытие
+%% соседей и потому обязаны выполняться после всех обычных constraints. Свои
+%% подсхемы они называют так же, как `additionalProperties`, — без сегмента
+%% сверх имени keyword.
+unevaluated_test() ->
+    Schema = #{<<"unevaluatedProperties">> => #{<<"type">> => <<"integer">>},
+               <<"unevaluatedItems">>      => false,
+               <<"properties">>            => #{<<"a">> => true}},
+    Root = #node{constraints =
+                     [{properties, #{<<"a">> => addr(<<"/properties/a">>)},
+                       undefined, undefined}],
+                 unevaluated =
+                     [{unevaluated_items, addr(<<"/unevaluatedItems">>)},
+                      {unevaluated_properties, addr(<<"/unevaluatedProperties">>)}]},
+    ?assertEqual({ok, artifact(#{<<>>                          => Root,
+                                 <<"/properties/a">>           => true,
+                                 <<"/unevaluatedItems">>       => false,
+                                 <<"/unevaluatedProperties">>  =>
+                                     schema_node([{type, [integer]}])})},
+                 compile(Schema)),
+    %% Keyword известен обоим dialects: в 2019-09 он не должен становиться
+    %% неизвестным расширением.
+    ?assertEqual({ok, legacy_artifact(#{<<>> =>
+                                            #node{constraints = [],
+                                                  unevaluated =
+                                                      [{unevaluated_items,
+                                                        addr(<<"/unevaluatedItems">>)}]},
+                                        <<"/unevaluatedItems">> => true})},
+                 legacy(#{<<"unevaluatedItems">> => true})).
+
 %% Корневой `$id` меняет entry rid, но не создаёт constraint. В compiled()
 %% остаётся уже именованный resource, а anonymous resource исчезает.
 named_root_resource_test() ->
@@ -910,9 +940,9 @@ unknown_keyword_is_not_schema_position_test() ->
 %% Ещё не реализованный keyword обязан останавливать компиляцию, а не молча
 %% исчезать: иначе преждевременно подключённый файл сьюта пройдёт по недоразумению.
 not_implemented_test_() ->
-    [?_assertEqual(schema_error({not_implemented, <<"unevaluatedItems">>},
-                                <<"/unevaluatedItems">>),
-                   compile(#{<<"unevaluatedItems">> => #{}})),
+    [?_assertEqual(schema_error({not_implemented, <<"$vocabulary">>},
+                                <<"/$vocabulary">>),
+                   compile(#{<<"$vocabulary">> => #{}})),
      ?_assertEqual(schema_error({not_implemented, <<"$dynamicRef">>},
                                 <<"/$dynamicRef">>),
                    compile(#{<<"$dynamicRef">> => <<"#node">>})),

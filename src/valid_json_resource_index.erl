@@ -482,7 +482,8 @@ children(Schema, Dialect) ->
         items_children(Schema, Dialect),
         single_children([<<"additionalProperties">>, <<"propertyNames">>,
                          <<"contains">>, <<"not">>, <<"if">>, <<"then">>,
-                         <<"else">>], Schema),
+                         <<"else">>, <<"unevaluatedProperties">>,
+                         <<"unevaluatedItems">>], Schema),
         additional_items_children(Schema, Dialect)
     ]).
 

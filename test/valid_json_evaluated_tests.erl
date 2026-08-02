@@ -45,6 +45,23 @@ order_independent_test_() ->
       ?_assertEqual(Expected, merged(Permutation))}
      || Permutation <- permutations(Masks)].
 
+%% Чтение маски: индексы, до которых `unevaluatedItems` обязан дойти. Длину
+%% массива маска не знает, поэтому исчерпанный префикс и покрытие сверх длины
+%% дают один и тот же пустой ответ.
+unevaluated_indexes_test_() ->
+    [?_assertEqual([], indexes(all, 3)),
+     ?_assertEqual([], indexes(mask(3, []), 3)),
+     ?_assertEqual([], indexes(mask(5, []), 3)),
+     ?_assertEqual([], indexes(mask(0, []), 0)),
+     ?_assertEqual([0, 1, 2], indexes(mask(0, []), 3)),
+     ?_assertEqual([2, 3], indexes(mask(2, []), 4)),
+     %% Разреженная часть выкалывает отдельные индексы за префиксом.
+     ?_assertEqual([1, 3], indexes(mask(1, [2]), 4)),
+     ?_assertEqual([3], indexes(mask(3, [4]), 5))].
+
+indexes(Mask, Length) ->
+    valid_json_evaluated:unevaluated_indexes(Mask, Length).
+
 merged(Masks) ->
     expand(lists:foldl(fun valid_json_evaluated:merge_items/2,
                        {0, sets:new([{version, 2}])}, Masks)).

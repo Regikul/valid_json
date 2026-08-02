@@ -15,7 +15,8 @@ run(#{root := Root} = Compiled, Instance, Format) ->
                             instance_location = [],
                             dynamic_scope     = [Root],
                             guard             = sets:new([{version, 2}]),
-                            mode              = Format},
+                            mode              = Format,
+                            coverage          = false},
     try eval({Root, <<>>}, Instance, Context) of
         Result -> {ok, Result}
     catch
@@ -59,12 +60,36 @@ eval_node(true, _Instance, Context) ->
 eval_node(false, _Instance, Context) ->
     #eval_result{valid = false, evaluated = valid_json_evaluated:neutral(),
                  units = node_units(false, {error, <<"schema is false">>}, [], Context)};
-eval_node(#node{constraints = Constraints, unevaluated = []}, Instance, Context) ->
+eval_node(#node{constraints = Constraints, unevaluated = Unevaluated}, Instance, Context) ->
     #eval_result{valid = Valid, units = Units} = Result =
-        discard_coverage(eval_constraints(Constraints, Instance, Context)),
-    Result#eval_result{units = node_units(Valid, none, Units, Context)};
-eval_node(#node{} = Node, _Instance, _Context) ->
-    erlang:error({not_implemented, Node}).
+        discard_coverage(eval_all(Constraints, Unevaluated, Instance, Context)),
+    Result#eval_result{units = node_units(Valid, none, Units, Context)}.
+
+%% Обычные constraints выполняются первыми, и `unevaluated*` читают их общее
+%% покрытие: своего порядка между собой у них нет, потому что каждый применяется
+%% к своему типу инстанса. Пока это покрытие не посчитано, обрывать обход нельзя
+%% даже в режиме flag (validator-core.md, «Output unit и локации»), причём не
+%% только в самом node: покрытие поднимается сюда по цепочке in-place
+%% applicators, и оборванный внутри неё `anyOf` потерял бы часть аннотаций.
+-spec eval_all([constraint()], [constraint()], json(), #eval_context{}) -> #eval_result{}.
+eval_all(Constraints, [], Instance, #eval_context{coverage = Coverage} = Context) ->
+    eval_constraints(Constraints, Instance, Context, not Coverage);
+eval_all(Constraints, Unevaluated, Instance, Context) ->
+    Awaited = Context#eval_context{coverage = true},
+    #eval_result{evaluated = Evaluated} = Result =
+        eval_constraints(Constraints, Instance, Awaited, false),
+    Step = fun(Constraint, Acc) ->
+                   both(Acc, valid_json_unevaluated:check(Constraint, Instance,
+                                                          Evaluated, Context))
+           end,
+    lists:foldl(Step, Result, Unevaluated).
+
+-spec both(#eval_result{}, #eval_result{}) -> #eval_result{}.
+both(#eval_result{valid = Valid, evaluated = Evaluated, units = Units},
+     #eval_result{valid = ValidOne, evaluated = EvaluatedOne, units = UnitsOne}) ->
+    #eval_result{valid     = Valid andalso ValidOne,
+                 evaluated = valid_json_evaluated:merge(Evaluated, EvaluatedOne),
+                 units     = Units ++ UnitsOne}.
 
 %% Собственный unit node стоит над units своих constraints и ни сообщения, ни
 %% аннотации не несёт: причину провала называют его дети
@@ -77,25 +102,28 @@ node_units(Valid, Detail, Nested, Context) ->
     [valid_json_unit:schema(Valid, Detail, Nested, Context)].
 
 %% Schema object есть конъюнкция независимых ограничений. Обрыв разрешён только
-%% в режиме flag: в остальных режимах дерево units должно быть полным.
--spec eval_constraints([constraint()], json(), #eval_context{}) -> #eval_result{}.
-eval_constraints(Constraints, Instance, Context) ->
-    eval_constraints(Constraints, Instance, Context,
+%% в режиме flag и только там, где покрытие уже никому не нужно: аргумент `Short`
+%% его и разрешает.
+-spec eval_constraints([constraint()], json(), #eval_context{}, boolean()) ->
+          #eval_result{}.
+eval_constraints(Constraints, Instance, Context, Short) ->
+    eval_constraints(Constraints, Instance, Context, Short,
                      true, valid_json_evaluated:neutral(), []).
 
-eval_constraints([], _Instance, _Context, Valid, Evaluated, Units) ->
+eval_constraints([], _Instance, _Context, _Short, Valid, Evaluated, Units) ->
     #eval_result{valid = Valid, evaluated = Evaluated, units = lists:reverse(Units)};
-eval_constraints([Constraint | Rest], Instance, Context, Valid, Evaluated, Units) ->
+eval_constraints([Constraint | Rest], Instance, Context, Short, Valid, Evaluated, Units) ->
     #eval_result{valid = ValidOne, evaluated = EvaluatedOne, units = UnitsOne} =
         dispatch(Constraint, Instance, Context),
     Merged   = valid_json_evaluated:merge(Evaluated, EvaluatedOne),
     Collected = lists:reverse(UnitsOne, Units),
     case Valid andalso ValidOne of
-        false when Context#eval_context.mode =:= flag ->
+        false when Short, Context#eval_context.mode =:= flag ->
             #eval_result{valid = false, evaluated = Merged,
                          units = lists:reverse(Collected)};
         Accumulated ->
-            eval_constraints(Rest, Instance, Context, Accumulated, Merged, Collected)
+            eval_constraints(Rest, Instance, Context, Short, Accumulated, Merged,
+                             Collected)
     end.
 
 %% Диспетчер разводит constraints по обработчикам: assertion отвечает на вопрос

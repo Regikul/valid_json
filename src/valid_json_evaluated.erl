@@ -6,6 +6,7 @@
 -include("valid_json_core.hrl").
 
 -export([neutral/0, properties/1, items/1, merge/2, merge_items/2]).
+-export([unevaluated_indexes/2]).
 
 -spec neutral() -> evaluated().
 neutral() ->
@@ -39,6 +40,19 @@ merge_items(all, _) -> all;
 merge_items(_, all) -> all;
 merge_items({P1, S1}, {P2, S2}) ->
     normalize(max(P1, P2), sets:union(S1, S2)).
+
+%% Индексы массива длины Length, которых покрытие не касается: их и получает
+%% `unevaluatedItems`. Маска канонична, поэтому исчерпанный префикс сразу
+%% отвечает пустым списком, а разреженная часть только выкалывает отдельные
+%% индексы за ним.
+-spec unevaluated_indexes(items_mask(), non_neg_integer()) -> [non_neg_integer()].
+unevaluated_indexes(all, _Length) ->
+    [];
+unevaluated_indexes({Prefix, _Sparse}, Length) when Prefix >= Length ->
+    [];
+unevaluated_indexes({Prefix, Sparse}, Length) ->
+    [Index || Index <- lists:seq(Prefix, Length - 1),
+              not sets:is_element(Index, Sparse)].
 
 -spec normalize(non_neg_integer(), sets:set(non_neg_integer())) -> items_mask().
 normalize(P, S) ->

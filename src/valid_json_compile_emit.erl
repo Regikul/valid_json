@@ -37,6 +37,12 @@
                 [<<"if">>, <<"then">>, <<"else">>],
                 <<"dependentSchemas">> | ?ANNOTATIONS]).
 
+%% Constraints, которые обязаны выполняться после всех остальных: они читают
+%% объединённое покрытие соседей. Порядок между собой тот же, что и у обычных
+%% array и object applicators в ?ORDER; применяются они к разным типам инстанса,
+%% поэтому наблюдаем он только в дереве units.
+-define(UNEVALUATED, [<<"unevaluatedItems">>, <<"unevaluatedProperties">>]).
+
 %% Полностью потребляются компилятором и собственного constraint не дают.
 %% `$defs` отдельно обходит свои schema entries до emission constraints.
 -define(CONSUMED, [<<"$schema">>, <<"$id">>, <<"$anchor">>, <<"$defs">>,
@@ -48,7 +54,6 @@
 %% указанному dialect и в другом считаются обычными unknown keywords.
 -define(DEFERRED_COMMON,
         [<<"$vocabulary">>,
-         <<"unevaluatedProperties">>, <<"unevaluatedItems">>,
          <<"format">>, <<"contentEncoding">>, <<"contentMediaType">>,
          <<"contentSchema">>]).
 -define(DEFERRED_2020_12, [<<"$dynamicRef">>, <<"$dynamicAnchor">>]).
@@ -132,10 +137,10 @@ compile_node(Schema, Position, #state{dialect = Dialect} = State)
         {ok, ExtraConstraints} ->
             case definitions(Schema, Position, State) of
                 {ok, WithDefinitions} ->
-                    case constraints(Schema, Position, WithDefinitions) of
-                        {ok, Constraints, Built} ->
+                    case node_constraints(Schema, Position, WithDefinitions) of
+                        {ok, Constraints, Unevaluated, Built} ->
                             Node = #node{constraints = Constraints ++ ExtraConstraints,
-                                         unevaluated = []},
+                                         unevaluated = Unevaluated},
                             {ok, place(Position, Node, Built)};
                         {error, _} = Error ->
                             Error
@@ -159,7 +164,7 @@ compile_node(Other, Position, _State) ->
           {ok, [constraint()]} | {error, #schema_error{}}.
 extra_constraints(Schema, Dialect, Position) ->
     Extras = lists:sort(maps:keys(Schema) --
-                        (lists:flatten(?ORDER) ++ ?CONSUMED)),
+                        (lists:flatten(?ORDER) ++ ?UNEVALUATED ++ ?CONSUMED)),
     case [Keyword || Keyword <- Extras, deferred(Keyword, Dialect)] of
         [Keyword | _] ->
             {error, schema_error({not_implemented, Keyword},
@@ -228,6 +233,51 @@ addr({Rid, Location}) ->
 -spec schema_error(reason(), position()) -> #schema_error{}.
 schema_error(Reason, Position) ->
     #schema_error{reason = Reason, location = addr(Position)}.
+
+%% Оба поля node собираются одним проходом по схеме, но лежат раздельно:
+%% `unevaluated*` читают объединённое покрытие соседей и потому обязаны
+%% выполняться последними (validator-core.md, «Инварианты компиляции IR»).
+-spec node_constraints(#{binary() => json()}, position(), state()) ->
+          {ok, [constraint()], [constraint()], state()} | {error, #schema_error{}}.
+node_constraints(Schema, Position, State) ->
+    case constraints(Schema, Position, State) of
+        {ok, Constraints, Built} ->
+            case unevaluated(Schema, Position, Built) of
+                {ok, Unevaluated, Grown} -> {ok, Constraints, Unevaluated, Grown};
+                {error, _} = Error       -> Error
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+%% Своего сегмента у подсхемы нет: она стоит на самом keyword, как и
+%% `additionalProperties`. Ненаписанный keyword constraint не даёт.
+-spec unevaluated(#{binary() => json()}, position(), state()) ->
+          {ok, [constraint()], state()} | {error, #schema_error{}}.
+unevaluated(Schema, Position, State) ->
+    Step = fun(_Keyword, {error, _} = Error) ->
+                   Error;
+              (Keyword, {ok, Acc, Built}) ->
+                   case maps:find(Keyword, Schema) of
+                       error ->
+                           {ok, Acc, Built};
+                       {ok, Value} ->
+                           case subschema(Value, below(Keyword, Position), Built) of
+                               {ok, Addr, Grown} ->
+                                   {ok, [{unevaluated_tag(Keyword), Addr} | Acc], Grown};
+                               {error, _} = Error ->
+                                   Error
+                           end
+                   end
+           end,
+    case lists:foldl(Step, {ok, [], State}, ?UNEVALUATED) of
+        {ok, Acc, Built}   -> {ok, lists:reverse(Acc), Built};
+        {error, _} = Error -> Error
+    end.
+
+-spec unevaluated_tag(binary()) -> atom().
+unevaluated_tag(<<"unevaluatedItems">>)      -> unevaluated_items;
+unevaluated_tag(<<"unevaluatedProperties">>) -> unevaluated_properties.
 
 %% Обход групп несёт accumulator итоговых resources, но applicator только
 %% записывает канонические адреса: сами дочерние nodes выпускает общий проход.

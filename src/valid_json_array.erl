@@ -218,12 +218,15 @@ marks(true, true, Matched, _Count, _Length) ->
 
 %% Локация keyword следует схеме, локация инстанса — значению: индекс элемента
 %% двигает второй стек, а сегменты первого зависят от применившегося keyword.
+%% Ожидание покрытия сюда не наследуется: покрытие дочерней schema принадлежит
+%% ей самой, и обрывать её обход ради чужих аннотаций незачем.
 -spec branch(addr(), [binary()], non_neg_integer(), json(), #eval_context{}) ->
           #eval_result{}.
 branch(Addr, Tail, Index, Element, Context) ->
     #eval_context{keyword_location = Keywords, instance_location = Instance} = Context,
     Nested = Context#eval_context{keyword_location  = Tail ++ Keywords,
-                                  instance_location = [integer_to_binary(Index) | Instance]},
+                                  instance_location = [integer_to_binary(Index) | Instance],
+                                  coverage          = false},
     valid_json_eval:eval(Addr, Element, Nested).
 
 %% Units применённых подсхем лежат внутри unit'а того keyword, который их

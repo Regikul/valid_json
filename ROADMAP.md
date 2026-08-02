@@ -195,34 +195,40 @@
 - [x] Подключить к runner `items.json` Draft 2020-12: его группа «items and
   subitems» написана через `$defs` и `$ref` и потому ждала адресации ссылок.
 - [x] Приёмка P3: проходят `anchor`, `refRemote`, `infinite-loop-detection`,
-  `optional/id` и `optional/unknownKeyword`. Файл подключается целиком, поэтому
-  `ref.json` и `defs.json` принимаются в P6: обоим нужна группа с `$ref` на
-  корневую метасхему, а та компилируется только после `$dynamicRef` из P5,
-  `$vocabulary`, `format`-аннотации и recursive keywords из P6.
+  `optional/id` и `optional/unknownKeyword`. `ref.json` и `defs.json`
+  принимаются в P6: у обоих есть группа с `$ref` на корневую метасхему, а та
+  компилируется только после `$dynamicRef` из P5, `$vocabulary`,
+  `format`-аннотации и recursive keywords из P6. В `defs.json` эта группа
+  единственная.
 
 ## P4 — unevaluated keywords
 
-- [ ] **Фаза P4 завершена**
-- [ ] Компилировать `unevaluatedProperties` и `unevaluatedItems` отдельно от
+- [x] **Фаза P4 завершена**
+- [x] Компилировать `unevaluatedProperties` и `unevaluatedItems` отдельно от
   обычных constraints.
-- [ ] Выполнять unevaluated constraints только после всех обычных constraints
-  schema object.
-- [ ] Объединять покрытие properties от applicators и достигнутых `$ref`.
-- [ ] Объединять префиксное и разреженное покрытие items от `items`,
+- [x] Выполнять unevaluated constraints только после всех обычных constraints
+  schema object. Пока их покрытие не посчитано, обрывать перебор ветвей нельзя
+  и в режиме `flag`: ожидание покрытия идёт по цепочке in-place applicators
+  отдельным полем контекста.
+- [x] Объединять покрытие properties от applicators и достигнутых `$ref`.
+- [x] Объединять префиксное и разреженное покрытие items от `items`,
   `prefixItems`, `contains`, applicators и `$ref`.
-- [ ] Дополнить операции маски массива получением списка непокрытых индексов:
+- [x] Дополнить операции маски массива получением списка непокрытых индексов:
   это первый потребитель такой операции.
-- [ ] Не переносить coverage из провалившегося schema object и из внутренней
+- [x] Не переносить coverage из провалившегося schema object и из внутренней
   успешной схемы `not`.
-- [ ] Покрыть evaluator fixtures вложенными applicators, ссылками и
+- [x] Покрыть evaluator fixtures вложенными applicators, ссылками и
   разреженными совпадениями `contains`, а также ветвью `#node{}` с unevaluated
   constraints на границе resource: до этой фазы такой ветви просто не из чего
   собрать.
-- [ ] Подключить к runner `not.json` обоих dialects: его последняя группа
+- [x] Подключить к runner `not.json` обоих dialects: его последняя группа
   написана через `unevaluatedProperties`.
-- [ ] Приёмка P4: проходят `unevaluatedProperties.json` и
-  `unevaluatedItems.json`, обязательно группы про вложенные `contains` и
-  `minContains = 0`.
+- [x] Приёмка P4: проходят `unevaluatedProperties.json` обоих dialects и
+  `unevaluatedItems.json` Draft 2020-12 вместе с группами про вложенные
+  `contains` и `minContains = 0`. Группы этих файлов, написанные через
+  `$dynamicRef`, принимаются в P5, а `unevaluatedItems.json` Draft 2019-09
+  целиком — в P6: восемнадцать из двадцати шести его групп опираются на
+  array-form `items`, `additionalItems` и recursive keywords.
 
 ## P5 — динамические ссылки Draft 2020-12
 
@@ -236,6 +242,10 @@
   необходимости включить dynamic scope в frame.
 - [ ] Добавить compiler и evaluator fixtures на переопределение, fallback,
   циклы и несколько уровней dynamic scope.
+- [ ] Подключить к runner группы `unevaluatedProperties with $dynamicRef` и
+  `unevaluatedItems with $dynamicRef` Draft 2020-12: они ждут в списке
+  отложенных групп с P4, потому что до `$dynamicAnchor` их схемы не
+  компилируются вовсе.
 - [ ] Приёмка P5: проходит обязательный `dynamicRef.json` и выбранные
   `optional/dynamicRef` cases.
 
@@ -266,6 +276,9 @@
   cross-draft closure.
 - [ ] Подключить к runner `uniqueItems.json` и `items.json` Draft 2019-09: обе
   раскладки опираются на array-form `items` и `additionalItems`.
+- [ ] Подключить к runner `unevaluatedItems.json` Draft 2019-09 целиком и
+  группу `unevaluatedProperties with $recursiveRef`: они ждут той же
+  array-form `items` с `additionalItems` и recursive keywords этой фазы.
 - [ ] Подключить к runner `ref.json` и `defs.json` обоих dialects: у каждого
   есть группа с `$ref` на корневую метасхему, и она ждала, пока та станет
   компилируемой.
