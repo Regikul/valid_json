@@ -173,6 +173,21 @@ Bar = <<"https://example.com/bar">>,
 
 Pointer в `Bar` — `/additionalProperties`, не `/items/additionalProperties`. Синтаксическая вложенность документа заканчивается на resource boundary.
 
+Во время компиляции физические locations дополнительно представлены временными
+отображениями:
+
+```erlang
+#{{Foo, <<"/items">>} => {Bar, <<>>},
+  {Foo, <<"/items/additionalProperties">>} =>
+    {Bar, <<"/additionalProperties">>}}.
+```
+
+Поэтому URI `https://example.com/foo#/items` и
+`https://example.com/bar` находят один node. Эти location aliases нужны только
+для разрешения ссылок и отсутствуют в показанном выше итоговом артефакте. Если
+`Foo` был получен по отличающемуся retrieval URI, compiler строит такую же пару
+отображений и под ним.
+
 # Unknown keyword
 
 ```json
@@ -216,6 +231,8 @@ Draft 2020-12:
 - В обоих обязательных наборах найдено 99 embedded resources без `$schema` в 17 files. Они требуют не отказывать в компиляции, но не различают inheritance от compile default: enclosing dialect всегда совпадает с entry dialect.
 - Embedded `$schema` встречается один раз — группа `$ref` with `$recursiveAnchor` в `draft2019-09/ref.json`; он совпадает с enclosing dialect.
 - Embedded resource с другим dialect в snapshot отсутствует. Возможность смены dialect держится на спецификации, не fixture.
+- Parent-pointer location aliases обязательны для пяти групп и 22 cases в
+  [`draft2019-09/recursiveRef.json`](../../test/fixtures/json-schema-test-suite/tests/draft2019-09/recursiveRef.json): embedded resource объявляет собственный `$id`, а ссылка из объемлющего resource продолжает адресовать его через `#/$defs/...`.
 
 ## Anonymous roots
 

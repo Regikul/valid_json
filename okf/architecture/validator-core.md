@@ -206,6 +206,9 @@ Defaults применяет handler, а не compiler. Это сохраняет
 ## Инварианты компиляции IR
 
 - Все nodes, включая неиспользованные `$defs`, строятся до валидации; ссылки уже разрешены в `addr()`.
+- Parent-pointer и retrieval-pointer locations embedded resources
+  канонизируются compile-time индексом до построения constraints; aliases в
+  `compiled()` не сохраняются.
 - Компилятор посещает только schema positions активных keywords и location-reserving `$defs` ([core.txt:2169](../references/json-schema/draft-2020-12/core.txt)); внутрь unknown, `enum`, `const`, `default` и property names он не спускается.
 - Dangling и non-schema targets — compile errors. `optional/refOfUnknownKeyword` остаётся вне профиля как undefined behavior.
 - Подсхема с `$id` получает новый `rid`; поэтому дочерние переходы всегда хранят полный `addr()`, не голый pointer.
