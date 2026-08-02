@@ -198,6 +198,81 @@ boolean_units_test_() ->
     [?_assertEqual([{<<>>, true, none}], located(true, 1)),
      ?_assertMatch([{<<>>, false, {error, _}}], located(false, 1))].
 
+%% Разрешение адреса в готовом артефакте тотально: каждый указатель выбирает
+%% ровно свой node, а корень resource стоит под пустым указателем.
+resolve_test_() ->
+    Root = schema_node([{all_of, [addr(<<"/allOf/0">>)]}]),
+    Child = schema_node([{type, [string]}]),
+    Artifact = tree(#{<<>> => Root, <<"/allOf/0">> => Child, <<"/allOf/1">> => false}),
+    [?_assertEqual(Root, valid_json_eval:resolve(addr(<<>>), Artifact)),
+     ?_assertEqual(Child, valid_json_eval:resolve(addr(<<"/allOf/0">>), Artifact)),
+     ?_assertEqual(false, valid_json_eval:resolve(addr(<<"/allOf/1">>), Artifact))].
+
+%% Логические applicators спускаются в дочерние nodes общим входом evaluator'а и
+%% сводят их вердикты. Ветвь применяется к тому же значению, что и родитель.
+all_of_test_() ->
+    [?_assert(branches(all_of, <<"allOf">>, [true, true], 1)),
+     ?_assertNot(branches(all_of, <<"allOf">>, [true, false], 1)),
+     ?_assert(branches(all_of, <<"allOf">>, [[{type, [integer]}]], 1)),
+     ?_assertNot(branches(all_of, <<"allOf">>, [[{type, [string]}]], 1)),
+     %% Пустой список ветвей проходит любое значение.
+     ?_assert(branches(all_of, <<"allOf">>, [], 1))].
+
+any_of_test_() ->
+    [?_assert(branches(any_of, <<"anyOf">>, [false, true], 1)),
+     ?_assertNot(branches(any_of, <<"anyOf">>, [false, false], 1)),
+     ?_assert(branches(any_of, <<"anyOf">>, [[{type, [string]}], [{type, [integer]}]], 1)),
+     %% Пустой список не проходит ни одно значение: совпасть не с чем.
+     ?_assertNot(branches(any_of, <<"anyOf">>, [], 1))].
+
+one_of_test_() ->
+    [?_assert(branches(one_of, <<"oneOf">>, [false, true], 1)),
+     ?_assertNot(branches(one_of, <<"oneOf">>, [true, true], 1)),
+     ?_assertNot(branches(one_of, <<"oneOf">>, [false, false], 1)),
+     ?_assert(branches(one_of, <<"oneOf">>, [[{type, [string]}], [{type, [integer]}]], 1)),
+     ?_assertNot(branches(one_of, <<"oneOf">>, [], 1))].
+
+not_test_() ->
+    [?_assert(negated(false, 1)),
+     ?_assertNot(negated(true, 1)),
+     ?_assert(negated([{type, [string]}], 1)),
+     ?_assertNot(negated([{type, [integer]}], 1))].
+
+%% Обрыв разрешён только в режиме flag. Ветвь-ловушка при вычислении падает,
+%% поэтому её достижение видно прямо в результате.
+short_circuit_test_() ->
+    Failing = branching([{all_of, [addr(<<"/allOf/0">>), addr(<<"/allOf/1">>)]}],
+                        [{<<"/allOf/0">>, false}, {<<"/allOf/1">>, tripwire()}]),
+    Matching = branching([{any_of, [addr(<<"/anyOf/0">>), addr(<<"/anyOf/1">>)]}],
+                         [{<<"/anyOf/0">>, true}, {<<"/anyOf/1">>, tripwire()}]),
+    Second = branching([{one_of, [addr(<<"/oneOf/0">>), addr(<<"/oneOf/1">>),
+                                  addr(<<"/oneOf/2">>)]}],
+                       [{<<"/oneOf/0">>, true}, {<<"/oneOf/1">>, true},
+                        {<<"/oneOf/2">>, tripwire()}]),
+    [?_assertMatch({ok, #eval_result{valid = false}},
+                   valid_json_eval:run(Failing, 1, flag)),
+     ?_assertMatch({ok, #eval_result{valid = true}},
+                   valid_json_eval:run(Matching, 1, flag)),
+     ?_assertMatch({ok, #eval_result{valid = false}},
+                   valid_json_eval:run(Second, 1, flag)),
+     %% В basic дерево units должно быть полным, поэтому обходятся все ветви.
+     ?_assertError({not_implemented, _}, valid_json_eval:run(Failing, 1, basic))].
+
+%% Applicator выпускает собственный unit написанного keyword, а units ветвей
+%% стоят под ним и несут в локации индекс ветви.
+applicator_units_test_() ->
+    Listed = branching([{any_of, [addr(<<"/anyOf/0">>), addr(<<"/anyOf/1">>)]}],
+                       [{<<"/anyOf/0">>, false}, {<<"/anyOf/1">>, [{type, [string]}]}]),
+    Negated = branching([{'not', addr(<<"/not">>)}], [{<<"/not">>, [{const, 1}]}]),
+    [?_assertMatch([{<<"/anyOf">>, false, {error, _}},
+                    {<<"/anyOf/0">>, false, {error, _}},
+                    {<<"/anyOf/1/type">>, false, {error, _}}],
+                   printed(collect(Listed, 1, basic))),
+     %% Units опровергнутой внутренней схемы остаются диагностическими.
+     ?_assertMatch([{<<"/not">>, false, {error, _}},
+                    {<<"/not/const">>, true, none}],
+                   printed(collect(Negated, 1, basic)))].
+
 %% Абсолютная локация выводится из адреса node, а не накапливается обходом,
 %% поэтому у названного resource она появляется сама и печатается вместе с unit.
 absolute_test_() ->
@@ -207,7 +282,20 @@ absolute_test_() ->
      %% У boolean-схемы собственного сегмента нет: она стоит в корне resource.
      ?_assertEqual([{?RESOURCE, []}], absolute(named(false), 1)),
      ?_assertEqual(<<"https://example.com/s#/type">>,
-                   printed_absolute(named(Assertion), 1))].
+                   printed_absolute(named(Assertion), 1)),
+     %% У вложенного node указатель непустой, и путь внутри resource берётся
+     %% из него, а не из накопленной локации обхода.
+     ?_assertEqual([{?RESOURCE, [<<"allOf">>]},
+                    {?RESOURCE, [<<"type">>, <<"0">>, <<"allOf">>]}],
+                   absolute(nested_named(), 1)),
+     ?_assertEqual(<<"https://example.com/s#/allOf/0/type">>,
+                   valid_json_location:fragment({?RESOURCE, [<<"type">>, <<"0">>,
+                                                             <<"allOf">>]}))].
+
+%% Названный resource с дочерним node: ветвь адресуется тем же rid.
+nested_named() ->
+    named_tree(#{<<>>           => schema_node([{all_of, [{?RESOURCE, <<"/allOf/0">>}]}]),
+                 <<"/allOf/0">> => schema_node([{type, [string]}])}).
 
 %% Сообщение называет нарушенное требование. Оно не влияет на вердикт, поэтому
 %% проверяется отдельно от него.
@@ -283,10 +371,42 @@ units(Node, Instance, Format) when is_boolean(Node) ->
 units(Constraints, Instance, Format) ->
     collect(schema_node(Constraints), Instance, Format).
 
+collect(Node, Instance, Format) when is_map(Node) ->
+    {ok, #eval_result{units = Units}} = valid_json_eval:run(Node, Instance, Format),
+    Units;
 collect(Node, Instance, Format) ->
-    {ok, #eval_result{units = Units}} =
-        valid_json_eval:run(artifact(Node), Instance, Format),
-    Units.
+    collect(artifact(Node), Instance, Format).
+
+%% Ветви списочного applicator адресуются по индексу, как их кладёт компилятор,
+%% поэтому фикстуре достаточно перечислить сами дочерние schemas.
+branches(Tag, Keyword, Children, Instance) ->
+    Pointers = [<<"/", Keyword/binary, "/", (integer_to_binary(Index))/binary>>
+                || Index <- lists:seq(0, length(Children) - 1)],
+    Artifact = branching([{Tag, [addr(Pointer) || Pointer <- Pointers]}],
+                         lists:zip(Pointers, Children)),
+    {ok, #eval_result{valid = Valid}} = valid_json_eval:run(Artifact, Instance, flag),
+    Valid.
+
+negated(Child, Instance) ->
+    Artifact = branching([{'not', addr(<<"/not">>)}], [{<<"/not">>, Child}]),
+    {ok, #eval_result{valid = Valid}} = valid_json_eval:run(Artifact, Instance, flag),
+    Valid.
+
+branching(Constraints, Children) ->
+    Nodes = maps:from_list([{Pointer, child(Child)} || {Pointer, Child} <- Children]),
+    tree(Nodes#{<<>> => schema_node(Constraints)}).
+
+%% Дочерняя schema задаётся списком constraints, boolean или готовым node.
+child(Node) when is_boolean(Node) -> Node;
+child(#node{} = Node)             -> Node;
+child(Constraints)                -> schema_node(Constraints).
+
+addr(Pointer) ->
+    {anonymous, Pointer}.
+
+%% Node, вычисление которого падает: он показывает, дошёл ли обход до ветви.
+tripwire() ->
+    #node{constraints = [], unevaluated = [{unevaluated_items, addr(<<>>)}]}.
 
 absolute(Artifact, Instance) ->
     {ok, #eval_result{units = Units}} = valid_json_eval:run(Artifact, Instance, basic),
@@ -338,6 +458,17 @@ named(Node) ->
     artifact(?RESOURCE, ?RESOURCE, Node).
 
 artifact(Rid, Id, Node) ->
+    tree(Rid, Id, #{<<>> => Node}).
+
+%% Артефакт с дочерними nodes: подсхемы лежат в той же map под своими
+%% указателями, как их кладёт компилятор.
+tree(Nodes) ->
+    tree(anonymous, undefined, Nodes).
+
+named_tree(Nodes) ->
+    tree(?RESOURCE, ?RESOURCE, Nodes).
+
+tree(Rid, Id, Nodes) ->
     #{root      => Rid,
       sources   => [],
       resources => #{Rid =>
@@ -346,4 +477,4 @@ artifact(Rid, Id, Node) ->
                     anchors          = #{},
                     dynamic_anchors  = #{},
                     recursive_anchor = false,
-                    nodes            = #{<<>> => Node}}}}.
+                    nodes            = Nodes}}}.

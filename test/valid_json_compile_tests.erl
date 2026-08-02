@@ -48,15 +48,15 @@ numeric_test_() ->
 
 %% Неположительный делитель запрещён метасхемой, поэтому не доходит до IR.
 bad_multiple_of_test_() ->
-    [?_assertEqual({error, {bad_keyword_value, <<"multipleOf">>, 0}},
+    [?_assertEqual(schema_error({bad_keyword_value, 0}, <<"/multipleOf">>),
                    compile(#{<<"multipleOf">> => 0})),
-     ?_assertEqual({error, {bad_keyword_value, <<"multipleOf">>, -1.5}},
+     ?_assertEqual(schema_error({bad_keyword_value, -1.5}, <<"/multipleOf">>),
                    compile(#{<<"multipleOf">> => -1.5})),
-     ?_assertEqual({error, {bad_keyword_value, <<"multipleOf">>, <<"2">>}},
+     ?_assertEqual(schema_error({bad_keyword_value, <<"2">>}, <<"/multipleOf">>),
                    compile(#{<<"multipleOf">> => <<"2">>})),
-     ?_assertEqual({error, {bad_keyword_value, <<"maximum">>, null}},
+     ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/maximum">>),
                    compile(#{<<"maximum">> => null})),
-     ?_assertEqual({error, {bad_keyword_value, <<"minimum">>, true}},
+     ?_assertEqual(schema_error({bad_keyword_value, true}, <<"/minimum">>),
                    compile(#{<<"minimum">> => true}))].
 
 %% Скомпилированный re:mp() попадает прямо в IR, поэтому точное равенство
@@ -70,12 +70,14 @@ pattern_test_() ->
 %% Некомпилируемое выражение останавливает компиляцию схемы. Причина от re
 %% проверяется по форме: её текст принадлежит библиотеке и может меняться.
 bad_pattern_test_() ->
-    [?_assertMatch({error, {bad_pattern, <<"(">>, _}},
+    [?_assertMatch({error, #schema_error{reason   = {bad_pattern, _},
+                                         location = {anonymous, <<"/pattern">>}}},
                    compile(#{<<"pattern">> => <<"(">>})),
-     ?_assertMatch({error, {bad_pattern, <<"[z-a]">>, _}},
+     ?_assertMatch({error, #schema_error{reason   = {bad_pattern, _},
+                                         location = {anonymous, <<"/pattern">>}}},
                    compile(#{<<"pattern">> => <<"[z-a]">>})),
      %% Нестроковое значение — обычная ошибка значения keyword, не regex.
-     ?_assertEqual({error, {bad_keyword_value, <<"pattern">>, 1}},
+     ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/pattern">>),
                    compile(#{<<"pattern">> => 1}))].
 
 counted_test_() ->
@@ -106,21 +108,63 @@ collections_test_() ->
                    compile(#{<<"dependentRequired">> => #{<<"bar">> => [<<"foo">>]}}))].
 
 bad_counted_test_() ->
-    [?_assertEqual({error, {bad_keyword_value, <<"maxLength">>, -1}},
+    [?_assertEqual(schema_error({bad_keyword_value, -1}, <<"/maxLength">>),
                    compile(#{<<"maxLength">> => -1})),
-     ?_assertEqual({error, {bad_keyword_value, <<"minItems">>, 1.5}},
+     ?_assertEqual(schema_error({bad_keyword_value, 1.5}, <<"/minItems">>),
                    compile(#{<<"minItems">> => 1.5})),
-     ?_assertEqual({error, {bad_keyword_value, <<"maxProperties">>, <<"2">>}},
+     ?_assertEqual(schema_error({bad_keyword_value, <<"2">>}, <<"/maxProperties">>),
                    compile(#{<<"maxProperties">> => <<"2">>})),
-     ?_assertEqual({error, {bad_keyword_value, <<"uniqueItems">>, 1}},
+     ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/uniqueItems">>),
                    compile(#{<<"uniqueItems">> => 1})),
-     ?_assertEqual({error, {bad_keyword_value, <<"required">>, [1]}},
+     ?_assertEqual(schema_error({bad_keyword_value, [1]}, <<"/required">>),
                    compile(#{<<"required">> => [1]})),
-     ?_assertEqual({error, {bad_keyword_value, <<"required">>, null}},
+     ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/required">>),
                    compile(#{<<"required">> => null})),
-     ?_assertEqual({error, {bad_keyword_value, <<"dependentRequired">>,
-                            #{<<"bar">> => <<"foo">>}}},
+     ?_assertEqual(schema_error({bad_keyword_value, #{<<"bar">> => <<"foo">>}},
+                                <<"/dependentRequired">>),
                    compile(#{<<"dependentRequired">> => #{<<"bar">> => <<"foo">>}}))].
+
+%% Дочерняя schema становится отдельным node, а constraint хранит её полный
+%% адрес. Сегменты локации — фактические keywords и десятичные индексы ветвей.
+logical_test_() ->
+    [?_assertEqual({ok, artifact(#{<<>>          => schema_node([{all_of, [addr(<<"/allOf/0">>)]}]),
+                                   <<"/allOf/0">> => schema_node([{type, [integer]}])})},
+                   compile(#{<<"allOf">> => [#{<<"type">> => <<"integer">>}]})),
+     %% Boolean-подсхема — такой же адресуемый node.
+     ?_assertEqual({ok, artifact(#{<<>>           => schema_node([{any_of, [addr(<<"/anyOf/0">>),
+                                                                           addr(<<"/anyOf/1">>)]}]),
+                                   <<"/anyOf/0">> => true,
+                                   <<"/anyOf/1">> => false})},
+                   compile(#{<<"anyOf">> => [true, false]})),
+     ?_assertEqual({ok, artifact(#{<<>>           => schema_node([{one_of, [addr(<<"/oneOf/0">>)]}]),
+                                   <<"/oneOf/0">> => schema_node([])})},
+                   compile(#{<<"oneOf">> => [#{}]})),
+     %% У `not` ветвь одна, поэтому индекса в её локации нет.
+     ?_assertEqual({ok, artifact(#{<<>>        => schema_node([{'not', addr(<<"/not">>)}]),
+                                   <<"/not">>  => schema_node([{const, 1}])})},
+                   compile(#{<<"not">> => #{<<"const">> => 1}})),
+     %% Пустой список ветвей метасхема запрещает, но в IR он ложится.
+     ?_assertEqual({ok, artifact(schema_node([{all_of, []}]))},
+                   compile(#{<<"allOf">> => []}))].
+
+%% Все nodes строятся до вычисления, поэтому вложенность произвольной глубины
+%% полностью лежит в одной map, а не разворачивается на ходу.
+nested_test() ->
+    Schema = #{<<"not">> => #{<<"allOf">> => [#{<<"anyOf">> => [#{<<"type">> => <<"null">>}]},
+                                              true]}},
+    Expected =
+        #{<<>>                       => schema_node([{'not', addr(<<"/not">>)}]),
+          <<"/not">>                 => schema_node([{all_of, [addr(<<"/not/allOf/0">>),
+                                                               addr(<<"/not/allOf/1">>)]}]),
+          <<"/not/allOf/0">>         => schema_node([{any_of, [addr(<<"/not/allOf/0/anyOf/0">>)]}]),
+          <<"/not/allOf/0/anyOf/0">> => schema_node([{type, [null]}]),
+          <<"/not/allOf/1">>         => true},
+    ?assertEqual({ok, artifact(Expected)}, compile(Schema)).
+
+%% Ошибка внутри ветви называет позицию внутри неё, а не корень схемы.
+nested_error_test() ->
+    ?assertEqual(schema_error({bad_keyword_value, null}, <<"/allOf/1/not/maximum">>),
+                 compile(#{<<"allOf">> => [true, #{<<"not">> => #{<<"maximum">> => null}}]})).
 
 %% Порядок constraints задан компилятором и не зависит от порядка ключей.
 order_test() ->
@@ -128,13 +172,17 @@ order_test() ->
                <<"maximum">> => 4, <<"type">> => <<"number">>,
                <<"multipleOf">> => 1, <<"pattern">> => <<"a">>,
                <<"required">> => [<<"a">>], <<"uniqueItems">> => true,
-               <<"maxLength">> => 5},
+               <<"maxLength">> => 5, <<"not">> => true, <<"allOf">> => [true]},
     Expected = schema_node([{type, [number]}, {enum, [1]}, {const, 1},
                             {multiple_of, 1}, {maximum, 4},
                             {exclusive_minimum, 0}, {max_length, 5},
                             {pattern, regex(<<"a">>)}, {unique_items, true},
-                            {required, [<<"a">>]}]),
-    ?assertEqual({ok, artifact(Expected)}, compile(Schema)).
+                            {required, [<<"a">>]},
+                            {all_of, [addr(<<"/allOf/0">>)]}, {'not', addr(<<"/not">>)}]),
+    ?assertEqual({ok, artifact(#{<<>>           => Expected,
+                                 <<"/allOf/0">> => true,
+                                 <<"/not">>     => true})},
+                 compile(Schema)).
 
 %% Потребляются компилятором и собственного constraint не дают.
 consumed_keywords_test() ->
@@ -144,27 +192,34 @@ consumed_keywords_test() ->
     ?assertEqual({ok, artifact(schema_node([{type, [boolean]}]))}, compile(Schema)).
 
 bad_keyword_value_test_() ->
-    [?_assertEqual({error, {bad_keyword_value, <<"type">>, <<"int">>}},
+    [?_assertEqual(schema_error({bad_keyword_value, <<"int">>}, <<"/type">>),
                    compile(#{<<"type">> => <<"int">>})),
-     ?_assertEqual({error, {bad_keyword_value, <<"type">>, [<<"string">>, 1]}},
+     ?_assertEqual(schema_error({bad_keyword_value, [<<"string">>, 1]}, <<"/type">>),
                    compile(#{<<"type">> => [<<"string">>, 1]})),
-     ?_assertEqual({error, {bad_keyword_value, <<"type">>, null}},
+     ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/type">>),
                    compile(#{<<"type">> => null})),
-     ?_assertEqual({error, {bad_keyword_value, <<"enum">>, 1}},
+     ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/enum">>),
                    compile(#{<<"enum">> => 1}))].
 
 %% Ещё не реализованный keyword обязан останавливать компиляцию, а не молча
 %% исчезать: иначе преждевременно подключённый файл сьюта пройдёт по недоразумению.
 not_implemented_test_() ->
-    [?_assertEqual({error, {not_implemented, {keyword, <<"properties">>}}},
+    [?_assertEqual(schema_error({not_implemented, <<"properties">>}, <<"/properties">>),
                    compile(#{<<"properties">> => #{}})),
-     ?_assertEqual({error, {not_implemented, {keyword, <<"$ref">>}}},
+     ?_assertEqual(schema_error({not_implemented, <<"$ref">>}, <<"/$ref">>),
                    compile(#{<<"$ref">> => <<"#">>, <<"type">> => <<"object">>}))].
 
+%% На позиции schema стоит значение, которое schema не является: отдельной
+%% причины у него нет, для slot IR оно просто невозможно.
 not_a_schema_test_() ->
-    [?_assertEqual({error, {not_a_schema, 42}}, compile(42)),
-     ?_assertEqual({error, {not_a_schema, null}}, compile(null)),
-     ?_assertEqual({error, {not_a_schema, []}}, compile([]))].
+    [?_assertEqual(schema_error({bad_keyword_value, 42}, <<>>), compile(42)),
+     ?_assertEqual(schema_error({bad_keyword_value, null}, <<>>), compile(null)),
+     ?_assertEqual(schema_error({bad_keyword_value, []}, <<>>), compile([])),
+     %% Позицию называет её собственная локация, а не имя ближайшего keyword.
+     ?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/allOf/1">>),
+                   compile(#{<<"allOf">> => [true, 42]})),
+     ?_assertEqual(schema_error({bad_keyword_value, <<"x">>}, <<"/not">>),
+                   compile(#{<<"not">> => <<"x">>}))].
 
 compile(Schema) ->
     valid_json_compile:compile(Schema, ?DIALECT).
@@ -172,12 +227,24 @@ compile(Schema) ->
 schema_node(Constraints) ->
     #node{constraints = Constraints, unevaluated = []}.
 
+%% Локация называет позицию, значение которой виновато: сам keyword либо schema
+%% position. Resource пока всегда один и анонимный.
+schema_error(Reason, Pointer) ->
+    {error, #schema_error{reason = Reason, location = {anonymous, Pointer}}}.
+
+addr(Pointer) ->
+    {anonymous, Pointer}.
+
 %% Опции повторяют validator-core.md: без них терм не совпал бы с компиляторным.
 regex(Source) ->
     {ok, Compiled} = re:compile(Source, [unicode, dollar_endonly]),
     {Source, Compiled}.
 
-artifact(Node) ->
+%% Схема без подсхем даёт единственный node в корне resource, поэтому один node
+%% принимается вместо готовой map.
+artifact(Node) when not is_map(Node) ->
+    artifact(#{<<>> => Node});
+artifact(Nodes) ->
     #{root      => anonymous,
       sources   => [],
       resources => #{anonymous =>
@@ -186,4 +253,4 @@ artifact(Node) ->
                     anchors          = #{},
                     dynamic_anchors  = #{},
                     recursive_anchor = false,
-                    nodes            = #{<<>> => Node}}}}.
+                    nodes            = Nodes}}}.

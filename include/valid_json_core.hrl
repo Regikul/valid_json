@@ -118,6 +118,24 @@
     mode              :: format()
 }).
 
+%% Ошибка схемы. Текста в записи нет: машинный контракт исчерпывается причиной и
+%% локацией, а формулировку вычисляет valid_json_error:format_error/1
+%% (okf/architecture/validator-resources-runtime.md, «Ошибки схемы»). Локация
+%% называет позицию, значение которой виновато: сам keyword либо schema
+%% position. У регистрации локации нет.
+-record(schema_error, {
+    reason   :: reason(),
+    location :: addr() | undefined
+}).
+
+%% Каталог причин задан в дизайне и растёт вместе с фазами; здесь перечислено
+%% то, что компилятор умеет производить сейчас. `not_implemented` в каталог не
+%% входит: это временная причина, которая исчезнет вместе с последним
+%% нереализованным keyword.
+-type reason() :: {bad_keyword_value, json()}
+                | {bad_pattern, term()}
+                | {not_implemented, binary()}.
+
 -type format()     :: flag | basic | detailed | verbose.
 -type option()     :: {output, format()}.
 -type output()     :: json().

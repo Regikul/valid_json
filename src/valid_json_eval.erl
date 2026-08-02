@@ -4,7 +4,7 @@
 
 -include("valid_json_core.hrl").
 
--export([run/3, resolve/2]).
+-export([run/3, eval/3, resolve/2]).
 
 %% Единственный вход в вычисление. Cycle guard — единственная причина отказа.
 -spec run(compiled(), json(), format()) -> {ok, #eval_result{}} | {error, eval_error()}.
@@ -30,6 +30,7 @@ resolve({Rid, Pointer}, #{resources := Resources}) ->
 
 %% Общий вход: guard, resource scope, затем сам node. Кадр живёт только в
 %% контексте потомков, поэтому снимается на выходе без отдельного шага.
+%% Applicators входят сюда же: своей точки входа у них нет.
 -spec eval(addr(), json(), #eval_context{}) -> #eval_result{}.
 eval(Addr, Instance, #eval_context{guard = Guard} = Context) ->
     Frame = {Addr, Context#eval_context.instance_location},
@@ -81,7 +82,7 @@ eval_constraints([], _Instance, _Context, Valid, Evaluated, Units) ->
     #eval_result{valid = Valid, evaluated = Evaluated, units = lists:reverse(Units)};
 eval_constraints([Constraint | Rest], Instance, Context, Valid, Evaluated, Units) ->
     #eval_result{valid = ValidOne, evaluated = EvaluatedOne, units = UnitsOne} =
-        valid_json_assert:check(Constraint, Instance, Context),
+        dispatch(Constraint, Instance, Context),
     Merged   = valid_json_evaluated:merge(Evaluated, EvaluatedOne),
     Collected = lists:reverse(UnitsOne, Units),
     case Valid andalso ValidOne of
@@ -91,6 +92,22 @@ eval_constraints([Constraint | Rest], Instance, Context, Valid, Evaluated, Units
         Accumulated ->
             eval_constraints(Rest, Instance, Context, Accumulated, Merged, Collected)
     end.
+
+%% Диспетчер разводит constraints по обработчикам: assertion отвечает на вопрос
+%% о самом значении, applicator спускается в дочерние schemas. Список тегов
+%% перечислен явно: принадлежность обработчику — часть контракта IR, а не
+%% свойство формы тега.
+-spec dispatch(constraint(), json(), #eval_context{}) -> #eval_result{}.
+dispatch({all_of, _} = Constraint, Instance, Context) ->
+    valid_json_apply:check(Constraint, Instance, Context);
+dispatch({any_of, _} = Constraint, Instance, Context) ->
+    valid_json_apply:check(Constraint, Instance, Context);
+dispatch({one_of, _} = Constraint, Instance, Context) ->
+    valid_json_apply:check(Constraint, Instance, Context);
+dispatch({'not', _} = Constraint, Instance, Context) ->
+    valid_json_apply:check(Constraint, Instance, Context);
+dispatch(Constraint, Instance, Context) ->
+    valid_json_assert:check(Constraint, Instance, Context).
 
 %% Провалившийся schema object не отдаёт эффективных аннотаций, но свои
 %% диагностические units сохраняет.
