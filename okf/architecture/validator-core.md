@@ -373,6 +373,8 @@ unevaluated_indexes({P, S}, L) ->
 
 Локации — обратные стеки сегментов: push/pop выполняется за O(1), JSON Pointer escaping и URI percent-encoding делаются при печати. `keywordLocation` проходит сквозь ссылки; `absoluteKeywordLocation` строится из канонического resource URI и печатается всегда, кроме anonymous resource.
 
+Эти две локации живут по-разному. `keywordLocation` — накопленный стек: обход добавляет к нему сегмент за сегментом и продолжает его через `$ref`. `absoluteKeywordLocation` ничего не накапливает и выводится из адреса node в момент построения unit: канонический URI даёт `rid`, путь внутри resource — pointer, а последним сегментом идёт имя keyword. Поэтому переход по ссылке не требует ни сброса, ни отдельного стека, а у анонимного resource локация отсутствует сама собой, потому что `id` у него не определён.
+
 Сериализация разделена явно:
 
 - `keywordLocation` и `instanceLocation` — JSON Pointer с `~0`/`~1`, без percent-encoding ([rfc6901.txt:95](../references/rfc/rfc6901.txt));
@@ -403,7 +405,7 @@ Draft 2019-09 prose требует fragment-encoded `instanceLocation`, но з�
 
 -record(eval_context, {
     schema            :: compiled(),
-    resource          :: rid(),
+    node              :: addr(),
     keyword_location  :: [binary()],
     instance_location :: [binary()],
     dynamic_scope     :: [rid()],
@@ -413,6 +415,8 @@ Draft 2019-09 prose требует fragment-encoded `instanceLocation`, но з�
 
 -type frame() :: {addr(), [binary()]}.
 ```
+
+`node` — адрес вычисляемого сейчас node. Отдельного поля под текущий resource нет: это первая половина адреса, и граница определяется её сравнением. Вторая половина, pointer, задаёт путь от корня resource и потому полностью определяет абсолютную локацию всех units этого node. Обработчик получает контекст целиком, поэтому строит её сам и ни от кого не наследует.
 
 Guard — множество активных кадров, не глобальный visited set. Кадр добавляется на входе в node и удаляется на выходе: повтор пары schema/instance внутри собственного поддерева означает цикл, тот же повтор в соседней ветви допустим. Если P5 выявит зависимость от dynamic scope, он добавляется третьим элементом frame без изменения остального контракта.
 

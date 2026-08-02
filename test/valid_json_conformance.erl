@@ -25,9 +25,29 @@
         [{"pattern.json",
           <<"pattern with Unicode property escape requires unicode mode">>}]).
 
+%% Ожидаемый размер прогона: {групп, cases}. Число закреплено, чтобы прогон, в
+%% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
+%% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES и
+%% ?EXCLUDED, и менять его иначе нельзя.
+-define(CENSUS, {120, 530}).
+
 validation_test_() ->
-    [file_tests(Dir, Dialect, File)
-     || {Dir, Dialect} <- ?DIALECTS, File <- ?FILES].
+    Tests = [file_tests(Dir, Dialect, File)
+             || {Dir, Dialect} <- ?DIALECTS, File <- ?FILES],
+    [census_test(Tests) | Tests].
+
+%% Перепись идёт по уже построенным тестам, а не по второму обходу сьюта:
+%% считается ровно то, что будет запущено.
+census_test(Tests) ->
+    {"census", ?_assertEqual(?CENSUS, lists:foldl(fun count_file/2, {0, 0}, Tests))}.
+
+count_file({_Name, Groups}, {Files, Cases}) ->
+    {Files + length(Groups), Cases + lists:sum([count_group(G) || G <- Groups])}.
+
+%% Группа, схема которой не скомпилировалась, выпускает один падающий тест
+%% вместо своих cases, поэтому её вклад тоже виден в переписи.
+count_group({_Title, Cases}) when is_list(Cases)     -> length(Cases);
+count_group({_Title, Fun}) when is_function(Fun, 0)  -> 1.
 
 file_tests(Dir, Dialect, File) ->
     Path = filename:join([suite_dir(), Dir, File]),

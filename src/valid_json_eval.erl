@@ -10,7 +10,7 @@
 -spec run(compiled(), json(), format()) -> {ok, #eval_result{}} | {error, eval_error()}.
 run(#{root := Root} = Compiled, Instance, Format) ->
     Context = #eval_context{schema            = Compiled,
-                            resource          = Root,
+                            node              = {Root, <<>>},
                             keyword_location  = [],
                             instance_location = [],
                             dynamic_scope     = [Root],
@@ -37,27 +37,38 @@ eval(Addr, Instance, #eval_context{guard = Guard} = Context) ->
         true  -> throw({no_progress, Addr});
         false -> ok
     end,
-    Entered = enter_resource(Addr, Context#eval_context{guard = sets:add_element(Frame, Guard)}),
+    Entered = enter_node(Addr, Context#eval_context{guard = sets:add_element(Frame, Guard)}),
     eval_node(resolve(Addr, Context#eval_context.schema), Instance, Entered).
 
-%% Граница ресурса определяется целевым rid, а не видом перехода.
--spec enter_resource(addr(), #eval_context{}) -> #eval_context{}.
-enter_resource({Rid, _}, #eval_context{resource = Rid} = Context) ->
-    Context;
-enter_resource({Rid, _}, #eval_context{dynamic_scope = Scope} = Context) ->
-    Context#eval_context{resource = Rid, dynamic_scope = [Rid | Scope]}.
+%% Граница ресурса определяется целевым rid, а не видом перехода: это первая
+%% половина адреса, и сравнивается именно она.
+-spec enter_node(addr(), #eval_context{}) -> #eval_context{}.
+enter_node({Rid, _} = Addr, #eval_context{node = {Rid, _}} = Context) ->
+    Context#eval_context{node = Addr};
+enter_node({Rid, _} = Addr, #eval_context{dynamic_scope = Scope} = Context) ->
+    Context#eval_context{node = Addr, dynamic_scope = [Rid | Scope]}.
 
-%% Boolean true даёт успех с пустым покрытием, false — отказ. Units в режиме flag
-%% не собираются, поэтому их сборка появится вместе с проекцией basic.
+%% Boolean true даёт успех с пустым покрытием, false — отказ. Аннотаций boolean
+%% не производит, но остаётся обычным адресуемым node и потому выпускает
+%% собственный unit.
 -spec eval_node(schema_node(), json(), #eval_context{}) -> #eval_result{}.
-eval_node(true, _Instance, _Context) ->
-    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
-eval_node(false, _Instance, _Context) ->
-    #eval_result{valid = false, evaluated = valid_json_evaluated:neutral(), units = []};
+eval_node(true, _Instance, Context) ->
+    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(),
+                 units = node_units(true, none, Context)};
+eval_node(false, _Instance, Context) ->
+    #eval_result{valid = false, evaluated = valid_json_evaluated:neutral(),
+                 units = node_units(false, {error, <<"schema is false">>}, Context)};
 eval_node(#node{constraints = Constraints, unevaluated = []}, Instance, Context) ->
     discard_coverage(eval_constraints(Constraints, Instance, Context));
 eval_node(#node{} = Node, _Instance, _Context) ->
     erlang:error({not_implemented, Node}).
+
+%% В режиме flag units не собираются вовсе: ответ исчерпывается вердиктом.
+-spec node_units(boolean(), detail(), #eval_context{}) -> [#output_unit{}].
+node_units(_Valid, _Detail, #eval_context{mode = flag}) ->
+    [];
+node_units(Valid, Detail, Context) ->
+    [valid_json_unit:schema(Valid, Detail, Context)].
 
 %% Schema object есть конъюнкция независимых ограничений. Обрыв разрешён только
 %% в режиме flag: в остальных режимах дерево units должно быть полным.

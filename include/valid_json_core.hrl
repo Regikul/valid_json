@@ -87,12 +87,14 @@
                     | {Prefix :: non_neg_integer(), Sparse :: sets:set(non_neg_integer())}.
 
 %% Локации — обратные стеки сегментов; escaping делается при печати.
+-type detail() :: {error, binary()} | {annotation, json()} | none.
+
 -record(output_unit, {
     valid             :: boolean(),
     keyword_location  :: [binary()],
     absolute_location :: {uri(), [binary()]} | undefined,
     instance_location :: [binary()],
-    detail            :: {error, binary()} | {annotation, json()} | none,
+    detail            :: detail(),
     nested            :: [#output_unit{}]
 }).
 
@@ -104,9 +106,11 @@
 
 -type frame() :: {addr(), [binary()]}.
 
+%% node — адрес вычисляемого сейчас node. Отдельного поля под текущий resource
+%% нет: это первая половина адреса, а вторая задаёт абсолютную локацию units.
 -record(eval_context, {
     schema            :: compiled(),
-    resource          :: rid(),
+    node              :: addr(),
     keyword_location  :: [binary()],
     instance_location :: [binary()],
     dynamic_scope     :: [rid()],

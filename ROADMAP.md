@@ -29,14 +29,19 @@
 - [x] Поднять conformance runner для `boolean_schema.json` обоих dialects.
 - [x] Подтвердить текущий срез: `rebar3 compile` и 36 EUnit-тестов без
   провалов.
-- [ ] Добавить построение `#output_unit{}` для boolean-схем и пустого node.
-- [ ] Реализовать операции над стеками `keywordLocation`,
-  `absoluteKeywordLocation` и `instanceLocation`.
-- [ ] Реализовать JSON Pointer escaping и печать абсолютной URI fragment
+- [~] Добавить построение `#output_unit{}` для boolean-схем и пустого node:
+  boolean-схема выпускает собственный unit, а у schema object своего unit пока
+  нет. Он станет родителем вложенных units вместе с иерархией `detailed` и
+  `verbose`, поэтому его форма определяется там же.
+- [~] Реализовать операции над стеками `keywordLocation`,
+  `absoluteKeywordLocation` и `instanceLocation`: сегмент keyword добавляется
+  при построении unit, абсолютная локация выводится из адреса node. Стек
+  инстанса пока только переносится — двигать его начнут child applicators в P2.
+- [x] Реализовать JSON Pointer escaping и печать абсолютной URI fragment
   location.
-- [ ] Добавить минимальную проекцию `basic` для вручную собранных fixtures;
+- [x] Добавить минимальную проекцию `basic` для вручную собранных fixtures;
   полную приёмку формата оставить в P7.
-- [ ] Покрыть локации и `basic` structure-тестами, включая пустой сегмент,
+- [x] Покрыть локации и `basic` structure-тестами, включая пустой сегмент,
   `~`, `/` и anonymous resource.
 - [ ] Покрыть cycle guard fixtures: self-reference возвращает
   `{error, {no_progress, Addr}}`, повтор адреса в соседней ветви разрешён.
@@ -44,12 +49,12 @@
   списка непокрытых индексов ждёт своего потребителя в P4.
 - [x] Покрыть маску тестами на `all`, префикс, разреженные индексы и
   независимость результата от порядка слияния.
-- [~] Реализовать модель JSON-значения: `is_type/2`, `is_multiple_of/2`,
-  подсчёт code points и `is_unique/1` сделаны; `type_of/1` ждёт сообщений об
-  ошибках в units.
+- [x] Реализовать модель JSON-значения: `is_type/2`, `type_of/1`,
+  `is_multiple_of/2`, подсчёт code points и `is_unique/1`.
 - [x] Покрыть модель значения тестами на integer/number, все семь JSON types,
-  три ветви кратности, Unicode code points и JSON equality в уникальности.
-- [ ] Зафиксировать в runner ожидаемое число групп и test cases, чтобы пустой
+  выбор узкого типа в `type_of/1`, три ветви кратности, Unicode code points и
+  JSON equality в уникальности.
+- [x] Зафиксировать в runner ожидаемое число групп и test cases, чтобы пустой
   прогон не мог быть зелёным.
 - [ ] Приёмка P0: все core fixtures и `boolean_schema.json` обоих dialects
   проходят без провалов.
@@ -72,9 +77,9 @@
 - [x] Реализовать `maxItems`, `minItems` и `uniqueItems`.
 - [x] Реализовать `maxProperties`, `minProperties`, `required` и
   `dependentRequired`.
-- [~] Сохранять написанные no-op assertions в IR и выпускать для них output
-  unit: `uniqueItems: false` и `minLength: 0` доходят до IR и вычисляются,
-  выпуск units ждёт проекции `basic`.
+- [x] Сохранять написанные no-op assertions в IR и выпускать для них output
+  unit: `uniqueItems: false` и `minLength: 0` доходят до IR, вычисляются и
+  выпускают собственный unit.
 - [x] Добавить точные compiler fixtures для IR каждого assertion, включая
   нормализацию десятичной формы `nonNegativeInteger`.
 - [x] Добавить evaluator fixtures для применимого и неприменимого типа

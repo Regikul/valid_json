@@ -6,6 +6,7 @@
 -include("valid_json_core.hrl").
 
 -define(DIALECT, <<"https://json-schema.org/draft/2020-12/schema">>).
+-define(RESOURCE, <<"https://example.com/s">>).
 
 type_test_() ->
     [?_assert(valid([{type, [integer]}], 1)),
@@ -159,6 +160,101 @@ boolean_schema_test_() ->
     [?_assertEqual({ok, #{<<"valid">> => true}}, validate(true, 1)),
      ?_assertEqual({ok, #{<<"valid">> => false}}, validate(false, 1))].
 
+%% Каждый написанный keyword выпускает ровно один unit, включая no-op и
+%% неприменимый к instance тип. Имя в локации — фактический keyword, а не тег IR.
+units_test_() ->
+    Cases = [{{type, [string]},                        <<"/type">>},
+             {{enum, [1]},                             <<"/enum">>},
+             {{const, 1},                              <<"/const">>},
+             {{multiple_of, 2},                        <<"/multipleOf">>},
+             {{maximum, 4},                            <<"/maximum">>},
+             {{exclusive_maximum, 4},                  <<"/exclusiveMaximum">>},
+             {{minimum, 0},                            <<"/minimum">>},
+             {{exclusive_minimum, 0},                  <<"/exclusiveMinimum">>},
+             {{max_length, 2},                         <<"/maxLength">>},
+             {{min_length, 0},                         <<"/minLength">>},
+             {{pattern, regex(<<"a">>)},               <<"/pattern">>},
+             {{max_items, 2},                          <<"/maxItems">>},
+             {{min_items, 2},                          <<"/minItems">>},
+             {{unique_items, false},                   <<"/uniqueItems">>},
+             {{max_properties, 2},                     <<"/maxProperties">>},
+             {{min_properties, 2},                     <<"/minProperties">>},
+             {{required, []},                          <<"/required">>},
+             {{dependent_required, #{}},               <<"/dependentRequired">>}],
+    [{binary_to_list(Location),
+      ?_assertMatch([{Location, _, _}], located([Constraint], 1))}
+     || {Constraint, Location} <- Cases].
+
+%% Units собираются во всех режимах, кроме flag, и обрыв разрешён только там же:
+%% в basic после провала выполняются и остальные constraints.
+mode_test_() ->
+    Constraints = [{type, [string]}, {const, 1}],
+    [?_assertEqual([], units(Constraints, 1, flag)),
+     ?_assertMatch([{<<"/type">>, false, _}, {<<"/const">>, true, none}],
+                   located(Constraints, 1))].
+
+%% Boolean-схема сегмента не добавляет: она стоит там же, где схема.
+boolean_units_test_() ->
+    [?_assertEqual([{<<>>, true, none}], located(true, 1)),
+     ?_assertMatch([{<<>>, false, {error, _}}], located(false, 1))].
+
+%% Абсолютная локация выводится из адреса node, а не накапливается обходом,
+%% поэтому у названного resource она появляется сама и печатается вместе с unit.
+absolute_test_() ->
+    Assertion = schema_node([{type, [string]}]),
+    [?_assertEqual([undefined], absolute(artifact(Assertion), 1)),
+     ?_assertEqual([{?RESOURCE, [<<"type">>]}], absolute(named(Assertion), 1)),
+     %% У boolean-схемы собственного сегмента нет: она стоит в корне resource.
+     ?_assertEqual([{?RESOURCE, []}], absolute(named(false), 1)),
+     ?_assertEqual(<<"https://example.com/s#/type">>,
+                   printed_absolute(named(Assertion), 1))].
+
+%% Сообщение называет нарушенное требование. Оно не влияет на вердикт, поэтому
+%% проверяется отдельно от него.
+message_test_() ->
+    [?_assertEqual(<<"expected string, got integer">>, message({type, [string]}, 1)),
+     ?_assertEqual(<<"expected string, got number">>, message({type, [string]}, 1.5)),
+     ?_assertEqual(<<"expected integer or null, got array">>,
+                   message({type, [integer, null]}, [])),
+     ?_assertEqual(<<"expected no type, got boolean">>, message({type, []}, true)),
+     ?_assertEqual(<<"value is not a multiple of 0.0001">>,
+                   message({multiple_of, 0.0001}, 0.00751)),
+     ?_assertEqual(<<"value is greater than the maximum 4">>, message({maximum, 4}, 5)),
+     ?_assertEqual(<<"string is longer than 2 characters">>,
+                   message({max_length, 2}, <<"abc">>)),
+     ?_assertEqual(<<"string does not match pattern ^a+$">>,
+                   message({pattern, regex(<<"^a+$">>)}, <<"b">>)),
+     ?_assertEqual(<<"array items are not unique">>, message({unique_items, true}, [1, 1])),
+     %% Отсутствующие имена называются поимённо, а присутствующие не называются.
+     ?_assertEqual(<<"object is missing required property \"b\"">>,
+                   message({required, [<<"a">>, <<"b">>]}, #{<<"a">> => 1})),
+     ?_assertEqual(<<"object is missing required properties \"a\", \"b\"">>,
+                   message({required, [<<"a">>, <<"b">>]}, #{})),
+     ?_assertEqual(<<"object is missing required property \"foo\"">>,
+                   message({dependent_required, #{<<"bar">> => [<<"foo">>]}},
+                           #{<<"bar">> => 1}))].
+
+%% Публичный вызов доводит дерево units до плоской проекции basic.
+basic_output_test_() ->
+    Schema = schema_node([{type, [string]}, {min_length, 2}]),
+    [?_assertEqual({ok, #{<<"valid">>            => true,
+                          <<"keywordLocation">>  => <<>>,
+                          <<"instanceLocation">> => <<>>,
+                          <<"annotations">>      => []}},
+                   basic(Schema, <<"ab">>)),
+     ?_assertEqual({ok, #{<<"valid">>            => false,
+                          <<"keywordLocation">>  => <<>>,
+                          <<"instanceLocation">> => <<>>,
+                          <<"errors">> =>
+                              [#{<<"valid">>            => false,
+                                 <<"keywordLocation">>  => <<"/type">>,
+                                 <<"instanceLocation">> => <<>>,
+                                 <<"error">> => <<"expected string, got integer">>}]}},
+                   basic(Schema, 1)),
+     %% Провалившаяся boolean-схема тоже обязана дать непустой errors.
+     ?_assertMatch({ok, #{<<"valid">> := false, <<"errors">> := [_]}},
+                   basic(false, 1))].
+
 %% Публичный результат — JSON выбранного формата; valid = false остаётся ok.
 flag_output_test_() ->
     [?_assertEqual({ok, #{<<"valid">> => true}},
@@ -169,6 +265,47 @@ flag_output_test_() ->
 valid(Constraints, Instance) ->
     {ok, #eval_result{valid = Valid}} = run(schema_node(Constraints), Instance),
     Valid.
+
+%% Локация печатается прямо в тесте: обратный стек сегментов читается хуже, чем
+%% готовый указатель, а его построение проверено отдельно.
+located(Node, Instance) when is_boolean(Node) ->
+    printed(units(Node, Instance, basic));
+located(Constraints, Instance) ->
+    printed(units(Constraints, Instance, basic)).
+
+printed(Units) ->
+    [{valid_json_location:pointer(Keywords), Valid, Detail}
+     || #output_unit{valid = Valid, keyword_location = Keywords,
+                     detail = Detail} <- Units].
+
+units(Node, Instance, Format) when is_boolean(Node) ->
+    collect(Node, Instance, Format);
+units(Constraints, Instance, Format) ->
+    collect(schema_node(Constraints), Instance, Format).
+
+collect(Node, Instance, Format) ->
+    {ok, #eval_result{units = Units}} =
+        valid_json_eval:run(artifact(Node), Instance, Format),
+    Units.
+
+absolute(Artifact, Instance) ->
+    {ok, #eval_result{units = Units}} = valid_json_eval:run(Artifact, Instance, basic),
+    [Location || #output_unit{absolute_location = Location} <- Units].
+
+%% Проекция печатает ту же локацию отдельным ключом.
+printed_absolute(Artifact, Instance) ->
+    {ok, #{<<"errors">> := [Unit]}} =
+        valid_json:validate(Artifact, Instance, [{output, basic}]),
+    maps:get(<<"absoluteKeywordLocation">>, Unit).
+
+%% Сообщение существует только у провалившегося constraint, поэтому берётся из
+%% его же unit.
+message(Constraint, Instance) ->
+    [{_Location, false, {error, Message}}] = located([Constraint], Instance),
+    Message.
+
+basic(Node, Instance) ->
+    valid_json:validate(artifact(Node), Instance, [{output, basic}]).
 
 coverage(Constraints, Instance) ->
     {ok, #eval_result{evaluated = Evaluated}} = run(schema_node(Constraints), Instance),
@@ -194,10 +331,17 @@ regex(Source) ->
     {Source, Compiled}.
 
 artifact(Node) ->
-    #{root      => anonymous,
+    artifact(anonymous, undefined, Node).
+
+%% Названный resource нужен ради абсолютной локации: у анонимного её нет.
+named(Node) ->
+    artifact(?RESOURCE, ?RESOURCE, Node).
+
+artifact(Rid, Id, Node) ->
+    #{root      => Rid,
       sources   => [],
-      resources => #{anonymous =>
-          #resource{id               = undefined,
+      resources => #{Rid =>
+          #resource{id               = Id,
                     dialect          = ?DIALECT,
                     anchors          = #{},
                     dynamic_anchors  = #{},

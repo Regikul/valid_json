@@ -24,6 +24,17 @@ seven_types_test_() ->
       ?_assertEqual(Expected, matching_types(Value))}
      || {Value, Expected} <- Values].
 
+%% Обратная сторона той же таблицы: у значения двух типов выбирается узкий,
+%% потому что сообщение об ошибке должно называть его так же, как схема.
+type_of_test_() ->
+    Values = [{null, null}, {true, boolean}, {false, boolean},
+              {#{}, object}, {[], array}, {<<"a">>, string}, {<<>>, string},
+              {1, integer}, {-1, integer}, {1.0, integer}, {1 bsl 200, integer},
+              {1.5, number}, {1.0e-8, number}],
+    [{lists:flatten(io_lib:format("~p", [Value])),
+      ?_assertEqual(Expected, valid_json_value:type_of(Value))}
+     || {Value, Expected} <- Values].
+
 %% Целое остаётся целым при любой величине, ненулевая дробная часть выводит
 %% значение из integer.
 integer_test_() ->

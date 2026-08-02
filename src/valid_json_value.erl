@@ -5,7 +5,7 @@
 
 -include("valid_json_core.hrl").
 
--export([is_type/2, is_multiple_of/2,
+-export([is_type/2, type_of/1, is_multiple_of/2,
          is_length_at_most/2, is_length_at_least/2, is_unique/1]).
 
 %% type: "integer" принимает любой number с нулевой дробной частью, поэтому
@@ -18,6 +18,21 @@ is_type(array,   V) -> is_list(V);
 is_type(string,  V) -> is_binary(V);
 is_type(number,  V) -> is_number(V);
 is_type(integer, V) -> is_integer(V) orelse (is_float(V) andalso V == trunc(V)).
+
+%% Название типа для сообщения об ошибке. Из двух типов целого числа выбирается
+%% узкий: сообщение должно называть значение тем же именем, каким его называет
+%% схема, а `type: "integer"` — единственный способ отличить 1 от 1.5.
+-spec type_of(json()) -> json_type().
+type_of(null)                         -> null;
+type_of(Value) when is_boolean(Value) -> boolean;
+type_of(Value) when is_map(Value)     -> object;
+type_of(Value) when is_list(Value)    -> array;
+type_of(Value) when is_binary(Value)  -> string;
+type_of(Value) when is_number(Value)  ->
+    case is_type(integer, Value) of
+        true  -> integer;
+        false -> number
+    end.
 
 %% minLength и maxLength считают Unicode code points, а не байты, UTF-16 units
 %% или grapheme clusters (validation.txt:385). Границы byte_size div 4 =< CP =<
