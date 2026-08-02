@@ -276,11 +276,12 @@ Evaluator выполняет node в одном порядке, независи
 3. выполняет `constraints`, накапливая validity, coverage и diagnostic units;
 4. при необходимости выполняет `unevaluated` над оставшимися properties/items;
 5. очищает effective coverage, если весь schema object провалился;
-6. снимает frame и resource scope, возвращает `#eval_result{}`.
+6. выпускает собственный unit и кладёт внутрь него units выполненных constraints;
+7. снимает frame и resource scope, возвращает `#eval_result{}`.
 
 Порядок обычных constraints семантически свободен. Compiler может ставить дешёвые assertions раньше applicators ради `flag`, но observable tree не должен зависеть от оптимизации: для `basic`, `detailed`, `verbose` units сериализуются в детерминированном schema/keyword order.
 
-Boolean `true` возвращает success с пустым coverage и unit без detail; boolean `false` возвращает failure. Boolean schemas не производят annotations, но участвуют в hierarchy и guard как обычные адресуемые nodes.
+Boolean `true` возвращает success с пустым coverage, boolean `false` — failure. Annotations boolean schemas не производят, но остаются обычными адресуемыми nodes: собственный unit выпускают и они, а поскольку keywords у них нет, сообщение о провале несёт этот unit сам.
 
 Resource boundary определяется target `rid`, а не синтаксическим видом перехода: child applicator тоже может войти во встроенный resource с `$id`. Поэтому dynamic scope обновляет общий evaluator вход после `resolve/2`, а не только обработчики ссылок.
 
@@ -371,6 +372,10 @@ unevaluated_indexes({P, S}, L) ->
 }).
 ```
 
+Units образуют дерево, и уровни в нём чередуются. Каждый node выпускает собственный unit на своей локации, внутри него лежат units его keywords, а внутри unit'а applicator-keyword'а — units nodes, к которым этот keyword применился. Составной constraint чередования не нарушает: units ветви он кладёт внутрь того keyword'а, который её применил.
+
+Собственный unit schema object не несёт ни сообщения, ни аннотации. Он говорит только о том, что подсхема применялась и чем это кончилось, а причину провала называют его дети; спецификация прямо освобождает узлы ветвления от сообщения ([core.txt:3150](../references/json-schema/draft-2020-12/core.txt)). Сообщение появляется у node лишь там, где детей нет вовсе, — у boolean `false`.
+
 Локации — обратные стеки сегментов: push/pop выполняется за O(1), JSON Pointer escaping и URI percent-encoding делаются при печати. `keywordLocation` проходит сквозь ссылки; `absoluteKeywordLocation` строится из канонического resource URI и печатается всегда, кроме anonymous resource.
 
 Эти две локации живут по-разному. `keywordLocation` — накопленный стек: обход добавляет к нему сегмент за сегментом и продолжает его через `$ref`. `absoluteKeywordLocation` ничего не накапливает и выводится из адреса node в момент построения unit: канонический URI даёт `rid`, путь внутри resource — pointer, а последним сегментом идёт имя keyword. Поэтому переход по ссылке не требует ни сброса, ни отдельного стека, а у анонимного resource локация отсутствует сама собой, потому что `id` у него не определён.
@@ -397,6 +402,8 @@ Draft 2019-09 prose требует fragment-encoded `instanceLocation`, но з�
 | `verbose` | полностью реализованная hierarchy, включая успехи и отброшенные results |
 
 Все три структурных формата строятся из одного дерева units; отдельного evaluator API на формат нет. Официальный snapshot закрепляет только `basic`, поэтому точные правила схлопывания `detailed` и полнота `verbose` должны быть зафиксированы собственными golden/structure tests до P7.
+
+Корнем `basic` служит unit корневого node: его локации и его собственный detail печатаются прямо в объекте результата, а плоский список идёт в `errors` либо `annotations` — по валидности этого же корня. В список попадает то, что несёт detail: сообщение при провале, аннотацию при успехе. Собирая аннотации, обход не спускается в провалившийся unit: провалившийся schema object не производит аннотаций ни своими keywords, ни keywords своих подсхем ([core.txt:1206](../references/json-schema/draft-2020-12/core.txt)). Из дерева эти аннотации не исчезают — их показывает `verbose`. Поэтому units ветвлений в нём не видны — своего сообщения у них нет, — а провалившаяся boolean-схема видна, потому что сообщение есть только у неё самой. Пустой список остаётся ключом: `errors` обязателен при `valid = false`, `annotations` — при `valid = true`, и второго ключа рядом быть не должно ([output-schema.json](../../test/fixtures/json-schema-test-suite/output-tests/draft2020-12/output-schema.json)).
 
 ## Контекст и cycle guard
 

@@ -43,7 +43,8 @@ names(Names, Addr, Context) ->
     {Valid, Units} = scan(Names, Addr, Context, true, []),
     #eval_result{valid     = Valid,
                  evaluated = valid_json_evaluated:neutral(),
-                 units     = own(<<"propertyNames">>, Valid, name_detail(Valid), Context) ++ Units}.
+                 units     = own(<<"propertyNames">>, Valid, name_detail(Valid),
+                                 Units, Context)}.
 
 -spec scan([binary()], addr(), #eval_context{}, boolean(), [#output_unit{}]) ->
           {boolean(), [#output_unit{}]}.
@@ -137,7 +138,8 @@ keyword(Keyword, Applications, Instance, Context) ->
     Applied = lists:usort(Names),
     #eval_result{valid     = Valid,
                  evaluated = coverage(Valid, Applied),
-                 units     = own(Keyword, Valid, detail(Keyword, Valid, Applied), Context) ++ Units}.
+                 units     = own(Keyword, Valid, detail(Keyword, Valid, Applied),
+                                 Units, Context)}.
 
 -spec coverage(boolean(), [binary()]) -> evaluated().
 coverage(true, Applied) -> valid_json_evaluated:properties(Applied);
@@ -168,12 +170,15 @@ branch(Addr, Tail, Name, Value, Context) ->
                                   instance_location = [Name | Instance]},
     valid_json_eval:eval(Addr, Value, Nested).
 
-%% В режиме flag units не собираются вовсе: ответ исчерпывается вердиктом.
--spec own(binary(), boolean(), detail(), #eval_context{}) -> [#output_unit{}].
-own(_Keyword, _Valid, _Detail, #eval_context{mode = flag}) ->
+%% Units применённых подсхем лежат внутри unit'а того keyword, который их
+%% применил. В режиме flag units не собираются вовсе: ответ исчерпывается
+%% вердиктом.
+-spec own(binary(), boolean(), detail(), [#output_unit{}], #eval_context{}) ->
+          [#output_unit{}].
+own(_Keyword, _Valid, _Detail, _Nested, #eval_context{mode = flag}) ->
     [];
-own(Keyword, Valid, Detail, Context) ->
-    [valid_json_unit:keyword(Keyword, Valid, Detail, Context)].
+own(Keyword, Valid, Detail, Nested, Context) ->
+    [valid_json_unit:keyword(Keyword, Valid, Detail, Nested, Context)].
 
 -spec detail(binary(), boolean(), [binary()]) -> detail().
 detail(_Keyword, true, Applied) -> {annotation, Applied};

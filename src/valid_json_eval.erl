@@ -51,25 +51,30 @@ enter_node({Rid, _} = Addr, #eval_context{dynamic_scope = Scope} = Context) ->
 
 %% Boolean true даёт успех с пустым покрытием, false — отказ. Аннотаций boolean
 %% не производит, но остаётся обычным адресуемым node и потому выпускает
-%% собственный unit.
+%% собственный unit. Детей у него нет, поэтому сообщение о провале он несёт сам.
 -spec eval_node(schema_node(), json(), #eval_context{}) -> #eval_result{}.
 eval_node(true, _Instance, Context) ->
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(),
-                 units = node_units(true, none, Context)};
+                 units = node_units(true, none, [], Context)};
 eval_node(false, _Instance, Context) ->
     #eval_result{valid = false, evaluated = valid_json_evaluated:neutral(),
-                 units = node_units(false, {error, <<"schema is false">>}, Context)};
+                 units = node_units(false, {error, <<"schema is false">>}, [], Context)};
 eval_node(#node{constraints = Constraints, unevaluated = []}, Instance, Context) ->
-    discard_coverage(eval_constraints(Constraints, Instance, Context));
+    #eval_result{valid = Valid, units = Units} = Result =
+        discard_coverage(eval_constraints(Constraints, Instance, Context)),
+    Result#eval_result{units = node_units(Valid, none, Units, Context)};
 eval_node(#node{} = Node, _Instance, _Context) ->
     erlang:error({not_implemented, Node}).
 
-%% В режиме flag units не собираются вовсе: ответ исчерпывается вердиктом.
--spec node_units(boolean(), detail(), #eval_context{}) -> [#output_unit{}].
-node_units(_Valid, _Detail, #eval_context{mode = flag}) ->
+%% Собственный unit node стоит над units своих constraints и ни сообщения, ни
+%% аннотации не несёт: причину провала называют его дети
+%% (validator-core.md, «Output unit и локации»). В режиме flag units не
+%% собираются вовсе: ответ исчерпывается вердиктом.
+-spec node_units(boolean(), detail(), [#output_unit{}], #eval_context{}) -> [#output_unit{}].
+node_units(_Valid, _Detail, _Nested, #eval_context{mode = flag}) ->
     [];
-node_units(Valid, Detail, Context) ->
-    [valid_json_unit:schema(Valid, Detail, Context)].
+node_units(Valid, Detail, Nested, Context) ->
+    [valid_json_unit:schema(Valid, Detail, Nested, Context)].
 
 %% Schema object есть конъюнкция независимых ограничений. Обрыв разрешён только
 %% в режиме flag: в остальных режимах дерево units должно быть полным.

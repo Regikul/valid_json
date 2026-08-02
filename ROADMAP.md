@@ -29,10 +29,9 @@
 - [x] Поднять conformance runner для `boolean_schema.json` обоих dialects.
 - [x] Подтвердить текущий срез: `rebar3 compile` и 36 EUnit-тестов без
   провалов.
-- [~] Добавить построение `#output_unit{}` для boolean-схем и пустого node:
-  boolean-схема выпускает собственный unit, а у schema object своего unit пока
-  нет. Он станет родителем вложенных units вместе с иерархией `detailed` и
-  `verbose`, поэтому его форма определяется там же.
+- [x] Добавить построение `#output_unit{}` для boolean-схем и пустого node:
+  собственный unit выпускает и boolean-схема, и schema object, и он становится
+  родителем units своих keywords.
 - [x] Реализовать операции над стеками `keywordLocation`,
   `absoluteKeywordLocation` и `instanceLocation`.
 - [x] Реализовать JSON Pointer escaping и печать абсолютной URI fragment
@@ -117,9 +116,9 @@
   записывать совпавшие индексы в разреженную часть маски.
 - [ ] Реализовать annotation-only keywords: `title`, `description`, `default`,
   `deprecated`, `readOnly`, `writeOnly`, `examples` и content annotations.
-- [ ] Сохранять диагностические units провалившихся ветвей, но очищать их
+- [x] Сохранять диагностические units провалившихся ветвей, но очищать их
   effective coverage и annotations.
-- [ ] Выпускать отдельный unit для каждого фактически написанного keyword
+- [x] Выпускать отдельный unit для каждого фактически написанного keyword
   внутри составного constraint.
 - [x] Добавить compiler fixtures на адреса дочерних nodes и нормализацию
   составных constraints.

@@ -165,15 +165,15 @@ branch(Addr, Keyword, Tail, Instance, #eval_context{keyword_location = Location}
     valid_json_eval:eval(Addr, Instance, Nested).
 
 %% Applicator выпускает собственный unit написанного keyword, а units ветвей
-%% остаются рядом с ним. В режиме flag units не собираются вовсе. Сообщение
-%% `none` принадлежит keyword, который провалиться не может.
+%% лежат внутри него. В режиме flag units не собираются вовсе. Сообщение `none`
+%% принадлежит keyword, который провалиться не может.
 -spec result(binary(), boolean(), binary() | none, evaluated(), [#output_unit{}],
              #eval_context{}) -> #eval_result{}.
 result(_Keyword, Valid, _Message, Evaluated, _Units, #eval_context{mode = flag}) ->
     #eval_result{valid = Valid, evaluated = Evaluated, units = []};
 result(Keyword, Valid, Message, Evaluated, Units, Context) ->
-    Unit = valid_json_unit:keyword(Keyword, Valid, detail(Valid, Message), Context),
-    #eval_result{valid = Valid, evaluated = Evaluated, units = [Unit | Units]}.
+    Unit = valid_json_unit:keyword(Keyword, Valid, detail(Valid, Message), Units, Context),
+    #eval_result{valid = Valid, evaluated = Evaluated, units = [Unit]}.
 
 -spec detail(boolean(), binary() | none) -> detail().
 detail(true, _Message)  -> none;

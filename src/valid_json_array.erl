@@ -92,7 +92,7 @@ keyword(Keyword, Applications, Length, Context) ->
     #eval_result{valid     = Valid,
                  evaluated = coverage(Keyword, Valid, Applied, Length),
                  units     = own(Keyword, Valid, detail(Keyword, Valid, Applied, Length),
-                                 Context) ++ Units}.
+                                 Units, Context)}.
 
 %% Покрытие дочерней schema принадлежит ей самой и наверх не идёт: родитель
 %% покрывает индекс элемента, а не то, что нашлось внутри значения.
@@ -151,13 +151,15 @@ contains(Addr, Min, Max, Marks, Instance, Context) ->
     Length = length(Instance),
     Count  = length(Matched),
     Found  = Count > 0 orelse Min =:= 0,
-    Written = [{<<"contains">>, Found, found(Found, Matched, Count, Length)}]
+    %% Обход общий, но подсхему применял только `contains`, поэтому units ветвей
+    %% лежат внутри его unit'а, а границы остаются листьями.
+    Written = [{<<"contains">>, Found, found(Found, Matched, Count, Length), Units}]
               ++ bounded(<<"minContains">>, Min, at_least(Count, Min))
               ++ bounded(<<"maxContains">>, Max, at_most(Count, Max)),
-    #eval_result{valid     = lists:all(fun({_Keyword, Valid, _Detail}) -> Valid end, Written),
+    #eval_result{valid     = lists:all(fun({_K, Valid, _D, _N}) -> Valid end, Written),
                  evaluated = marks(Marks, Found, Matched, Count, Length),
-                 units     = lists:append([own(Keyword, Valid, Detail, Context)
-                                           || {Keyword, Valid, Detail} <- Written]) ++ Units}.
+                 units     = lists:append([own(Keyword, Valid, Detail, Nested, Context)
+                                           || {Keyword, Valid, Detail, Nested} <- Written])}.
 
 -spec scan(addr(), [json()], non_neg_integer(), #eval_context{},
            [non_neg_integer()], [#output_unit{}]) ->
@@ -186,10 +188,11 @@ found(true, Matched, _Count, _Length) ->
 
 %% Ненаписанная граница ни unit, ни вердикта не даёт: спецификация оставляет её
 %% без эффекта. Аннотаций границы не производят, поэтому у успеха деталей нет.
--spec bounded(binary(), bound(), boolean()) -> [{binary(), boolean(), detail()}].
+-spec bounded(binary(), bound(), boolean()) ->
+          [{binary(), boolean(), detail(), [#output_unit{}]}].
 bounded(_Keyword, undefined, _Valid) -> [];
-bounded(Keyword, _Value, true)       -> [{Keyword, true, none}];
-bounded(Keyword, _Value, false)      -> [{Keyword, false, {error, message(Keyword)}}].
+bounded(Keyword, _Value, true)       -> [{Keyword, true, none, []}];
+bounded(Keyword, _Value, false)      -> [{Keyword, false, {error, message(Keyword)}, []}].
 
 -spec at_least(non_neg_integer(), bound()) -> boolean().
 at_least(_Count, undefined) -> true;
@@ -223,12 +226,15 @@ branch(Addr, Tail, Index, Element, Context) ->
                                   instance_location = [integer_to_binary(Index) | Instance]},
     valid_json_eval:eval(Addr, Element, Nested).
 
-%% В режиме flag units не собираются вовсе: ответ исчерпывается вердиктом.
--spec own(binary(), boolean(), detail(), #eval_context{}) -> [#output_unit{}].
-own(_Keyword, _Valid, _Detail, #eval_context{mode = flag}) ->
+%% Units применённых подсхем лежат внутри unit'а того keyword, который их
+%% применил. В режиме flag units не собираются вовсе: ответ исчерпывается
+%% вердиктом.
+-spec own(binary(), boolean(), detail(), [#output_unit{}], #eval_context{}) ->
+          [#output_unit{}].
+own(_Keyword, _Valid, _Detail, _Nested, #eval_context{mode = flag}) ->
     [];
-own(Keyword, Valid, Detail, Context) ->
-    [valid_json_unit:keyword(Keyword, Valid, Detail, Context)].
+own(Keyword, Valid, Detail, Nested, Context) ->
+    [valid_json_unit:keyword(Keyword, Valid, Detail, Nested, Context)].
 
 -spec message(binary()) -> binary().
 message(<<"items">>) ->

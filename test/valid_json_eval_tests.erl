@@ -196,10 +196,22 @@ mode_test_() ->
      ?_assertMatch([{<<"/type">>, false, _}, {<<"/const">>, true, none}],
                    located(Constraints, 1))].
 
-%% Boolean-схема сегмента не добавляет: она стоит там же, где схема.
+%% Boolean-схема сегмента не добавляет: она стоит там же, где схема. Keywords у
+%% неё нет, поэтому сообщение о провале несёт её собственный unit.
 boolean_units_test_() ->
-    [?_assertEqual([{<<>>, true, none}], located(true, 1)),
-     ?_assertMatch([{<<>>, false, {error, _}}], located(false, 1))].
+    [?_assertEqual({<<>>, true, none}, shown(node_unit(true, 1))),
+     ?_assertMatch({<<>>, false, {error, _}}, shown(node_unit(false, 1))),
+     ?_assertEqual([], located(false, 1))].
+
+%% Schema object тоже выпускает собственный unit и тоже стоит там же, где схема.
+%% Ни сообщения, ни аннотации у него нет: причину провала называют units его
+%% keywords, которые лежат внутри него.
+schema_units_test_() ->
+    Failed = node_unit([{type, [string]}], 1),
+    [?_assertEqual({<<>>, false, none}, shown(Failed)),
+     ?_assertEqual({<<>>, true, none}, shown(node_unit([{type, [string]}], <<"a">>))),
+     ?_assertMatch([{<<"/type">>, false, {error, _}}],
+                   [shown(Unit) || Unit <- Failed#output_unit.nested])].
 
 %% Разрешение адреса в готовом артефакте тотально: каждый указатель выбирает
 %% ровно свой node, а корень resource стоит под пустым указателем.
@@ -357,13 +369,10 @@ object_units_test_() ->
 object_annotation_test_() ->
     %% Берутся только units самих keywords: units ветвей стоят глубже и говорят
     %% о своих значениях, а не о применении.
-    Own = [<<"/properties">>, <<"/patternProperties">>, <<"/additionalProperties">>],
     Details = fun(Instance) ->
-                      [{Pointer, Detail}
+                      [{valid_json_location:pointer(Keywords), Detail}
                        || #output_unit{keyword_location = Keywords, detail = Detail}
-                              <- collect(object(), Instance, basic),
-                          Pointer <- [valid_json_location:pointer(Keywords)],
-                          lists:member(Pointer, Own)]
+                              <- own(collect(object(), Instance, basic))]
               end,
     [?_assertEqual([{<<"/properties">>, {annotation, [<<"a">>]}},
                     {<<"/patternProperties">>, {annotation, [<<"bb">>, <<"bc">>]}},
@@ -527,8 +536,7 @@ array_annotation_test_() ->
     Own = fun(Artifact, Instance) ->
                   [{valid_json_location:pointer(Keywords), Detail}
                    || #output_unit{keyword_location = Keywords, detail = Detail}
-                          <- collect(Artifact, Instance, basic),
-                      length(Keywords) =:= 1]
+                          <- own(collect(Artifact, Instance, basic))]
           end,
     Pair = prefix_items([true, true], undefined),
     [?_assertEqual([{<<"/prefixItems">>, {annotation, 1}}], Own(Pair, [1, 2, 3])),
@@ -581,13 +589,13 @@ contains_test_() ->
 contains_units_test_() ->
     Artifact = contains([{type, [integer]}], 2, undefined),
     [?_assertEqual([{<<"/contains">>, <<>>},
-                    {<<"/minContains">>, <<>>},
                     {<<"/contains/type">>, <<"/0">>},
-                    {<<"/contains/type">>, <<"/1">>}],
+                    {<<"/contains/type">>, <<"/1">>},
+                    {<<"/minContains">>, <<>>}],
                    paired(collect(Artifact, [1, <<"a">>], basic))),
      %% Совпадение нашлось, поэтому сам `contains` успешен, а граница — нет.
-     ?_assertMatch([{<<"/contains">>, true, {annotation, [0]}},
-                    {<<"/minContains">>, false, {error, _}} | _],
+     ?_assertMatch([{<<"/contains">>, true, {annotation, [0]}}, _, _,
+                    {<<"/minContains">>, false, {error, _}}],
                    printed(collect(Artifact, [1, <<"a">>], basic))),
      %% Совпали все элементы — аннотация вырождается в `true`.
      ?_assertMatch([{<<"/contains">>, true, {annotation, true}} | _],
@@ -652,13 +660,18 @@ applicator_units_test_() ->
                        [{<<"/anyOf/0">>, false}, {<<"/anyOf/1">>, [{type, [string]}]}]),
     Negated = branching([{'not', addr(<<"/not">>)}], [{<<"/not">>, [{const, 1}]}]),
     [?_assertMatch([{<<"/anyOf">>, false, {error, _}},
-                    {<<"/anyOf/0">>, false, {error, _}},
                     {<<"/anyOf/1/type">>, false, {error, _}}],
                    printed(collect(Listed, 1, basic))),
      %% Units опровергнутой внутренней схемы остаются диагностическими.
      ?_assertMatch([{<<"/not">>, false, {error, _}},
                     {<<"/not/const">>, true, none}],
-                   printed(collect(Negated, 1, basic)))].
+                   printed(collect(Negated, 1, basic))),
+     %% Ветвь-boolean своих keywords не имеет, поэтому сообщение несёт её
+     %% собственный unit — и в плоскую проекцию он попадает наравне с keywords.
+     ?_assertMatch([#{<<"keywordLocation">> := <<"/anyOf">>},
+                    #{<<"keywordLocation">> := <<"/anyOf/0">>, <<"error">> := _},
+                    #{<<"keywordLocation">> := <<"/anyOf/1/type">>}],
+                   errors(Listed, 1))].
 
 %% Абсолютная локация выводится из адреса node, а не накапливается обходом,
 %% поэтому у названного resource она появляется сама и печатается вместе с unit.
@@ -666,8 +679,10 @@ absolute_test_() ->
     Assertion = schema_node([{type, [string]}]),
     [?_assertEqual([undefined], absolute(artifact(Assertion), 1)),
      ?_assertEqual([{?RESOURCE, [<<"type">>]}], absolute(named(Assertion), 1)),
-     %% У boolean-схемы собственного сегмента нет: она стоит в корне resource.
-     ?_assertEqual([{?RESOURCE, []}], absolute(named(false), 1)),
+     %% У boolean-схемы собственного сегмента нет: она стоит в корне resource,
+     %% и keywords, к чьим units можно было бы приглядеться, у неё тоже нет.
+     ?_assertEqual({?RESOURCE, []},
+                   (node_unit(named(false), 1))#output_unit.absolute_location),
      ?_assertEqual(<<"https://example.com/s#/type">>,
                    printed_absolute(named(Assertion), 1)),
      %% У вложенного node указатель непустой, и путь внутри resource берётся
@@ -726,9 +741,39 @@ basic_output_test_() ->
                                  <<"instanceLocation">> => <<>>,
                                  <<"error">> => <<"expected string, got integer">>}]}},
                    basic(Schema, 1)),
-     %% Провалившаяся boolean-схема тоже обязана дать непустой errors.
-     ?_assertMatch({ok, #{<<"valid">> := false, <<"errors">> := [_]}},
+     %% Корнем проекции служит собственный unit node. У boolean-схемы это
+     %% единственный unit вообще, поэтому её сообщение стоит прямо в корне, а
+     %% список остаётся пустым.
+     ?_assertEqual({ok, #{<<"valid">>            => false,
+                          <<"keywordLocation">>  => <<>>,
+                          <<"instanceLocation">> => <<>>,
+                          <<"error">>            => <<"schema is false">>,
+                          <<"errors">>           => []}},
                    basic(false, 1))].
+
+%% Провалившаяся ветвь свои units сохраняет, но аннотации из неё в плоскую
+%% проекцию не выходят: провалившийся schema object не производит аннотаций ни
+%% своими keywords, ни keywords своих подсхем.
+dropped_annotation_test_() ->
+    Covering = [{properties, #{<<"a">> => addr(<<"/anyOf/0/properties/a">>)}, undefined,
+                 undefined},
+                {type, [string]}],
+    Artifact = branching([{any_of, [addr(<<"/anyOf/0">>), addr(<<"/anyOf/1">>)]}],
+                         [{<<"/anyOf/0">>, Covering},
+                          {<<"/anyOf/0/properties/a">>, true},
+                          {<<"/anyOf/1">>, true}]),
+    Instance = #{<<"a">> => 1},
+    [?_assertEqual({ok, #{<<"valid">>            => true,
+                          <<"keywordLocation">>  => <<>>,
+                          <<"instanceLocation">> => <<>>,
+                          <<"annotations">>      => []}},
+                   valid_json:validate(Artifact, Instance, [{output, basic}])),
+     %% В дереве units аннотация остаётся: её показывает verbose.
+     ?_assertEqual([{<<"/anyOf">>, true, none},
+                    {<<"/anyOf/0/properties">>, true, {annotation, [<<"a">>]}},
+                    {<<"/anyOf/0/type">>, false,
+                     {error, <<"expected string, got object">>}}],
+                   printed(collect(Artifact, Instance, basic)))].
 
 %% Публичный результат — JSON выбранного формата; valid = false остаётся ok.
 flag_output_test_() ->
@@ -749,11 +794,33 @@ located(Constraints, Instance) ->
     printed(units(Constraints, Instance, basic)).
 
 printed(Units) ->
-    [{valid_json_location:pointer(Keywords), Valid, Detail}
-     || #output_unit{valid = Valid, keyword_location = Keywords,
-                     detail = Detail} <- Units].
+    [shown(Unit) || Unit <- keywords(Units)].
 
-units(Node, Instance, Format) when is_boolean(Node) ->
+shown(#output_unit{valid = Valid, keyword_location = Keywords, detail = Detail}) ->
+    {valid_json_location:pointer(Keywords), Valid, Detail}.
+
+%% Уровни дерева чередуются: под unit'ом node лежат units его keywords, под
+%% unit'ом keyword — units применённых им nodes. Проверкам нужны первые, поэтому
+%% уровень nodes разворачивается насквозь.
+keywords([])      -> [];
+keywords([Root])  -> from_node(Root).
+
+from_node(#output_unit{nested = Keywords}) ->
+    lists:append([[Unit | from_keyword(Unit)] || Unit <- Keywords]).
+
+from_keyword(#output_unit{nested = Nodes}) ->
+    lists:append([from_node(Node) || Node <- Nodes]).
+
+%% Units самих keywords — прямые дети unit'а node: units их ветвей лежат глубже
+%% и говорят о своих значениях, а не о применении.
+own([#output_unit{nested = Keywords}]) -> Keywords.
+
+%% Собственный unit node: он один, потому что вычисление начинается от корня.
+node_unit(Node, Instance) ->
+    [Unit] = units(Node, Instance, basic),
+    Unit.
+
+units(Node, Instance, Format) when is_boolean(Node); is_map(Node) ->
     collect(Node, Instance, Format);
 units(Constraints, Instance, Format) ->
     collect(schema_node(Constraints), Instance, Format).
@@ -844,7 +911,8 @@ coverage_of(Artifact, Instance) ->
 %% Обе локации сразу: keyword следует схеме, инстанс — значению.
 paired(Units) ->
     [{valid_json_location:pointer(Keywords), valid_json_location:pointer(Instance)}
-     || #output_unit{keyword_location = Keywords, instance_location = Instance} <- Units].
+     || #output_unit{keyword_location = Keywords, instance_location = Instance}
+            <- keywords(Units)].
 
 negated(Child, Instance) ->
     Artifact = branching([{'not', addr(<<"/not">>)}], [{<<"/not">>, Child}]),
@@ -869,7 +937,7 @@ tripwire() ->
 
 absolute(Artifact, Instance) ->
     {ok, #eval_result{units = Units}} = valid_json_eval:run(Artifact, Instance, basic),
-    [Location || #output_unit{absolute_location = Location} <- Units].
+    [Location || #output_unit{absolute_location = Location} <- keywords(Units)].
 
 %% Проекция печатает ту же локацию отдельным ключом.
 printed_absolute(Artifact, Instance) ->
@@ -885,6 +953,13 @@ message(Constraint, Instance) ->
 
 basic(Node, Instance) ->
     valid_json:validate(artifact(Node), Instance, [{output, basic}]).
+
+%% Плоский список провалов уже готовой проекции: он показывает, что до неё
+%% дошло, а что осталось только в дереве.
+errors(Artifact, Instance) ->
+    {ok, #{<<"errors">> := Errors}} =
+        valid_json:validate(Artifact, Instance, [{output, basic}]),
+    Errors.
 
 coverage(Constraints, Instance) ->
     {ok, #eval_result{evaluated = Evaluated}} = run(schema_node(Constraints), Instance),

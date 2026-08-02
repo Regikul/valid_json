@@ -9,31 +9,42 @@
 -spec project(format(), #eval_result{}) -> output().
 project(flag, #eval_result{valid = Valid}) ->
     #{<<"valid">> => Valid};
-project(basic, #eval_result{valid = Valid, units = Units}) ->
-    basic(Valid, Units).
+project(basic, #eval_result{units = [Root]}) ->
+    basic(Root).
 
-%% basic — плоский список units применённых keywords: при провале сообщения об
-%% ошибках, при успехе аннотации. Успешный unit без аннотации в плоский список
-%% не попадает, но из дерева не исчезает: его показывает verbose.
--spec basic(boolean(), [#output_unit{}]) -> output().
-basic(false, Units) ->
-    root(false, <<"errors">>, [unit(Unit) || Unit <- Units, failed(Unit)]);
-basic(true, Units) ->
-    root(true, <<"annotations">>, [unit(Unit) || Unit <- Units, annotated(Unit)]).
+%% basic — корневой unit, внутри которого плоский список потомков: при провале
+%% сообщения об ошибках, при успехе аннотации. Ключ соответствует валидности
+%% корня и присутствует всегда, хотя бы пустым; второго ключа рядом быть не
+%% должно (validator-core.md, «Проекции output»).
+-spec basic(#output_unit{}) -> output().
+basic(#output_unit{valid = Valid} = Root) ->
+    (unit(Root))#{key(Valid) => [unit(Unit) || Unit <- flatten(Valid, Root)]}.
 
-%% Корневой unit стоит на пустых локациях: вычисление начинается от корня схемы
-%% и корня инстанса.
--spec root(boolean(), binary(), [output()]) -> output().
-root(Valid, Key, Nested) ->
-    #{<<"valid">>             => Valid,
-      <<"keywordLocation">>   => <<>>,
-      <<"instanceLocation">>  => <<>>,
-      Key                     => Nested}.
+key(false) -> <<"errors">>;
+key(true)  -> <<"annotations">>.
 
-failed(#output_unit{valid = Valid}) -> not Valid.
+%% Потомки в порядке обхода: своё дерево unit уже потерял, поэтому вложенность
+%% в плоском списке не печатается.
+-spec flatten(boolean(), #output_unit{}) -> [#output_unit{}].
+flatten(Valid, #output_unit{nested = Nested}) ->
+    lists:append([[Unit || carries(Valid, Unit)] ++ descend(Valid, Unit) || Unit <- Nested]).
 
-annotated(#output_unit{detail = {annotation, _}}) -> true;
-annotated(#output_unit{})                         -> false.
+%% Провалившийся schema object не производит аннотаций ни своими keywords, ни
+%% keywords своих подсхем (core.txt:1206), поэтому обход в него не спускается.
+%% Из дерева аннотации не исчезают: их показывает verbose. При провале корня
+%% обходится всё — units успешных ветвей остаются диагностическими.
+-spec descend(boolean(), #output_unit{}) -> [#output_unit{}].
+descend(true, #output_unit{valid = false}) -> [];
+descend(Valid, Unit)                       -> flatten(Valid, Unit).
+
+%% В список попадает то, что несёт detail. Unit без него из дерева не исчезает:
+%% его показывает verbose. Ветвление своего сообщения не имеет и потому в
+%% плоском списке не видно, а провалившаяся boolean-схема видна: сообщение есть
+%% только у неё самой.
+-spec carries(boolean(), #output_unit{}) -> boolean().
+carries(false, #output_unit{detail = {error, _}})     -> true;
+carries(true, #output_unit{detail = {annotation, _}}) -> true;
+carries(_Valid, #output_unit{})                       -> false.
 
 -spec unit(#output_unit{}) -> output().
 unit(#output_unit{valid = Valid, keyword_location = Keywords,
