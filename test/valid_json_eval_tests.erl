@@ -213,6 +213,39 @@ schema_units_test_() ->
      ?_assertMatch([{<<"/type">>, false, {error, _}}],
                    [shown(Unit) || Unit <- Failed#output_unit.nested])].
 
+%% Annotation-only keyword выпускает успешный unit со своим значением и не
+%% трогает ни вердикт, ни покрытие. Instance ему безразличен: он описывает
+%% позицию, а не значение, и значение отдаётся целиком, каким бы ни было.
+annotation_test_() ->
+    Deprecated = {annotation, <<"deprecated">>, true},
+    [?_assertEqual([{<<"/deprecated">>, true, {annotation, true}}],
+                   located([Deprecated], 1)),
+     ?_assertEqual([{<<"/title">>, true, {annotation, <<"t">>}}],
+                   located([{annotation, <<"title">>, <<"t">>}], #{<<"a">> => 1})),
+     ?_assertEqual([{<<"/examples">>, true, {annotation, [1, null]}}],
+                   located([{annotation, <<"examples">>, [1, null]}], <<"a">>)),
+     ?_assertEqual({ok, #{<<"valid">> => true}}, validate(schema_node([Deprecated]), 1)),
+     ?_assertEqual(neutral(), coverage([Deprecated], 1)),
+     ?_assertEqual([], units([Deprecated], 1, flag))].
+
+%% В basic аннотация доходит до плоского списка, а провал соседнего keyword
+%% уносит её оттуда: тот же schema object перестаёт производить аннотации.
+%% Из дерева она не исчезает — её показывает verbose.
+annotation_projection_test_() ->
+    Node = schema_node([{type, [string]}, {annotation, <<"title">>, <<"t">>}]),
+    [?_assertEqual({ok, #{<<"valid">>            => true,
+                          <<"keywordLocation">>  => <<>>,
+                          <<"instanceLocation">> => <<>>,
+                          <<"annotations">>      =>
+                              [#{<<"valid">>            => true,
+                                 <<"keywordLocation">>  => <<"/title">>,
+                                 <<"instanceLocation">> => <<>>,
+                                 <<"annotation">>       => <<"t">>}]}},
+                   basic(Node, <<"a">>)),
+     ?_assertMatch([#{<<"keywordLocation">> := <<"/type">>}], errors(artifact(Node), 1)),
+     ?_assertMatch([{<<"/type">>, false, _}, {<<"/title">>, true, {annotation, <<"t">>}}],
+                   located([{type, [string]}, {annotation, <<"title">>, <<"t">>}], 1))].
+
 %% Разрешение адреса в готовом артефакте тотально: каждый указатель выбирает
 %% ровно свой node, а корень resource стоит под пустым указателем.
 resolve_test_() ->

@@ -467,6 +467,37 @@ bad_keyword_value_test_() ->
      ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/enum">>),
                    compile(#{<<"enum">> => 1}))].
 
+%% Annotation-only keyword доносит своё значение до IR как есть. Типы этих
+%% keywords ограничивает метасхема, которую валидатор не применяет, поэтому
+%% запрещённое ею значение всё равно компилируется.
+annotation_test_() ->
+    [?_assertEqual({ok, artifact(schema_node([{annotation, <<"title">>, <<"t">>}]))},
+                   compile(#{<<"title">> => <<"t">>})),
+     ?_assertEqual({ok, artifact(schema_node([{annotation, <<"readOnly">>, true}]))},
+                   compile(#{<<"readOnly">> => true})),
+     ?_assertEqual({ok, artifact(schema_node([{annotation, <<"examples">>, [1, null]}]))},
+                   compile(#{<<"examples">> => [1, null]})),
+     ?_assertEqual({ok, artifact(schema_node([{annotation, <<"default">>, []}]))},
+                   compile(#{<<"default">> => []})),
+     ?_assertEqual({ok, artifact(schema_node([{annotation, <<"title">>, 1}]))},
+                   compile(#{<<"title">> => 1})),
+     %% Внутрь значения компилятор не спускается: schema positions там нет, и
+     %% похожий на схему объект остаётся обычными данными.
+     ?_assertEqual({ok, artifact(schema_node([{annotation, <<"default">>,
+                                               #{<<"unevaluatedItems">> => #{}}}]))},
+                   compile(#{<<"default">> => #{<<"unevaluatedItems">> => #{}}}))].
+
+%% Аннотации стоят в конце порядка обхода: сначала идёт то, что определяет
+%% вердикт, потом то, что только описывает значение.
+annotation_order_test() ->
+    Schema = #{<<"deprecated">> => true,
+               <<"title">>      => <<"t">>,
+               <<"type">>       => <<"integer">>},
+    Constraints = [{type, [integer]},
+                   {annotation, <<"title">>, <<"t">>},
+                   {annotation, <<"deprecated">>, true}],
+    ?assertEqual({ok, artifact(schema_node(Constraints))}, compile(Schema)).
+
 %% Ещё не реализованный keyword обязан останавливать компиляцию, а не молча
 %% исчезать: иначе преждевременно подключённый файл сьюта пройдёт по недоразумению.
 not_implemented_test_() ->

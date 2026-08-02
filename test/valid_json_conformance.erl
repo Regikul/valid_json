@@ -22,7 +22,8 @@
                 "additionalProperties.json", "propertyNames.json",
                 "contains.json", "maxContains.json", "minContains.json",
                 "allOf.json", "anyOf.json", "oneOf.json",
-                "if-then-else.json", "dependentSchemas.json"]).
+                "if-then-else.json", "dependentSchemas.json",
+                "default.json"]).
 
 %% Files, подключённые только к одному dialect: раскладка второго ждёт своей
 %% фазы. `prefixItems.json` в Draft 2019-09 не существует вовсе, а тамошний
@@ -42,7 +43,7 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES и
 %% ?EXCLUDED, и менять его иначе нельзя.
--define(CENSUS, {356, 1312}).
+-define(CENSUS, {362, 1326}).
 
 validation_test_() ->
     Tests = [file_tests(Dir, Dialect, File)

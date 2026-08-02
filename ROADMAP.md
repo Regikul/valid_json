@@ -114,8 +114,10 @@
 - [x] Реализовать `prefixItems` и хвостовой `items` для Draft 2020-12.
 - [x] Реализовать `contains`, `minContains` и `maxContains`; в Draft 2020-12
   записывать совпавшие индексы в разреженную часть маски.
-- [ ] Реализовать annotation-only keywords: `title`, `description`, `default`,
-  `deprecated`, `readOnly`, `writeOnly`, `examples` и content annotations.
+- [x] Реализовать annotation-only keywords: `title`, `description`, `default`,
+  `deprecated`, `readOnly`, `writeOnly` и `examples`. Content annotations
+  вынесены в P8 вместе с остальной обработкой `contentEncoding`,
+  `contentMediaType` и `contentSchema`.
 - [x] Сохранять диагностические units провалившихся ветвей, но очищать их
   effective coverage и annotations.
 - [x] Выпускать отдельный unit для каждого фактически написанного keyword
@@ -130,9 +132,10 @@
   `contains.json`, `minContains.json`, `maxContains.json`, `allOf.json`,
   `anyOf.json`, `oneOf.json`, `if-then-else.json`, `dependentSchemas.json`, а
   также дождавшиеся applicators `enum.json`, `required.json` и — для Draft
-  2020-12 — `prefixItems.json` с `uniqueItems.json`. `not.json` ждёт
-  `unevaluatedProperties` из P4, `items.json` — `$defs` из P3, а его группы с
-  array-form `items` — ещё и P6. Annotation и content files ждут своих keywords.
+  2020-12 — `prefixItems.json` с `uniqueItems.json`, а из annotation files —
+  `default.json`. `not.json` ждёт `unevaluatedProperties` из P4, `items.json` —
+  `$defs` из P3, а его группы с array-form `items` — ещё и P6. `content.json`
+  ждёт своих keywords в P8.
 - [ ] Приёмка P2: обязательные files этой фазы проходят, а `contains` оставляет
   каноническую маску для P4.
 

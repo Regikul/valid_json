@@ -99,7 +99,8 @@ eval_constraints([Constraint | Rest], Instance, Context, Valid, Evaluated, Units
     end.
 
 %% Диспетчер разводит constraints по обработчикам: assertion отвечает на вопрос
-%% о самом значении, applicator спускается в дочерние schemas. Список тегов
+%% о самом значении, applicator спускается в дочерние schemas, а annotation-only
+%% keyword не делает ни того, ни другого и только отдаёт значение. Список тегов
 %% перечислен явно: принадлежность обработчику — часть контракта IR, а не
 %% свойство формы тега.
 -spec dispatch(constraint(), json(), #eval_context{}) -> #eval_result{}.
@@ -125,6 +126,8 @@ dispatch({properties, _, _, _} = Constraint, Instance, Context) ->
     valid_json_object:check(Constraint, Instance, Context);
 dispatch({property_names, _} = Constraint, Instance, Context) ->
     valid_json_object:check(Constraint, Instance, Context);
+dispatch({annotation, _, _} = Constraint, Instance, Context) ->
+    valid_json_annotate:check(Constraint, Instance, Context);
 dispatch(Constraint, Instance, Context) ->
     valid_json_assert:check(Constraint, Instance, Context).
 

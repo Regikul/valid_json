@@ -8,10 +8,18 @@
 
 -export([compile/2]).
 
+%% Keywords, которые ничего не проверяют и только отдают своё значение
+%% аннотацией. Список назван отдельно: он нужен и порядку обхода, и разбору.
+-define(ANNOTATIONS, [<<"title">>, <<"description">>, <<"default">>,
+                      <<"deprecated">>, <<"readOnly">>, <<"writeOnly">>,
+                      <<"examples">>]).
+
 %% Порядок constraints в node задан статически. Наблюдаемое дерево units не
 %% должно зависеть от порядка обхода map, поэтому обход идёт по этому списку,
 %% а не по maps:keys/1. Элемент — один constraint: обычно это сам keyword, а
 %% составной перечисляет свои keywords списком и компилируется за один шаг.
+%% Annotation-only keywords стоят в конце: сначала идёт то, что определяет
+%% вердикт, потом то, что только описывает значение.
 -define(ORDER, [<<"type">>, <<"enum">>, <<"const">>,
                 <<"multipleOf">>,
                 <<"maximum">>, <<"exclusiveMaximum">>,
@@ -26,7 +34,7 @@
                 <<"propertyNames">>,
                 <<"allOf">>, <<"anyOf">>, <<"oneOf">>, <<"not">>,
                 [<<"if">>, <<"then">>, <<"else">>],
-                <<"dependentSchemas">>]).
+                <<"dependentSchemas">> | ?ANNOTATIONS]).
 
 %% Полностью потребляются компилятором и собственного constraint не дают.
 -define(CONSUMED, [<<"$schema">>, <<"$comment">>]).
@@ -161,7 +169,19 @@ constraint(<<"not">> = Keyword, Schema, Location, State) ->
         {ok, Built}        -> {ok, {'not', addr(Child)}, Built};
         {error, _} = Error -> Error
     end;
+%% Значение annotation-only keyword уходит в IR как есть, без проверки и
+%% нормализации. Типы этих keywords ограничивает метасхема, но валидатор её не
+%% применяет, поэтому `default: []` рядом с `type: integer` остаётся корректной
+%% схемой (suite, `default.json`), а `bad_keyword_value` здесь невозможен.
 constraint(Keyword, Schema, Location, State) ->
+    case lists:member(Keyword, ?ANNOTATIONS) of
+        true  -> {ok, {annotation, Keyword, maps:get(Keyword, Schema)}, State};
+        false -> asserted(Keyword, Schema, Location, State)
+    end.
+
+-spec asserted(binary(), #{binary() => json()}, [binary()], state()) ->
+          {ok, constraint(), state()} | {error, #schema_error{}}.
+asserted(Keyword, Schema, Location, State) ->
     case assertion(Keyword, maps:get(Keyword, Schema)) of
         {ok, Constraint} -> {ok, Constraint, State};
         {error, Reason}  -> {error, schema_error(Reason, [Keyword | Location])}
