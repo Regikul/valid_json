@@ -1,7 +1,8 @@
-%% Object applicators. `properties`, `patternProperties` и `additionalProperties`
-%% свёрнуты компилятором в один constraint, но каждый написанный keyword
-%% выпускает собственный unit и собственную аннотацию
-%% (okf/architecture/validator-core.md, «Контракт handler'а»).
+%% Object applicators: спуск в подсхемы по свойствам объекта. `properties`,
+%% `patternProperties` и `additionalProperties` свёрнуты компилятором в один
+%% constraint, но каждый написанный keyword выпускает собственный unit и
+%% собственную аннотацию (okf/architecture/validator-core.md, «Контракт
+%% handler'а»). `propertyNames` стоит отдельно: он спускается к именам свойств.
 -module(valid_json_object).
 
 -include("valid_json_core.hrl").
@@ -27,7 +28,41 @@ check({properties, Props, Patterns, Additional}, Instance, Context) when is_map(
 check({properties, Props, Patterns, Additional}, _Instance, Context) ->
     inapplicable([{<<"properties">>, Props},
                   {<<"patternProperties">>, Patterns},
-                  {<<"additionalProperties">>, Additional}], Context).
+                  {<<"additionalProperties">>, Additional}], Context);
+check({property_names, Addr}, Instance, Context) when is_map(Instance) ->
+    names(lists:sort(maps:keys(Instance)), Addr, Context);
+check({property_names, Addr}, _Instance, Context) ->
+    inapplicable([{<<"propertyNames">>, Addr}], Context).
+
+%% Подсхема применяется к самому имени свойства, а не к его значению: вычисляемым
+%% значением становится строка имени, а instance location указывает на свойство.
+%% Аннотации keyword не производит и потому покрытия не вносит: для
+%% `unevaluatedProperties` имя остаётся непокрытым.
+-spec names([binary()], addr(), #eval_context{}) -> #eval_result{}.
+names(Names, Addr, Context) ->
+    {Valid, Units} = scan(Names, Addr, Context, true, []),
+    #eval_result{valid     = Valid,
+                 evaluated = valid_json_evaluated:neutral(),
+                 units     = own(<<"propertyNames">>, Valid, name_detail(Valid), Context) ++ Units}.
+
+-spec scan([binary()], addr(), #eval_context{}, boolean(), [#output_unit{}]) ->
+          {boolean(), [#output_unit{}]}.
+scan([], _Addr, _Context, Valid, Units) ->
+    {Valid, lists:reverse(Units)};
+scan([Name | Rest], Addr, Context, Valid, Units) ->
+    #eval_result{valid = ValidOne, units = UnitsOne} =
+        branch(Addr, [<<"propertyNames">>], Name, Name, Context),
+    Accumulated = Valid andalso ValidOne,
+    Collected = lists:reverse(UnitsOne, Units),
+    case Accumulated =:= false andalso Context#eval_context.mode =:= flag of
+        true  -> {false, lists:reverse(Collected)};
+        false -> scan(Rest, Addr, Context, Accumulated, Collected)
+    end.
+
+%% Аннотации у keyword нет, поэтому у успешного unit деталей тоже нет.
+-spec name_detail(boolean()) -> detail().
+name_detail(true)  -> none;
+name_detail(false) -> {error, message(<<"propertyNames">>)}.
 
 -spec covered(#{binary() => addr()} | undefined, [{regex(), addr()}] | undefined,
               [binary()]) -> [binary()].
@@ -102,7 +137,7 @@ keyword(Keyword, Applications, Instance, Context) ->
     Applied = lists:usort(Names),
     #eval_result{valid     = Valid,
                  evaluated = coverage(Valid, Applied),
-                 units     = own(Keyword, Valid, Applied, Context) ++ Units}.
+                 units     = own(Keyword, Valid, detail(Keyword, Valid, Applied), Context) ++ Units}.
 
 -spec coverage(boolean(), [binary()]) -> evaluated().
 coverage(true, Applied) -> valid_json_evaluated:properties(Applied);
@@ -134,11 +169,11 @@ branch(Addr, Tail, Name, Value, Context) ->
     valid_json_eval:eval(Addr, Value, Nested).
 
 %% В режиме flag units не собираются вовсе: ответ исчерпывается вердиктом.
--spec own(binary(), boolean(), [binary()], #eval_context{}) -> [#output_unit{}].
-own(_Keyword, _Valid, _Applied, #eval_context{mode = flag}) ->
+-spec own(binary(), boolean(), detail(), #eval_context{}) -> [#output_unit{}].
+own(_Keyword, _Valid, _Detail, #eval_context{mode = flag}) ->
     [];
-own(Keyword, Valid, Applied, Context) ->
-    [valid_json_unit:keyword(Keyword, Valid, detail(Keyword, Valid, Applied), Context)].
+own(Keyword, Valid, Detail, Context) ->
+    [valid_json_unit:keyword(Keyword, Valid, Detail, Context)].
 
 -spec detail(binary(), boolean(), [binary()]) -> detail().
 detail(_Keyword, true, Applied) -> {annotation, Applied};
@@ -150,7 +185,9 @@ message(<<"properties">>) ->
 message(<<"patternProperties">>) ->
     <<"object properties do not match their pattern schemas">>;
 message(<<"additionalProperties">>) ->
-    <<"additional object properties do not match the schema">>.
+    <<"additional object properties do not match the schema">>;
+message(<<"propertyNames">>) ->
+    <<"object property names do not match the schema">>.
 
 -spec inapplicable([{binary(), term()}], #eval_context{}) -> #eval_result{}.
 inapplicable(_Slots, #eval_context{mode = flag}) ->

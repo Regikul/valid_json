@@ -9,7 +9,6 @@
 
 %% Файл подключается целиком и только когда его схемы компилируются полностью.
 %% Из applicator-файлов ждут своего: `not.json` — `unevaluatedProperties`,
-%% `additionalProperties.json` — `dependentSchemas` и `propertyNames`,
 %% `uniqueItems.json` — array applicators.
 -define(FILES, ["boolean_schema.json", "type.json", "const.json", "enum.json",
                 "multipleOf.json",
@@ -20,8 +19,9 @@
                 "maxProperties.json", "minProperties.json",
                 "required.json", "dependentRequired.json",
                 "properties.json", "patternProperties.json",
+                "additionalProperties.json", "propertyNames.json",
                 "allOf.json", "anyOf.json", "oneOf.json",
-                "if-then-else.json"]).
+                "if-then-else.json", "dependentSchemas.json"]).
 
 %% Объявленные расхождения основного набора: okf/testing/conformance-policy.md,
 %% раздел «Известные расхождения». Группа исключается поимённо, чтобы остальные
@@ -36,7 +36,7 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES и
 %% ?EXCLUDED, и менять его иначе нельзя.
--define(CENSUS, {268, 980}).
+-define(CENSUS, {306, 1106}).
 
 validation_test_() ->
     Tests = [file_tests(Dir, Dialect, File)

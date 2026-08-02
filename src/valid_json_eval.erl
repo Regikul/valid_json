@@ -108,7 +108,11 @@ dispatch({'not', _} = Constraint, Instance, Context) ->
     valid_json_apply:check(Constraint, Instance, Context);
 dispatch({if_then_else, _, _, _} = Constraint, Instance, Context) ->
     valid_json_apply:check(Constraint, Instance, Context);
+dispatch({dependent_schemas, _} = Constraint, Instance, Context) ->
+    valid_json_apply:check(Constraint, Instance, Context);
 dispatch({properties, _, _, _} = Constraint, Instance, Context) ->
+    valid_json_object:check(Constraint, Instance, Context);
+dispatch({property_names, _} = Constraint, Instance, Context) ->
     valid_json_object:check(Constraint, Instance, Context);
 dispatch(Constraint, Instance, Context) ->
     valid_json_assert:check(Constraint, Instance, Context).

@@ -107,10 +107,10 @@
 - [x] Реализовать `allOf`, `anyOf`, `oneOf` и `not` с корректным объединением и
   отбрасыванием effective coverage.
 - [x] Реализовать составной constraint `if` / `then` / `else`.
-- [ ] Реализовать `dependentSchemas`.
+- [x] Реализовать `dependentSchemas`.
 - [x] Реализовать составной object constraint: `properties`,
   `patternProperties` и `additionalProperties`.
-- [ ] Реализовать `propertyNames`.
+- [x] Реализовать `propertyNames`.
 - [ ] Реализовать schema-form `items` для обоих dialects.
 - [ ] Реализовать `prefixItems` и хвостовой `items` для Draft 2020-12.
 - [ ] Реализовать `contains`, `minContains` и `maxContains`; в Draft 2020-12
@@ -127,11 +127,12 @@
   структурных режимах и правила покрытия ветвей.
 - [~] Подключить соответствующие обязательные applicator, annotation и content
   validation files обоих dialects: подключены `properties.json`,
-  `patternProperties.json`, `allOf.json`, `anyOf.json`, `oneOf.json`,
-  `if-then-else.json`, а также дождавшиеся applicators `enum.json` и
-  `required.json`. `not.json` ждёт
-  `unevaluatedProperties` из P4, `additionalProperties.json` —
-  `dependentSchemas` и `propertyNames`, `uniqueItems.json` — array applicators.
+  `patternProperties.json`, `additionalProperties.json`, `propertyNames.json`,
+  `allOf.json`, `anyOf.json`, `oneOf.json`, `if-then-else.json`,
+  `dependentSchemas.json`, а также дождавшиеся applicators `enum.json` и
+  `required.json`. `not.json` ждёт `unevaluatedProperties` из P4,
+  `uniqueItems.json` — array applicators. Annotation и content files ждут своих
+  keywords.
 - [ ] Приёмка P2: обязательные files этой фазы проходят, а `contains` оставляет
   каноническую маску для P4.
 

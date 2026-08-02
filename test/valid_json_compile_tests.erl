@@ -214,6 +214,49 @@ object_error_test_() ->
      ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/additionalProperties">>),
                    compile(#{<<"additionalProperties">> => 1}))].
 
+%% Своего сегмента у ветви нет: она стоит на самом keyword.
+property_names_test_() ->
+    [?_assertEqual({ok, artifact(#{<<>> => schema_node([{property_names,
+                                                         addr(<<"/propertyNames">>)}]),
+                                   <<"/propertyNames">> => schema_node([{max_length, 3}])})},
+                   compile(#{<<"propertyNames">> => #{<<"maxLength">> => 3}})),
+     ?_assertEqual({ok, artifact(#{<<>> => schema_node([{property_names,
+                                                         addr(<<"/propertyNames">>)}]),
+                                   <<"/propertyNames">> => false})},
+                   compile(#{<<"propertyNames">> => false}))].
+
+property_names_error_test_() ->
+    [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/propertyNames">>),
+                   compile(#{<<"propertyNames">> => 42})),
+     ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/propertyNames/maxLength">>),
+                   compile(#{<<"propertyNames">> => #{<<"maxLength">> => null}}))].
+
+%% Раскладка та же, что у `properties`: имя свойства становится сегментом
+%% локации и экранируется в указателе как обычный сегмент.
+dependent_schemas_test_() ->
+    [?_assertEqual({ok, artifact(#{<<>> => schema_node([{dependent_schemas,
+                                                         #{<<"a">> => addr(<<"/dependentSchemas/a">>)}}]),
+                                   <<"/dependentSchemas/a">> =>
+                                       schema_node([{required, [<<"b">>]}])})},
+                   compile(#{<<"dependentSchemas">> =>
+                                 #{<<"a">> => #{<<"required">> => [<<"b">>]}}})),
+     %% Написанный пустой keyword — пустая map, а не отсутствие keyword.
+     ?_assertEqual({ok, artifact(schema_node([{dependent_schemas, #{}}]))},
+                   compile(#{<<"dependentSchemas">> => #{}})),
+     ?_assertEqual({ok, artifact(#{<<>> => schema_node([{dependent_schemas,
+                                                         #{<<"a/b">> =>
+                                                               addr(<<"/dependentSchemas/a~1b">>)}}]),
+                                   <<"/dependentSchemas/a~1b">> => true})},
+                   compile(#{<<"dependentSchemas">> => #{<<"a/b">> => true}}))].
+
+dependent_schemas_error_test_() ->
+    [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/dependentSchemas">>),
+                   compile(#{<<"dependentSchemas">> => 42})),
+     ?_assertEqual(schema_error({bad_keyword_value, null},
+                                <<"/dependentSchemas/a/maximum">>),
+                   compile(#{<<"dependentSchemas">> =>
+                                 #{<<"a">> => #{<<"maximum">> => null}}}))].
+
 %% Условные keywords тоже дают один constraint, и своего сегмента у ветви нет:
 %% каждая стоит на собственном keyword.
 conditional_test_() ->
@@ -281,18 +324,24 @@ order_test() ->
                <<"multipleOf">> => 1, <<"pattern">> => <<"a">>,
                <<"required">> => [<<"a">>], <<"uniqueItems">> => true,
                <<"maxLength">> => 5, <<"not">> => true, <<"allOf">> => [true],
-               <<"if">> => true},
+               <<"if">> => true, <<"propertyNames">> => true,
+               <<"dependentSchemas">> => #{<<"a">> => true}},
     Expected = schema_node([{type, [number]}, {enum, [1]}, {const, 1},
                             {multiple_of, 1}, {maximum, 4},
                             {exclusive_minimum, 0}, {max_length, 5},
                             {pattern, regex(<<"a">>)}, {unique_items, true},
                             {required, [<<"a">>]},
+                            {property_names, addr(<<"/propertyNames">>)},
                             {all_of, [addr(<<"/allOf/0">>)]}, {'not', addr(<<"/not">>)},
-                            {if_then_else, addr(<<"/if">>), undefined, undefined}]),
-    ?assertEqual({ok, artifact(#{<<>>           => Expected,
-                                 <<"/allOf/0">> => true,
-                                 <<"/not">>     => true,
-                                 <<"/if">>      => true})},
+                            {if_then_else, addr(<<"/if">>), undefined, undefined},
+                            {dependent_schemas,
+                             #{<<"a">> => addr(<<"/dependentSchemas/a">>)}}]),
+    ?assertEqual({ok, artifact(#{<<>>                      => Expected,
+                                 <<"/allOf/0">>            => true,
+                                 <<"/not">>                => true,
+                                 <<"/if">>                 => true,
+                                 <<"/propertyNames">>      => true,
+                                 <<"/dependentSchemas/a">> => true})},
                  compile(Schema)).
 
 %% Потребляются компилятором и собственного constraint не дают.
@@ -315,8 +364,8 @@ bad_keyword_value_test_() ->
 %% Ещё не реализованный keyword обязан останавливать компиляцию, а не молча
 %% исчезать: иначе преждевременно подключённый файл сьюта пройдёт по недоразумению.
 not_implemented_test_() ->
-    [?_assertEqual(schema_error({not_implemented, <<"propertyNames">>}, <<"/propertyNames">>),
-                   compile(#{<<"propertyNames">> => #{}})),
+    [?_assertEqual(schema_error({not_implemented, <<"items">>}, <<"/items">>),
+                   compile(#{<<"items">> => #{}})),
      ?_assertEqual(schema_error({not_implemented, <<"$ref">>}, <<"/$ref">>),
                    compile(#{<<"$ref">> => <<"#">>, <<"type">> => <<"object">>}))].
 

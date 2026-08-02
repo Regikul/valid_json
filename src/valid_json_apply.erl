@@ -36,7 +36,42 @@ check({'not', Addr}, Instance, Context) ->
     result(<<"not">>, not Valid, <<"value matches the subschema">>,
            valid_json_evaluated:neutral(), Units, Context);
 check({if_then_else, If, Then, Else}, Instance, Context) ->
-    conditional(If, Then, Else, Instance, Context).
+    conditional(If, Then, Else, Instance, Context);
+%% Подсхему выбирает присутствие свойства, а применяется она ко всему instance,
+%% поэтому keyword остаётся in-place applicator. Порядок обхода задан сортировкой
+%% имён: наблюдаемое дерево units не должно зависеть от порядка обхода map.
+check({dependent_schemas, Schemas}, Instance, Context) when is_map(Instance) ->
+    Present = [{Name, maps:get(Name, Schemas)}
+               || Name <- lists:sort(maps:keys(Schemas)), is_map_key(Name, Instance)],
+    dependent(Present, Instance, Context);
+%% Keyword применяется только к объекту: другое значение даёт успешный unit без
+%% error и annotation, а не отказ.
+check({dependent_schemas, _Schemas}, _Instance, Context) ->
+    result(<<"dependentSchemas">>, true, none, valid_json_evaluated:neutral(), [], Context).
+
+%% Зависимости конъюнктивны, как ветви `allOf`, и покрытие каждой идёт наверх:
+%% подсхема применяется к тому же instance. Провалившаяся своё покрытие очистила
+%% сама, поэтому отдельного условия здесь нет.
+-spec dependent([{binary(), addr()}], json(), #eval_context{}) -> #eval_result{}.
+dependent(Present, Instance, Context) ->
+    {Valid, Evaluated, Units} =
+        dependent(Present, Instance, Context, true, valid_json_evaluated:neutral(), []),
+    result(<<"dependentSchemas">>, Valid,
+           <<"value does not match the subschema of a present property">>,
+           Evaluated, Units, Context).
+
+dependent([], _Instance, _Context, Valid, Evaluated, Units) ->
+    {Valid, Evaluated, lists:reverse(Units)};
+dependent([{Name, Addr} | Rest], Instance, Context, Valid, Evaluated, Units) ->
+    #eval_result{valid = ValidOne, evaluated = EvaluatedOne, units = UnitsOne} =
+        branch(Addr, <<"dependentSchemas">>, [Name], Instance, Context),
+    Accumulated = Valid andalso ValidOne,
+    Merged = valid_json_evaluated:merge(Evaluated, EvaluatedOne),
+    Collected = lists:reverse(UnitsOne, Units),
+    case Accumulated =:= false andalso Context#eval_context.mode =:= flag of
+        true  -> {false, Merged, lists:reverse(Collected)};
+        false -> dependent(Rest, Instance, Context, Accumulated, Merged, Collected)
+    end.
 
 %% Вердикта `if` не меняет: он выбирает ветвь (core.txt:2388). Собственный unit
 %% он выпускает всегда и всегда успешный — ошибки у этого keyword не бывает, а

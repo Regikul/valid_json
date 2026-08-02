@@ -395,6 +395,84 @@ object_coverage_test_() ->
      ?_assertEqual({[<<"a">>], 0, []},
                    coverage_of(Nested, #{<<"a">> => #{<<"inner">> => 1}}))].
 
+%% Подсхема применяется к самому имени свойства, а не к его значению, поэтому
+%% ограничивает строку и проходит по всем именам объекта.
+property_names_test_() ->
+    Short = property_names([{max_length, 2}]),
+    [?_assert(verdict(Short, #{<<"ab">> => 1})),
+     ?_assertNot(verdict(Short, #{<<"ab">> => 1, <<"abc">> => 2})),
+     %% Имя всегда строка, поэтому подсхема видит именно её.
+     ?_assert(verdict(property_names([{type, [string]}]), #{<<"a">> => 1})),
+     ?_assertNot(verdict(property_names([{type, [integer]}]), #{<<"a">> => 1})),
+     %% Применять нечего: пустой объект проходит и false-схему.
+     ?_assert(verdict(property_names(false), #{})),
+     %% Не-объект constraint не ограничивает.
+     ?_assert(verdict(property_names(false), 1)),
+     ?_assert(verdict(property_names(false), [#{<<"a">> => 1}]))].
+
+%% Локация keyword следует схеме, локация инстанса — свойству, имя которого
+%% проверяется. Собственный unit стоит перед units своих ветвей.
+property_names_units_test_() ->
+    Artifact = property_names([{max_length, 2}]),
+    [?_assertEqual([{<<"/propertyNames">>, <<>>},
+                    {<<"/propertyNames/maxLength">>, <<"/ab">>},
+                    {<<"/propertyNames/maxLength">>, <<"/abc">>}],
+                   paired(collect(Artifact, #{<<"abc">> => 1, <<"ab">> => 2}, basic))),
+     %% Аннотации keyword не производит, поэтому у успешного unit деталей нет.
+     ?_assertMatch([{<<"/propertyNames">>, true, none} | _],
+                   printed(collect(Artifact, #{<<"ab">> => 1}, basic))),
+     ?_assertMatch([{<<"/propertyNames">>, false, {error, _}} | _],
+                   printed(collect(Artifact, #{<<"abc">> => 1}, basic))),
+     %% Не-объект: unit успешный и без деталей.
+     ?_assertEqual([{<<"/propertyNames">>, true, none}],
+                   printed(collect(Artifact, 1, basic)))].
+
+%% Аннотации keyword не производит, поэтому и покрытия не вносит: для
+%% `unevaluatedProperties` имя остаётся непокрытым.
+property_names_coverage_test() ->
+    ?assertEqual(neutral(),
+                 coverage_of(property_names([{max_length, 2}]), #{<<"ab">> => 1})).
+
+%% Подсхему выбирает присутствие свойства, а применяется она ко всему instance.
+dependent_schemas_test_() ->
+    Artifact = dependent_schemas([{<<"a">>, [{required, [<<"b">>]}]},
+                                  {<<"c">>, [{max_properties, 1}]}]),
+    [?_assert(verdict(Artifact, #{})),
+     %% Свойства нет — зависимость не применяется вовсе.
+     ?_assert(verdict(Artifact, #{<<"b">> => 1})),
+     ?_assertNot(verdict(Artifact, #{<<"a">> => 1})),
+     ?_assert(verdict(Artifact, #{<<"a">> => 1, <<"b">> => 2})),
+     ?_assert(verdict(Artifact, #{<<"c">> => 1})),
+     %% Применились обе зависимости, и нарушение любой из них видно.
+     ?_assertNot(verdict(Artifact, #{<<"a">> => 1, <<"b">> => 2, <<"c">> => 3})),
+     %% Не-объект constraint не ограничивает.
+     ?_assert(verdict(dependent_schemas([{<<"a">>, false}]), 1))].
+
+%% Keyword — in-place applicator: стек инстанса подсхема не двигает, а сегментом
+%% локации становится имя свойства.
+dependent_schemas_units_test_() ->
+    Artifact = dependent_schemas([{<<"a">>, [{required, [<<"b">>]}]}]),
+    [?_assertEqual([{<<"/dependentSchemas">>, <<>>},
+                    {<<"/dependentSchemas/a/required">>, <<>>}],
+                   paired(collect(Artifact, #{<<"a">> => 1}, basic))),
+     ?_assertMatch([{<<"/dependentSchemas">>, false, {error, _}} | _],
+                   printed(collect(Artifact, #{<<"a">> => 1}, basic))),
+     %% Ни одна зависимость не применилась: unit остаётся, деталей у него нет.
+     ?_assertEqual([{<<"/dependentSchemas">>, true, none}],
+                   printed(collect(Artifact, #{}, basic)))].
+
+%% Покрытие применившейся зависимости идёт наверх: подсхема стоит на том же
+%% значении, что и сам schema object.
+dependent_schemas_coverage_test_() ->
+    Covering = [{properties, #{<<"a">> => addr(<<"/dependentSchemas/a/properties/a">>)},
+                 undefined, undefined}],
+    Artifact = branching([{dependent_schemas, #{<<"a">> => addr(<<"/dependentSchemas/a">>)}}],
+                         [{<<"/dependentSchemas/a">>, Covering},
+                          {<<"/dependentSchemas/a/properties/a">>, true}]),
+    [?_assertEqual({[<<"a">>], 0, []}, coverage_of(Artifact, #{<<"a">> => 1})),
+     %% Свойства нет — применять нечего, покрытия не появляется.
+     ?_assertEqual(neutral(), coverage_of(Artifact, #{<<"b">> => 1}))].
+
 %% Обрыв разрешён только в режиме flag. Ветвь-ловушка при вычислении падает,
 %% поэтому её достижение видно прямо в результате.
 short_circuit_test_() ->
@@ -554,6 +632,20 @@ object() ->
               [{<<"/properties/a">>, [{type, [integer]}]},
                {<<"/patternProperties/^b">>, [{type, [string]}]},
                {<<"/additionalProperties">>, [{type, [integer]}]}]).
+
+%% Своего сегмента у ветви нет: она стоит на самом keyword, поэтому фикстуре
+%% достаточно одной дочерней schema.
+property_names(Child) ->
+    branching([{property_names, addr(<<"/propertyNames">>)}],
+              [{<<"/propertyNames">>, Child}]).
+
+%% Зависимости адресуются по имени свойства, как их кладёт компилятор, поэтому
+%% фикстуре достаточно пар «имя — дочерняя schema».
+dependent_schemas(Deps) ->
+    Pointer = fun(Name) -> <<"/dependentSchemas/", Name/binary>> end,
+    Addrs = maps:from_list([{Name, addr(Pointer(Name))} || {Name, _Child} <- Deps]),
+    branching([{dependent_schemas, Addrs}],
+              [{Pointer(Name), Child} || {Name, Child} <- Deps]).
 
 %% Составной условный constraint: каждая ветвь стоит на своём keyword, а
 %% ненаписанная задаётся `undefined` и в артефакт не попадает.

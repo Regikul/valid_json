@@ -21,8 +21,10 @@
                 <<"maxProperties">>, <<"minProperties">>,
                 <<"required">>, <<"dependentRequired">>,
                 [<<"properties">>, <<"patternProperties">>, <<"additionalProperties">>],
+                <<"propertyNames">>,
                 <<"allOf">>, <<"anyOf">>, <<"oneOf">>, <<"not">>,
-                [<<"if">>, <<"then">>, <<"else">>]]).
+                [<<"if">>, <<"then">>, <<"else">>],
+                <<"dependentSchemas">>]).
 
 %% Полностью потребляются компилятором и собственного constraint не дают.
 -define(CONSUMED, [<<"$schema">>, <<"$comment">>]).
@@ -115,6 +117,20 @@ constraint([<<"properties">>, <<"patternProperties">>, <<"additionalProperties">
     object(Schema, Location, Nodes);
 constraint([<<"if">>, <<"then">>, <<"else">>], Schema, Location, Nodes) ->
     conditional(Schema, Location, Nodes);
+%% Своего сегмента у ветви нет: она стоит на самом keyword, как и у
+%% `additionalProperties`.
+constraint(<<"propertyNames">> = Keyword, Schema, Location, Nodes) ->
+    case subschema(maps:get(Keyword, Schema), [Keyword | Location], Nodes) of
+        {ok, Addr, Built}  -> {ok, {property_names, Addr}, Built};
+        {error, _} = Error -> Error
+    end;
+%% Раскладка та же, что у `properties`: имя свойства становится сегментом
+%% локации. Отличие только в применении — подсхема достаётся всему instance.
+constraint(<<"dependentSchemas">> = Keyword, Schema, Location, Nodes) ->
+    case named(maps:get(Keyword, Schema), [Keyword | Location], Nodes) of
+        {ok, Addrs, Built}  -> {ok, {dependent_schemas, Addrs}, Built};
+        {error, _} = Error -> Error
+    end;
 constraint(<<"allOf">> = Keyword, Schema, Location, Nodes) ->
     branches(all_of, Keyword, maps:get(Keyword, Schema), Location, Nodes);
 constraint(<<"anyOf">> = Keyword, Schema, Location, Nodes) ->
