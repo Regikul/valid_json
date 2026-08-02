@@ -10,7 +10,8 @@
 
 %% Порядок constraints в node задан статически. Наблюдаемое дерево units не
 %% должно зависеть от порядка обхода map, поэтому обход идёт по этому списку,
-%% а не по maps:keys/1.
+%% а не по maps:keys/1. Элемент — один constraint: обычно это сам keyword, а
+%% составной перечисляет свои keywords списком и компилируется за один шаг.
 -define(ORDER, [<<"type">>, <<"enum">>, <<"const">>,
                 <<"multipleOf">>,
                 <<"maximum">>, <<"exclusiveMaximum">>,
@@ -19,6 +20,7 @@
                 <<"maxItems">>, <<"minItems">>, <<"uniqueItems">>,
                 <<"maxProperties">>, <<"minProperties">>,
                 <<"required">>, <<"dependentRequired">>,
+                [<<"properties">>, <<"patternProperties">>, <<"additionalProperties">>],
                 <<"allOf">>, <<"anyOf">>, <<"oneOf">>, <<"not">>]).
 
 %% Полностью потребляются компилятором и собственного constraint не дают.
@@ -40,7 +42,7 @@ compile(Schema, Dialect) ->
 compile_node(Schema, Location, Nodes) when is_boolean(Schema) ->
     {ok, place(Location, Schema, Nodes)};
 compile_node(Schema, Location, Nodes) when is_map(Schema) ->
-    case maps:keys(Schema) -- (?ORDER ++ ?CONSUMED) of
+    case maps:keys(Schema) -- (lists:flatten(?ORDER) ++ ?CONSUMED) of
         [] ->
             case constraints(Schema, Location, Nodes) of
                 {ok, Constraints, Built} ->
@@ -71,19 +73,21 @@ addr(Location) ->
 schema_error(Reason, Location) ->
     #schema_error{reason = Reason, location = addr(Location)}.
 
-%% Обход keywords несёт накопленные nodes: applicator дописывает в них свои
-%% дочерние schemas, assertion передаёт дальше без изменений.
+%% Обход групп несёт накопленные nodes: applicator дописывает в них свои
+%% дочерние schemas, assertion передаёт дальше без изменений. Группа, ни один
+%% keyword которой не написан, constraint не даёт.
 -spec constraints(#{binary() => json()}, [binary()], nodes()) ->
           {ok, [constraint()], nodes()} | {error, #schema_error{}}.
 constraints(Schema, Location, Nodes) ->
-    Step = fun(_Keyword, {error, _} = Error) ->
+    Step = fun(_Group, {error, _} = Error) ->
                    Error;
-              (Keyword, {ok, Acc, Built}) ->
-                   case maps:find(Keyword, Schema) of
-                       error ->
+              (Group, {ok, Acc, Built}) ->
+                   case lists:any(fun(Keyword) -> is_map_key(Keyword, Schema) end,
+                                  keywords(Group)) of
+                       false ->
                            {ok, Acc, Built};
-                       {ok, Value} ->
-                           case constraint(Keyword, Value, Location, Built) of
+                       true ->
+                           case constraint(Group, Schema, Location, Built) of
                                {ok, Constraint, Grown} -> {ok, [Constraint | Acc], Grown};
                                {error, _} = Error      -> Error
                            end
@@ -94,24 +98,120 @@ constraints(Schema, Location, Nodes) ->
         {error, _} = Error -> Error
     end.
 
--spec constraint(binary(), json(), [binary()], nodes()) ->
+%% Одиночный keyword записан в ?ORDER сам собой, группа — списком.
+-spec keywords(binary() | [binary()]) -> [binary()].
+keywords(Keyword) when is_binary(Keyword) -> [Keyword];
+keywords(Group)                           -> Group.
+
+%% Разбор идёт по элементу ?ORDER целиком, а не по написанному подмножеству:
+%% элемент — статический литерал, и по нему видно, какой constraint собирается.
+-spec constraint(binary() | [binary()], #{binary() => json()}, [binary()], nodes()) ->
           {ok, constraint(), nodes()} | {error, #schema_error{}}.
-constraint(<<"allOf">> = Keyword, Value, Location, Nodes) ->
-    branches(all_of, Keyword, Value, Location, Nodes);
-constraint(<<"anyOf">> = Keyword, Value, Location, Nodes) ->
-    branches(any_of, Keyword, Value, Location, Nodes);
-constraint(<<"oneOf">> = Keyword, Value, Location, Nodes) ->
-    branches(one_of, Keyword, Value, Location, Nodes);
-constraint(<<"not">> = Keyword, Value, Location, Nodes) ->
+constraint([<<"properties">>, <<"patternProperties">>, <<"additionalProperties">>],
+           Schema, Location, Nodes) ->
+    object(Schema, Location, Nodes);
+constraint(<<"allOf">> = Keyword, Schema, Location, Nodes) ->
+    branches(all_of, Keyword, maps:get(Keyword, Schema), Location, Nodes);
+constraint(<<"anyOf">> = Keyword, Schema, Location, Nodes) ->
+    branches(any_of, Keyword, maps:get(Keyword, Schema), Location, Nodes);
+constraint(<<"oneOf">> = Keyword, Schema, Location, Nodes) ->
+    branches(one_of, Keyword, maps:get(Keyword, Schema), Location, Nodes);
+constraint(<<"not">> = Keyword, Schema, Location, Nodes) ->
     Child = [Keyword | Location],
-    case compile_node(Value, Child, Nodes) of
+    case compile_node(maps:get(Keyword, Schema), Child, Nodes) of
         {ok, Built}        -> {ok, {'not', addr(Child)}, Built};
         {error, _} = Error -> Error
     end;
-constraint(Keyword, Value, Location, Nodes) ->
-    case assertion(Keyword, Value) of
+constraint(Keyword, Schema, Location, Nodes) ->
+    case assertion(Keyword, maps:get(Keyword, Schema)) of
         {ok, Constraint} -> {ok, Constraint, Nodes};
         {error, Reason}  -> {error, schema_error(Reason, [Keyword | Location])}
+    end.
+
+%% Три object applicators сворачиваются в один constraint: `additionalProperties`
+%% смотрит только на соседние `properties` и `patternProperties`, и статически
+%% сохранённые имена с паттернами не дают воспользоваться общим накопителем
+%% аннотаций (validator-core.md, «Составные constraints»). Ненаписанный keyword
+%% оставляет свой слот `undefined`.
+-spec object(#{binary() => json()}, [binary()], nodes()) ->
+          {ok, constraint(), nodes()} | {error, #schema_error{}}.
+object(Schema, Location, Nodes) ->
+    Slots = [{<<"properties">>, fun named/3},
+             {<<"patternProperties">>, fun patterned/3},
+             {<<"additionalProperties">>, fun additional/3}],
+    Step = fun(_Slot, {error, _} = Error) ->
+                   Error;
+              ({Keyword, Build}, {ok, Acc, Built}) ->
+                   case maps:find(Keyword, Schema) of
+                       error ->
+                           {ok, [undefined | Acc], Built};
+                       {ok, Value} ->
+                           case Build(Value, [Keyword | Location], Built) of
+                               {ok, Slot, Grown}  -> {ok, [Slot | Acc], Grown};
+                               {error, _} = Error -> Error
+                           end
+                   end
+           end,
+    case lists:foldl(Step, {ok, [], Nodes}, Slots) of
+        {ok, [Additional, Patterns, Props], Built} ->
+            {ok, {properties, Props, Patterns, Additional}, Built};
+        {error, _} = Error ->
+            Error
+    end.
+
+%% Имя свойства становится сегментом локации. Обход идёт по отсортированным
+%% именам, чтобы первая ошибка не зависела от порядка обхода map.
+-spec named(json(), [binary()], nodes()) ->
+          {ok, #{binary() => addr()}, nodes()} | {error, #schema_error{}}.
+named(Value, Location, Nodes) when is_map(Value) ->
+    Step = fun(_Name, {error, _} = Error) ->
+                   Error;
+              (Name, {ok, Acc, Built}) ->
+                   Child = [Name | Location],
+                   case compile_node(maps:get(Name, Value), Child, Built) of
+                       {ok, Grown}        -> {ok, Acc#{Name => addr(Child)}, Grown};
+                       {error, _} = Error -> Error
+                   end
+           end,
+    lists:foldl(Step, {ok, #{}, Nodes}, lists:sort(maps:keys(Value)));
+named(Value, Location, _Nodes) ->
+    {error, schema_error({bad_keyword_value, Value}, Location)}.
+
+%% Сегмент локации — исходный текст паттерна. Порядок списка задан сортировкой
+%% по нему же: от порядка обхода map наблюдаемое дерево units зависеть не должно.
+-spec patterned(json(), [binary()], nodes()) ->
+          {ok, [{regex(), addr()}], nodes()} | {error, #schema_error{}}.
+patterned(Value, Location, Nodes) when is_map(Value) ->
+    Step = fun(_Source, {error, _} = Error) ->
+                   Error;
+              (Source, {ok, Acc, Built}) ->
+                   Child = [Source | Location],
+                   case re:compile(Source, [unicode, dollar_endonly]) of
+                       {error, Reason} ->
+                           {error, schema_error({bad_pattern, Reason}, Child)};
+                       {ok, Compiled} ->
+                           case compile_node(maps:get(Source, Value), Child, Built) of
+                               {ok, Grown} ->
+                                   {ok, [{{Source, Compiled}, addr(Child)} | Acc], Grown};
+                               {error, _} = Error ->
+                                   Error
+                           end
+                   end
+           end,
+    case lists:foldl(Step, {ok, [], Nodes}, lists:sort(maps:keys(Value))) of
+        {ok, Acc, Built}   -> {ok, lists:reverse(Acc), Built};
+        {error, _} = Error -> Error
+    end;
+patterned(Value, Location, _Nodes) ->
+    {error, schema_error({bad_keyword_value, Value}, Location)}.
+
+%% Своего сегмента у ветви нет: она стоит на самом keyword.
+-spec additional(json(), [binary()], nodes()) ->
+          {ok, addr(), nodes()} | {error, #schema_error{}}.
+additional(Value, Location, Nodes) ->
+    case compile_node(Value, Location, Nodes) of
+        {ok, Built}        -> {ok, addr(Location), Built};
+        {error, _} = Error -> Error
     end.
 
 %% Пустой список ветвей метасхема запрещает, но в slot IR он ложится, поэтому

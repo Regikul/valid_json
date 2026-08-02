@@ -5,12 +5,18 @@
 
 -include("valid_json_core.hrl").
 
--export([neutral/0, merge/2, merge_items/2]).
+-export([neutral/0, properties/1, merge/2, merge_items/2]).
 
 -spec neutral() -> evaluated().
 neutral() ->
     #{properties => sets:new([{version, 2}]),
       items      => {0, sets:new([{version, 2}])}}.
+
+%% Покрытие, внесённое одним object applicator: имена свойств, к которым он
+%% применился. Маску массива он не трогает.
+-spec properties([binary()]) -> evaluated().
+properties(Names) ->
+    (neutral())#{properties := sets:from_list(Names, [{version, 2}])}.
 
 -spec merge(evaluated(), evaluated()) -> evaluated().
 merge(#{properties := P1, items := I1}, #{properties := P2, items := I2}) ->

@@ -147,6 +147,70 @@ logical_test_() ->
      ?_assertEqual({ok, artifact(schema_node([{all_of, []}]))},
                    compile(#{<<"allOf">> => []}))].
 
+%% Три object applicators дают один constraint, но каждый со своим слотом:
+%% ненаписанный keyword остаётся `undefined`.
+object_test_() ->
+    [?_assertEqual({ok, artifact(#{<<>> => schema_node([{properties,
+                                                         #{<<"a">> => addr(<<"/properties/a">>)},
+                                                         undefined, undefined}]),
+                                   <<"/properties/a">> => schema_node([{type, [integer]}])})},
+                   compile(#{<<"properties">> => #{<<"a">> => #{<<"type">> => <<"integer">>}}})),
+     %% Сегмент локации паттерна — его исходный текст.
+     ?_assertEqual({ok, artifact(#{<<>> => schema_node([{properties, undefined,
+                                                         [{regex(<<"^a">>),
+                                                           addr(<<"/patternProperties/^a">>)}],
+                                                         undefined}]),
+                                   <<"/patternProperties/^a">> => true})},
+                   compile(#{<<"patternProperties">> => #{<<"^a">> => true}})),
+     %% У additionalProperties своего сегмента нет: ветвь стоит на keyword.
+     ?_assertEqual({ok, artifact(#{<<>> => schema_node([{properties, undefined, undefined,
+                                                         addr(<<"/additionalProperties">>)}]),
+                                   <<"/additionalProperties">> => false})},
+                   compile(#{<<"additionalProperties">> => false})),
+     %% Написанный пустой properties — пустая map, а не отсутствие keyword.
+     ?_assertEqual({ok, artifact(schema_node([{properties, #{}, undefined, undefined}]))},
+                   compile(#{<<"properties">> => #{}})),
+     ?_assertEqual({ok, artifact(schema_node([{properties, undefined, [], undefined}]))},
+                   compile(#{<<"patternProperties">> => #{}})),
+     %% Имя свойства экранируется в указателе как обычный сегмент.
+     ?_assertEqual({ok, artifact(#{<<>> => schema_node([{properties,
+                                                         #{<<"a/b">> => addr(<<"/properties/a~1b">>)},
+                                                         undefined, undefined}]),
+                                   <<"/properties/a~1b">> => true})},
+                   compile(#{<<"properties">> => #{<<"a/b">> => true}}))].
+
+%% Три keyword'а собираются в один constraint, а список паттернов упорядочен по
+%% их тексту: от порядка обхода map наблюдаемый IR зависеть не должен.
+object_group_test() ->
+    Schema = #{<<"additionalProperties">> => false,
+               <<"patternProperties">> => #{<<"^b">> => true, <<"^a">> => true},
+               <<"properties">> => #{<<"x">> => true}},
+    Expected = schema_node([{properties,
+                             #{<<"x">> => addr(<<"/properties/x">>)},
+                             [{regex(<<"^a">>), addr(<<"/patternProperties/^a">>)},
+                              {regex(<<"^b">>), addr(<<"/patternProperties/^b">>)}],
+                             addr(<<"/additionalProperties">>)}]),
+    ?assertEqual({ok, artifact(#{<<>>                        => Expected,
+                                 <<"/properties/x">>         => true,
+                                 <<"/patternProperties/^a">> => true,
+                                 <<"/patternProperties/^b">> => true,
+                                 <<"/additionalProperties">> => false})},
+                 compile(Schema)).
+
+object_error_test_() ->
+    [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/properties">>),
+                   compile(#{<<"properties">> => 42})),
+     ?_assertEqual(schema_error({bad_keyword_value, []}, <<"/patternProperties">>),
+                   compile(#{<<"patternProperties">> => []})),
+     %% Некомпилируемый паттерн называет свою собственную позицию.
+     ?_assertMatch({error, #schema_error{reason   = {bad_pattern, _},
+                                         location = {anonymous, <<"/patternProperties/(">>}}},
+                   compile(#{<<"patternProperties">> => #{<<"(">> => true}})),
+     ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/properties/a/maximum">>),
+                   compile(#{<<"properties">> => #{<<"a">> => #{<<"maximum">> => null}}})),
+     ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/additionalProperties">>),
+                   compile(#{<<"additionalProperties">> => 1}))].
+
 %% Все nodes строятся до вычисления, поэтому вложенность произвольной глубины
 %% полностью лежит в одной map, а не разворачивается на ходу.
 nested_test() ->
@@ -204,8 +268,8 @@ bad_keyword_value_test_() ->
 %% Ещё не реализованный keyword обязан останавливать компиляцию, а не молча
 %% исчезать: иначе преждевременно подключённый файл сьюта пройдёт по недоразумению.
 not_implemented_test_() ->
-    [?_assertEqual(schema_error({not_implemented, <<"properties">>}, <<"/properties">>),
-                   compile(#{<<"properties">> => #{}})),
+    [?_assertEqual(schema_error({not_implemented, <<"propertyNames">>}, <<"/propertyNames">>),
+                   compile(#{<<"propertyNames">> => #{}})),
      ?_assertEqual(schema_error({not_implemented, <<"$ref">>}, <<"/$ref">>),
                    compile(#{<<"$ref">> => <<"#">>, <<"type">> => <<"object">>}))].
 

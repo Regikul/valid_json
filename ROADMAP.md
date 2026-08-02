@@ -33,10 +33,8 @@
   boolean-схема выпускает собственный unit, а у schema object своего unit пока
   нет. Он станет родителем вложенных units вместе с иерархией `detailed` и
   `verbose`, поэтому его форма определяется там же.
-- [~] Реализовать операции над стеками `keywordLocation`,
-  `absoluteKeywordLocation` и `instanceLocation`: сегмент keyword добавляется
-  при построении unit, абсолютная локация выводится из адреса node. Стек
-  инстанса пока только переносится — двигать его начнут child applicators в P2.
+- [x] Реализовать операции над стеками `keywordLocation`,
+  `absoluteKeywordLocation` и `instanceLocation`.
 - [x] Реализовать JSON Pointer escaping и печать абсолютной URI fragment
   location.
 - [x] Добавить минимальную проекцию `basic` для вручную собранных fixtures;
@@ -88,12 +86,14 @@
   подключены `type.json`, `const.json`, `multipleOf.json`, `maximum.json`,
   `exclusiveMaximum.json`, `minimum.json`, `exclusiveMinimum.json`,
   `maxLength.json`, `minLength.json`, `pattern.json`, `maxItems.json`,
-  `minItems.json`, `maxProperties.json`, `minProperties.json` и
-  `dependentRequired.json`. `enum.json`, `required.json` и `uniqueItems.json`
-  содержат группы со схемами `properties`, `prefixItems` и `items`, поэтому
-  целиком подключаются только после P2.
+  `minItems.json`, `maxProperties.json`, `minProperties.json`,
+  `dependentRequired.json`, а после object applicators — `enum.json` и
+  `required.json`. `uniqueItems.json` содержит группы со схемами `prefixItems`,
+  `items` и `additionalItems`, поэтому целиком подключается только после array
+  applicators.
 - [x] Научить runner исключать группы, объявленные расхождениями в
-  conformance-policy: сейчас это `^\p{Letter}+$` в `pattern.json`.
+  conformance-policy: сейчас это `^\p{Letter}+$` в `pattern.json` и
+  `patternProperties.json`.
 - [ ] Приёмка P1: все обязательные assertion files проходят с учётом
   объявленных regex- и high-precision-расхождений.
 
@@ -104,13 +104,11 @@
   начала вычисления.
 - [x] Свернуть compile errors в `#schema_error{}` с адресом виноватой позиции и
   вынести текст в `format_error/1`.
-- [~] Реализовать `allOf`, `anyOf`, `oneOf` и `not` с корректным объединением и
-  отбрасыванием effective coverage: вердикты, units и покрытие ветвей
-  объединяются, `not` покрытия не переносит. Само покрытие пока всегда пустое,
-  потому что вносить его начнут child applicators этой же фазы.
+- [x] Реализовать `allOf`, `anyOf`, `oneOf` и `not` с корректным объединением и
+  отбрасыванием effective coverage.
 - [ ] Реализовать составной constraint `if` / `then` / `else`.
 - [ ] Реализовать `dependentSchemas`.
-- [ ] Реализовать составной object constraint: `properties`,
+- [x] Реализовать составной object constraint: `properties`,
   `patternProperties` и `additionalProperties`.
 - [ ] Реализовать `propertyNames`.
 - [ ] Реализовать schema-form `items` для обоих dialects.
@@ -123,15 +121,16 @@
   effective coverage и annotations.
 - [ ] Выпускать отдельный unit для каждого фактически написанного keyword
   внутри составного constraint.
-- [~] Добавить compiler fixtures на адреса дочерних nodes и нормализацию
-  составных constraints: адреса, вложенность произвольной глубины и локация
-  ошибки внутри ветви покрыты. Нормализация ждёт первого составного constraint.
-- [~] Добавить evaluator fixtures на short-circuit в `flag`, полный обход в
-  структурных режимах и правила покрытия ветвей: обрыв и полный обход покрыты
-  ветвью-ловушкой. Правила покрытия проверять пока не на чем — ветви его не
-  вносят.
-- [ ] Подключить соответствующие обязательные applicator, annotation и content
-  validation files обоих dialects.
+- [x] Добавить compiler fixtures на адреса дочерних nodes и нормализацию
+  составных constraints.
+- [x] Добавить evaluator fixtures на short-circuit в `flag`, полный обход в
+  структурных режимах и правила покрытия ветвей.
+- [~] Подключить соответствующие обязательные applicator, annotation и content
+  validation files обоих dialects: подключены `properties.json`,
+  `patternProperties.json`, `allOf.json`, `anyOf.json`, `oneOf.json`, а также
+  дождавшиеся applicators `enum.json` и `required.json`. `not.json` ждёт
+  `unevaluatedProperties` из P4, `additionalProperties.json` —
+  `dependentSchemas` и `propertyNames`, `uniqueItems.json` — array applicators.
 - [ ] Приёмка P2: обязательные files этой фазы проходят, а `contains` оставляет
   каноническую маску для P4.
 

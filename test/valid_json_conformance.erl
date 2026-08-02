@@ -8,28 +8,34 @@
                    {"draft2019-09", <<"https://json-schema.org/draft/2019-09/schema">>}]).
 
 %% Файл подключается целиком и только когда его схемы компилируются полностью.
-%% enum.json, required.json и uniqueItems.json ждут applicators фазы P2.
--define(FILES, ["boolean_schema.json", "type.json", "const.json",
+%% Из applicator-файлов ждут своего: `not.json` — `unevaluatedProperties`,
+%% `additionalProperties.json` — `dependentSchemas` и `propertyNames`,
+%% `uniqueItems.json` — array applicators.
+-define(FILES, ["boolean_schema.json", "type.json", "const.json", "enum.json",
                 "multipleOf.json",
                 "maximum.json", "exclusiveMaximum.json",
                 "minimum.json", "exclusiveMinimum.json",
                 "maxLength.json", "minLength.json", "pattern.json",
                 "maxItems.json", "minItems.json",
                 "maxProperties.json", "minProperties.json",
-                "dependentRequired.json"]).
+                "required.json", "dependentRequired.json",
+                "properties.json", "patternProperties.json",
+                "allOf.json", "anyOf.json", "oneOf.json"]).
 
 %% Объявленные расхождения основного набора: okf/testing/conformance-policy.md,
 %% раздел «Известные расхождения». Группа исключается поимённо, чтобы остальные
 %% группы файла продолжали проверяться, а сам список оставался читаемым.
 -define(EXCLUDED,
         [{"pattern.json",
-          <<"pattern with Unicode property escape requires unicode mode">>}]).
+          <<"pattern with Unicode property escape requires unicode mode">>},
+         {"patternProperties.json",
+          <<"patternProperties with Unicode property escape">>}]).
 
 %% Ожидаемый размер прогона: {групп, cases}. Число закреплено, чтобы прогон, в
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES и
 %% ?EXCLUDED, и менять его иначе нельзя.
--define(CENSUS, {120, 530}).
+-define(CENSUS, {244, 920}).
 
 validation_test_() ->
     Tests = [file_tests(Dir, Dialect, File)

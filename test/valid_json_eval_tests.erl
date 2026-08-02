@@ -238,6 +238,96 @@ not_test_() ->
      ?_assert(negated([{type, [string]}], 1)),
      ?_assertNot(negated([{type, [integer]}], 1))].
 
+%% Object applicators применяются каждый к своим именам: `properties` — к
+%% точному, `patternProperties` — ко всем совпавшим паттернам,
+%% `additionalProperties` — только к остатку.
+object_test_() ->
+    Artifact = object(),
+    [?_assert(verdict(Artifact, #{<<"a">> => 1})),
+     ?_assertNot(verdict(Artifact, #{<<"a">> => <<"x">>})),
+     ?_assert(verdict(Artifact, #{<<"bb">> => <<"x">>})),
+     ?_assertNot(verdict(Artifact, #{<<"bb">> => 1})),
+     %% Имя, которого не взял никто, достаётся additionalProperties.
+     ?_assert(verdict(Artifact, #{<<"c">> => 1})),
+     ?_assertNot(verdict(Artifact, #{<<"c">> => <<"x">>})),
+     ?_assert(verdict(Artifact, #{<<"a">> => 1, <<"bb">> => <<"x">>})),
+     ?_assert(verdict(Artifact, #{})),
+     %% Не-объект constraint не ограничивает.
+     ?_assert(verdict(Artifact, 1)),
+     ?_assert(verdict(Artifact, [#{<<"c">> => 1}]))].
+
+%% Одно имя может достаться нескольким keywords сразу, и применяется каждый.
+object_overlap_test_() ->
+    Props = #{<<"b">> => addr(<<"/properties/b">>)},
+    Patterns = [{regex(<<"^b">>), addr(<<"/patternProperties/^b">>)},
+                {regex(<<"b$">>), addr(<<"/patternProperties/b$">>)}],
+    Artifact = branching([{properties, Props, Patterns, addr(<<"/additionalProperties">>)}],
+                         [{<<"/properties/b">>, [{type, [integer]}]},
+                          {<<"/patternProperties/^b">>, [{minimum, 0}]},
+                          {<<"/patternProperties/b$">>, [{maximum, 10}]},
+                          {<<"/additionalProperties">>, false}]),
+    [?_assert(verdict(Artifact, #{<<"b">> => 5})),
+     %% Совпали оба паттерна, и нарушение любого из них видно.
+     ?_assertNot(verdict(Artifact, #{<<"b">> => -1})),
+     ?_assertNot(verdict(Artifact, #{<<"b">> => 11})),
+     %% Имя взято соседями, поэтому additionalProperties до него не доходит.
+     ?_assertNot(verdict(Artifact, #{<<"b">> => 5, <<"z">> => 1}))].
+
+%% Локация keyword следует схеме, локация инстанса — значению. Собственный unit
+%% написанного keyword стоит перед units своих ветвей.
+object_units_test_() ->
+    Units = paired(collect(object(), #{<<"a">> => 1, <<"bb">> => <<"x">>, <<"c">> => 2}, basic)),
+    [?_assertEqual([{<<"/properties">>, <<>>},
+                    {<<"/properties/a/type">>, <<"/a">>},
+                    {<<"/patternProperties">>, <<>>},
+                    {<<"/patternProperties/^b/type">>, <<"/bb">>},
+                    {<<"/additionalProperties">>, <<>>},
+                    {<<"/additionalProperties/type">>, <<"/c">>}],
+                   Units)].
+
+%% Аннотация называет имена, к которым keyword применился, и не зависит от
+%% порядка обхода объекта.
+object_annotation_test_() ->
+    %% Берутся только units самих keywords: units ветвей стоят глубже и говорят
+    %% о своих значениях, а не о применении.
+    Own = [<<"/properties">>, <<"/patternProperties">>, <<"/additionalProperties">>],
+    Details = fun(Instance) ->
+                      [{Pointer, Detail}
+                       || #output_unit{keyword_location = Keywords, detail = Detail}
+                              <- collect(object(), Instance, basic),
+                          Pointer <- [valid_json_location:pointer(Keywords)],
+                          lists:member(Pointer, Own)]
+              end,
+    [?_assertEqual([{<<"/properties">>, {annotation, [<<"a">>]}},
+                    {<<"/patternProperties">>, {annotation, [<<"bb">>, <<"bc">>]}},
+                    {<<"/additionalProperties">>, {annotation, []}}],
+                   Details(#{<<"bc">> => <<"y">>, <<"a">> => 1, <<"bb">> => <<"x">>})),
+     %% Написанный keyword без единого применения даёт пустую аннотацию.
+     ?_assertEqual([{<<"/properties">>, {annotation, []}},
+                    {<<"/patternProperties">>, {annotation, []}},
+                    {<<"/additionalProperties">>, {annotation, []}}],
+                   Details(#{})),
+     %% Не-объект: unit успешный, но аннотации нет.
+     ?_assertEqual([{<<"/properties">>, none},
+                    {<<"/patternProperties">>, none},
+                    {<<"/additionalProperties">>, none}],
+                   Details(1))].
+
+%% Покрытие вносят применившиеся keywords. Покрытие дочерней schema принадлежит
+%% ей самой и наверх не идёт.
+object_coverage_test_() ->
+    Nested = branching([{properties, #{<<"a">> => addr(<<"/properties/a">>)}, undefined, undefined}],
+                       [{<<"/properties/a">>,
+                         [{properties, #{<<"inner">> => addr(<<"/properties/a/properties/inner">>)},
+                                       undefined, undefined}]},
+                        {<<"/properties/a/properties/inner">>, true}]),
+    [?_assertEqual({[<<"a">>, <<"bb">>, <<"c">>], 0, []},
+                   coverage_of(object(), #{<<"a">> => 1, <<"bb">> => <<"x">>, <<"c">> => 2})),
+     %% Провалившийся keyword аннотации не даёт, поэтому и покрытия не вносит.
+     ?_assertEqual(neutral(), coverage_of(object(), #{<<"a">> => <<"x">>})),
+     ?_assertEqual({[<<"a">>], 0, []},
+                   coverage_of(Nested, #{<<"a">> => #{<<"inner">> => 1}}))].
+
 %% Обрыв разрешён только в режиме flag. Ветвь-ловушка при вычислении падает,
 %% поэтому её достижение видно прямо в результате.
 short_circuit_test_() ->
@@ -386,6 +476,30 @@ branches(Tag, Keyword, Children, Instance) ->
                          lists:zip(Pointers, Children)),
     {ok, #eval_result{valid = Valid}} = valid_json_eval:run(Artifact, Instance, flag),
     Valid.
+
+%% Составной object constraint со всеми тремя написанными keywords: "a" берёт
+%% properties, имена на "b" — паттерн, остальные — additionalProperties.
+object() ->
+    branching([{properties,
+                #{<<"a">> => addr(<<"/properties/a">>)},
+                [{regex(<<"^b">>), addr(<<"/patternProperties/^b">>)}],
+                addr(<<"/additionalProperties">>)}],
+              [{<<"/properties/a">>, [{type, [integer]}]},
+               {<<"/patternProperties/^b">>, [{type, [string]}]},
+               {<<"/additionalProperties">>, [{type, [integer]}]}]).
+
+verdict(Artifact, Instance) ->
+    {ok, #eval_result{valid = Valid}} = valid_json_eval:run(Artifact, Instance, flag),
+    Valid.
+
+coverage_of(Artifact, Instance) ->
+    {ok, #eval_result{evaluated = Evaluated}} = valid_json_eval:run(Artifact, Instance, flag),
+    expand(Evaluated).
+
+%% Обе локации сразу: keyword следует схеме, инстанс — значению.
+paired(Units) ->
+    [{valid_json_location:pointer(Keywords), valid_json_location:pointer(Instance)}
+     || #output_unit{keyword_location = Keywords, instance_location = Instance} <- Units].
 
 negated(Child, Instance) ->
     Artifact = branching([{'not', addr(<<"/not">>)}], [{<<"/not">>, Child}]),
