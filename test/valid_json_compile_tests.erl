@@ -450,6 +450,103 @@ order_test() ->
                                  <<"/dependentSchemas/a">> => true})},
                  compile(Schema)).
 
+%% Корневой `$id` меняет entry rid, но не создаёт constraint. В compiled()
+%% остаётся уже именованный resource, а anonymous resource исчезает.
+named_root_resource_test() ->
+    Root = <<"https://example.com/root">>,
+    Schema = #{<<"$id">> => Root, <<"type">> => <<"integer">>},
+    Expected =
+        compiled(Root,
+                 #{Root => resource(Root,
+                                    #{<<>> => schema_node([{type, [integer]}])})}),
+    ?assertEqual({ok, Expected}, compile(Schema)).
+
+%% `$defs` собственного constraint не даёт, но каждая entry становится node.
+%% Имя definition экранируется как обычный JSON Pointer segment.
+definitions_resource_test() ->
+    Name = <<"a/b~c">>,
+    Schema = #{<<"$defs">> => #{Name => #{<<"type">> => <<"string">>}}},
+    Expected =
+        artifact(#{<<>> => schema_node([]),
+                   <<"/$defs/a~1b~0c">> => schema_node([{type, [string]}])}),
+    ?assertEqual({ok, Expected}, compile(Schema)).
+
+%% Подсхема с `$id` начинает новый resource: адрес в parent constraint сразу
+%% канонический, а указатели внутри child считаются от его собственного корня.
+embedded_resource_test() ->
+    Foo = <<"https://example.com/foo">>,
+    Bar = <<"https://example.com/bar">>,
+    Schema = #{<<"$id">> => Foo,
+               <<"items">> =>
+                   #{<<"$id">> => Bar,
+                     <<"additionalProperties">> => #{}}},
+    Expected =
+        compiled(
+          Foo,
+          #{Foo => resource(Foo,
+                            #{<<>> => schema_node([{items, {Bar, <<>>}}])}),
+            Bar => resource(
+                     Bar,
+                     #{<<>> => schema_node([{properties, undefined, undefined,
+                                             {Bar, <<"/additionalProperties">>}}]),
+                       <<"/additionalProperties">> => schema_node([])})}),
+    ?assertEqual({ok, Expected}, compile(Schema)).
+
+%% Anonymous parent тоже имеет physical pointer space на время компиляции, хотя
+%% в итоговом artifact абсолютного id у него нет.
+anonymous_parent_resource_test() ->
+    Child = <<"https://example.com/child">>,
+    Schema = #{<<"$defs">> =>
+                   #{<<"child">> =>
+                         #{<<"$id">> => Child, <<"contains">> => true}}},
+    Expected =
+        compiled(
+          anonymous,
+          #{anonymous => resource(anonymous, #{<<>> => schema_node([])}),
+            Child => resource(
+                       Child,
+                       #{<<>> => schema_node([{contains,
+                                               {Child, <<"/contains">>},
+                                               undefined, undefined, true}]),
+                         <<"/contains">> => true})}),
+    ?assertEqual({ok, Expected}, compile(Schema)).
+
+%% Relative `$id` разрешается от ближайшего resource, а не от anonymous root.
+relative_embedded_resource_test() ->
+    Root = <<"https://example.com/schemas/root.json">>,
+    Child = <<"https://example.com/schemas/child.json">>,
+    Schema = #{<<"$id">> => Root,
+               <<"$defs">> =>
+                   #{<<"child">> =>
+                         #{<<"$id">> => <<"child.json">>,
+                           <<"properties">> => #{<<"x">> => true}}}},
+    Expected =
+        compiled(
+          Root,
+          #{Root => resource(Root, #{<<>> => schema_node([])}),
+            Child => resource(
+                       Child,
+                       #{<<>> => schema_node([{properties,
+                                               #{<<"x">> => {Child,
+                                                              <<"/properties/x">>}},
+                                               undefined, undefined}]),
+                         <<"/properties/x">> => true})}),
+    ?assertEqual({ok, Expected}, compile(Schema)).
+
+%% После resource boundary ошибка тоже получает каноническую location.
+embedded_resource_error_test() ->
+    Root = <<"https://example.com/root">>,
+    Child = <<"https://example.com/child">>,
+    Schema = #{<<"$id">> => Root,
+               <<"not">> => #{<<"$id">> => Child, <<"maximum">> => null}},
+    ?assertEqual({error, #schema_error{reason = {bad_keyword_value, null},
+                                      location = {Child, <<"/maximum">>}}},
+                 compile(Schema)).
+
+definitions_error_test() ->
+    ?assertEqual(schema_error({bad_keyword_value, 42}, <<"/$defs">>),
+                 compile(#{<<"$defs">> => 42})).
+
 %% Потребляются компилятором и собственного constraint не дают.
 consumed_keywords_test() ->
     Schema = #{<<"$schema">> => ?DIALECT,
@@ -563,3 +660,15 @@ artifact(Nodes, Dialect) ->
                     dynamic_anchors  = #{},
                     recursive_anchor = false,
                     nodes            = Nodes}}}.
+
+compiled(Root, Resources) ->
+    #{root => Root, sources => [], resources => Resources}.
+
+resource(Rid, Nodes) ->
+    Id = case Rid of anonymous -> undefined; _ -> Rid end,
+    #resource{id               = Id,
+              dialect          = ?DIALECT,
+              anchors          = #{},
+              dynamic_anchors  = #{},
+              recursive_anchor = false,
+              nodes            = Nodes}.

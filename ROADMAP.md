@@ -147,19 +147,21 @@
 - [ ] **Фаза P3 завершена**
 - [~] Закрыть решение об адресации встроенных resources через parent pointer:
   выбраны эфемерные compile-time location aliases с немедленной
-  канонизацией в `addr()`; индекс и регрессионные тесты реализованы, осталось
-  подключить resolver к emission `$ref` в production `compile/3`.
+  канонизацией в `addr()`; индекс подключён к emission дочерних applicators в
+  `compile/2`, осталось подключить его к emission `$ref` в production
+  `compile/3`.
 - [x] Реализовать URI-слой: resolution, normalization, fragment handling и
   JSON Pointer/anchor lookup.
 - [x] Реализовать чистый `store()` с регистрацией retrieval и canonical URI.
 - [ ] Реализовать `compile/3`: dialect по `$schema` или опции, обход schema
   positions и построение полного `compiled()`.
 - [~] Выделять отдельный resource для корня документа и каждой подсхемы с
-  `$id`: discovery pass строит canonical resource map; осталось перенести
-  скомпилированные nodes в итоговые `#resource{}` внутри `compile/3`.
+  `$id`: `compile/2` переносит найденные nodes в итоговые `#resource{}` и
+  канонизирует переходы через границу; осталось использовать этот путь в
+  `compile/3`.
 - [~] Индексировать `$anchor`, `$defs` и nodes каждого resource: `$defs`, nodes
-  и physical location aliases уже индексируются; остались anchors и перенос
-  индексов в итоговый `compiled()`.
+  и physical location aliases индексируются, а nodes уже переносятся в
+  итоговый `compiled()`; остались anchors.
 - [ ] Разрешать `$ref` в `addr()` на этапе компиляции; dangling и non-schema
   targets возвращать как compile errors.
 - [ ] Реализовать переходы evaluator через `{ref, Addr}` с сохранением
@@ -173,8 +175,10 @@
 - [~] Добавить compiler fixtures на anonymous root, embedded resources,
   parent pointers через непосредственный и более внешний resource, анонимный
   объемлющий корень и retrieval URI, anchors, remotes, ошибки ссылок и
-  циклический конечный IR: discovery fixtures закрывают первые шесть случаев и
-  конфликты `$id`; остались anchors, remotes, ref errors и циклический IR.
+  циклический конечный IR: discovery fixtures закрывают physical aliases и
+  конфликты `$id`, emission fixtures — named root, `$defs`, embedded и relative
+  `$id`, canonical child addresses и errors; остались anchors, remotes, ref
+  errors и циклический IR.
 - [ ] Добавить evaluator fixtures на resource boundary, обе ветви `#node{}` и
   cycle guard через реальные `$ref`: self-reference возвращает
   `{error, {no_progress, Addr}}`, повтор адреса в соседней ветви разрешён.

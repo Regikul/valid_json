@@ -1,6 +1,7 @@
-%% Компиляция schema JSON в nodes одного анонимного resource. $id, anchors и
-%% ссылок здесь ещё нет, поэтому rid всегда anonymous, и дочерний адрес
-%% отличается от родительского только указателем.
+%% Компиляция schema JSON в канонические resources. Первая фаза выделяет
+%% границы `$id` и индексирует физические schema locations, вторая выпускает IR
+%% и немедленно заменяет каждый дочерний переход каноническим addr(). Anchors и
+%% ссылки здесь ещё не реализованы.
 %% Инварианты компиляции — okf/architecture/validator-core.md.
 -module(valid_json_compile).
 
@@ -37,74 +38,155 @@
                 <<"dependentSchemas">> | ?ANNOTATIONS]).
 
 %% Полностью потребляются компилятором и собственного constraint не дают.
--define(CONSUMED, [<<"$schema">>, <<"$comment">>]).
+%% `$defs` отдельно обходит свои schema entries до emission constraints.
+-define(CONSUMED, [<<"$schema">>, <<"$id">>, <<"$defs">>, <<"$comment">>]).
 
 %% Единственное место, где компилятор смотрит на dialect: раскладку array
 %% applicators и покрытие `contains` спецификации задают по-разному.
 -define(DRAFT_2020_12, <<"https://json-schema.org/draft/2020-12/schema">>).
 
 -type nodes() :: #{pointer() => schema_node()}.
+-type node_sets() :: #{rid() => nodes()}.
+-type position() :: {rid(), [binary()]}.
 
-%% Накопитель обхода. Кроме построенных nodes он несёт dialect: раскладку array
-%% applicators выбирает компилятор, и разные dialects дают разные теги IR
-%% (validator-core.md, «Составные constraints»). Само значение по обходу не
-%% меняется.
--record(state, {dialect :: dialect(), nodes :: nodes()}).
+%% Накопитель emission. Index immutable и нужен только для канонизации дочерних
+%% переходов; в compiled() он не попадает. Dialect пока один на весь inline
+%% document — выбор dialect каждого resource остаётся частью production API.
+-record(state, {
+    dialect   :: dialect(),
+    index     :: valid_json_resource_index:index(),
+    resources :: node_sets()
+}).
 
 -type state() :: #state{}.
 
 -spec compile(json(), dialect()) -> {ok, compiled()} | {error, #schema_error{}}.
 compile(Schema, Dialect) ->
-    case compile_node(Schema, [], #state{dialect = Dialect, nodes = #{}}) of
-        {ok, #state{nodes = Nodes}} -> {ok, artifact(Nodes, Dialect)};
-        {error, _} = Error          -> Error
+    case valid_json_resource_index:discover(Schema, anonymous, Dialect) of
+        {ok, Index} ->
+            Root = valid_json_resource_index:root(Index),
+            Schemas = valid_json_resource_index:resources(Index),
+            Empty = maps:map(fun(_Rid, _Nodes) -> #{} end, Schemas),
+            State = #state{dialect = Dialect, index = Index, resources = Empty},
+            case emit_resources(Root, Schemas, State) of
+                {ok, #state{resources = Resources}} ->
+                    {ok, artifact(Root, Resources, Dialect)};
+                {error, _} = Error ->
+                    Error
+            end;
+        {error, _} = Error ->
+            Error
     end.
 
-%% Все nodes строятся до вычисления, поэтому обход спускается в каждую дочернюю
-%% schema position и накапливает общую map. Локация — тот же обратный стек
-%% сегментов, что и в вычислении, и печатается в указатель при укладке node.
--spec compile_node(json(), [binary()], state()) -> {ok, state()} | {error, #schema_error{}}.
-compile_node(Schema, Location, State) when is_boolean(Schema) ->
-    {ok, place(Location, Schema, State)};
-compile_node(Schema, Location, State) when is_map(Schema) ->
+%% Root испускается первым, остальные resources — по URI. Внутри resource
+%% pointers тоже отсортированы. Порядок не влияет на итоговые maps, зато первая
+%% compile error остаётся воспроизводимой.
+-spec emit_resources(rid(), valid_json_resource_index:resource_schemas(), state()) ->
+          {ok, state()} | {error, #schema_error{}}.
+emit_resources(Root, Resources, State) ->
+    Rids = [Root | lists:sort(maps:keys(Resources) -- [Root])],
+    Step = fun(_Rid, {error, _} = Error) ->
+                   Error;
+              (Rid, {ok, Built}) ->
+                   emit_resource(Rid, maps:get(Rid, Resources), Built)
+           end,
+    lists:foldl(Step, {ok, State}, Rids).
+
+-spec emit_resource(rid(), #{pointer() => json()}, state()) ->
+          {ok, state()} | {error, #schema_error{}}.
+emit_resource(Rid, Schemas, State) ->
+    Step = fun(_Pointer, {error, _} = Error) ->
+                   Error;
+              (Pointer, {ok, Built}) ->
+                   Position = {Rid, valid_json_location:segments(Pointer)},
+                   compile_node(maps:get(Pointer, Schemas), Position, Built)
+           end,
+    lists:foldl(Step, {ok, State}, lists:sort(maps:keys(Schemas))).
+
+%% Position уже каноничен относительно текущего resource. Дочерняя schema
+%% взята из discovery map, поэтому после `$id` её position уже начинается с
+%% корня нового rid. Сам emitter в дочерние nodes не спускается.
+-spec compile_node(json(), position(), state()) ->
+          {ok, state()} | {error, #schema_error{}}.
+compile_node(Schema, Position, State) when is_boolean(Schema) ->
+    {ok, place(Position, Schema, State)};
+compile_node(Schema, Position, State) when is_map(Schema) ->
     case maps:keys(Schema) -- (lists:flatten(?ORDER) ++ ?CONSUMED) of
         [] ->
-            case constraints(Schema, Location, State) of
-                {ok, Constraints, Built} ->
-                    Node = #node{constraints = Constraints, unevaluated = []},
-                    {ok, place(Location, Node, Built)};
+            case definitions(Schema, Position, State) of
+                {ok, WithDefinitions} ->
+                    case constraints(Schema, Position, WithDefinitions) of
+                        {ok, Constraints, Built} ->
+                            Node = #node{constraints = Constraints, unevaluated = []},
+                            {ok, place(Position, Node, Built)};
+                        {error, _} = Error ->
+                            Error
+                    end;
                 {error, _} = Error ->
                     Error
             end;
         [Keyword | _] ->
-            {error, schema_error({not_implemented, Keyword}, [Keyword | Location])}
+            {error, schema_error({not_implemented, Keyword},
+                                 below(Keyword, Position))}
     end;
 %% На позиции schema стоит значение, которое schema не является. Для slot IR оно
 %% невозможно, а называет его собственная локация.
-compile_node(Other, Location, _Nodes) ->
-    {error, schema_error({bad_keyword_value, Other}, Location)}.
+compile_node(Other, Position, _State) ->
+    {error, schema_error({bad_keyword_value, Other}, Position)}.
 
--spec place([binary()], schema_node(), state()) -> state().
-place(Location, Node, #state{nodes = Nodes} = State) ->
-    State#state{nodes = Nodes#{valid_json_location:pointer(Location) => Node}}.
+-spec place(position(), schema_node(), state()) -> state().
+place({Rid, Location}, Node, #state{resources = Resources} = State) ->
+    Nodes = maps:get(Rid, Resources),
+    Pointer = valid_json_location:pointer(Location),
+    State#state{resources = Resources#{Rid => Nodes#{Pointer => Node}}}.
 
-%% Дочерний переход хранит полный адрес, а не голый указатель: подсхема с $id
-%% получит собственный rid уже в P3.
--spec addr([binary()]) -> addr().
-addr(Location) ->
-    {anonymous, valid_json_location:pointer(Location)}.
+%% `$defs` — schema container без собственного constraint. Entries уже лежат в
+%% discovery map и будут выпущены общим проходом; здесь остаётся только проверка
+%% формы самого контейнера.
+-spec definitions(#{binary() => json()}, position(), state()) ->
+          {ok, state()} | {error, #schema_error{}}.
+definitions(Schema, Position, State) ->
+    case maps:find(<<"$defs">>, Schema) of
+        error ->
+            {ok, State};
+        {ok, Definitions} when is_map(Definitions) ->
+            {ok, State};
+        {ok, Other} ->
+            {error, schema_error({bad_keyword_value, Other},
+                                 below(<<"$defs">>, Position))}
+    end.
 
--spec schema_error(reason(), [binary()]) -> #schema_error{}.
-schema_error(Reason, Location) ->
-    #schema_error{reason = Reason, location = addr(Location)}.
+-spec below(binary(), position()) -> position().
+below(Segment, {Rid, Location}) ->
+    {Rid, [Segment | Location]}.
 
-%% Обход групп несёт накопленные nodes: applicator дописывает в них свои
-%% дочерние schemas, assertion передаёт дальше без изменений. Группа, ни один
-%% keyword которой не написан, constraint не даёт. Ответ `none` означает
-%% обратное: keywords написаны и их nodes построены, но вычислять по ним нечего.
--spec constraints(#{binary() => json()}, [binary()], state()) ->
+%% Physical position разрешается относительно текущего resource. Index сразу
+%% возвращает canonical addr; pointer снова превращается в обратный стек, чтобы
+%% следующие keywords дописывались тем же способом, что и раньше.
+-spec canonical(position(), state()) -> position().
+canonical({Rid, Location} = Position, #state{index = Index}) ->
+    case valid_json_resource_index:resolve(Rid, {pointer, Location}, Index) of
+        {ok, {CanonicalRid, Pointer}} ->
+            {CanonicalRid, valid_json_location:segments(Pointer)};
+        error ->
+            erlang:error({missing_schema_location, addr(Position)})
+    end.
+
+-spec addr(position()) -> addr().
+addr({Rid, Location}) ->
+    {Rid, valid_json_location:pointer(Location)}.
+
+-spec schema_error(reason(), position()) -> #schema_error{}.
+schema_error(Reason, Position) ->
+    #schema_error{reason = Reason, location = addr(Position)}.
+
+%% Обход групп несёт accumulator итоговых resources, но applicator только
+%% записывает канонические адреса: сами дочерние nodes выпускает общий проход.
+%% Группа, ни один keyword которой не написан, constraint не даёт. Ответ `none`
+%% означает обратное: keywords написаны, но вычислять по ним нечего.
+-spec constraints(#{binary() => json()}, position(), state()) ->
           {ok, [constraint()], state()} | {error, #schema_error{}}.
-constraints(Schema, Location, State) ->
+constraints(Schema, Position, State) ->
     Step = fun(_Group, {error, _} = Error) ->
                    Error;
               (Group, {ok, Acc, Built}) ->
@@ -113,7 +195,7 @@ constraints(Schema, Location, State) ->
                        false ->
                            {ok, Acc, Built};
                        true ->
-                           case constraint(Group, Schema, Location, Built) of
+                           case constraint(Group, Schema, Position, Built) of
                                {ok, none, Grown}       -> {ok, Acc, Grown};
                                {ok, Constraint, Grown} -> {ok, [Constraint | Acc], Grown};
                                {error, _} = Error      -> Error
@@ -132,59 +214,59 @@ keywords(Group)                           -> Group.
 
 %% Разбор идёт по элементу ?ORDER целиком, а не по написанному подмножеству:
 %% элемент — статический литерал, и по нему видно, какой constraint собирается.
--spec constraint(binary() | [binary()], #{binary() => json()}, [binary()], state()) ->
+-spec constraint(binary() | [binary()], #{binary() => json()}, position(), state()) ->
           {ok, constraint() | none, state()} | {error, #schema_error{}}.
 constraint([<<"properties">>, <<"patternProperties">>, <<"additionalProperties">>],
-           Schema, Location, State) ->
-    object(Schema, Location, State);
-constraint([<<"if">>, <<"then">>, <<"else">>], Schema, Location, State) ->
-    conditional(Schema, Location, State);
-constraint([<<"prefixItems">>, <<"items">>], Schema, Location, State) ->
-    array(Schema, Location, State);
-constraint([<<"contains">>, <<"minContains">>, <<"maxContains">>], Schema, Location, State) ->
-    contains(Schema, Location, State);
+           Schema, Position, State) ->
+    object(Schema, Position, State);
+constraint([<<"if">>, <<"then">>, <<"else">>], Schema, Position, State) ->
+    conditional(Schema, Position, State);
+constraint([<<"prefixItems">>, <<"items">>], Schema, Position, State) ->
+    array(Schema, Position, State);
+constraint([<<"contains">>, <<"minContains">>, <<"maxContains">>],
+           Schema, Position, State) ->
+    contains(Schema, Position, State);
 %% Своего сегмента у ветви нет: она стоит на самом keyword, как и у
 %% `additionalProperties`.
-constraint(<<"propertyNames">> = Keyword, Schema, Location, State) ->
-    case subschema(maps:get(Keyword, Schema), [Keyword | Location], State) of
+constraint(<<"propertyNames">> = Keyword, Schema, Position, State) ->
+    case subschema(maps:get(Keyword, Schema), below(Keyword, Position), State) of
         {ok, Addr, Built}  -> {ok, {property_names, Addr}, Built};
         {error, _} = Error -> Error
     end;
 %% Раскладка та же, что у `properties`: имя свойства становится сегментом
 %% локации. Отличие только в применении — подсхема достаётся всему instance.
-constraint(<<"dependentSchemas">> = Keyword, Schema, Location, State) ->
-    case named(maps:get(Keyword, Schema), [Keyword | Location], State) of
+constraint(<<"dependentSchemas">> = Keyword, Schema, Position, State) ->
+    case named(maps:get(Keyword, Schema), below(Keyword, Position), State) of
         {ok, Addrs, Built}  -> {ok, {dependent_schemas, Addrs}, Built};
         {error, _} = Error -> Error
     end;
-constraint(<<"allOf">> = Keyword, Schema, Location, State) ->
-    branches(all_of, Keyword, maps:get(Keyword, Schema), Location, State);
-constraint(<<"anyOf">> = Keyword, Schema, Location, State) ->
-    branches(any_of, Keyword, maps:get(Keyword, Schema), Location, State);
-constraint(<<"oneOf">> = Keyword, Schema, Location, State) ->
-    branches(one_of, Keyword, maps:get(Keyword, Schema), Location, State);
-constraint(<<"not">> = Keyword, Schema, Location, State) ->
-    Child = [Keyword | Location],
-    case compile_node(maps:get(Keyword, Schema), Child, State) of
-        {ok, Built}        -> {ok, {'not', addr(Child)}, Built};
+constraint(<<"allOf">> = Keyword, Schema, Position, State) ->
+    branches(all_of, Keyword, maps:get(Keyword, Schema), Position, State);
+constraint(<<"anyOf">> = Keyword, Schema, Position, State) ->
+    branches(any_of, Keyword, maps:get(Keyword, Schema), Position, State);
+constraint(<<"oneOf">> = Keyword, Schema, Position, State) ->
+    branches(one_of, Keyword, maps:get(Keyword, Schema), Position, State);
+constraint(<<"not">> = Keyword, Schema, Position, State) ->
+    case subschema(maps:get(Keyword, Schema), below(Keyword, Position), State) of
+        {ok, Addr, Built}  -> {ok, {'not', Addr}, Built};
         {error, _} = Error -> Error
     end;
 %% Значение annotation-only keyword уходит в IR как есть, без проверки и
 %% нормализации. Типы этих keywords ограничивает метасхема, но валидатор её не
 %% применяет, поэтому `default: []` рядом с `type: integer` остаётся корректной
 %% схемой (suite, `default.json`), а `bad_keyword_value` здесь невозможен.
-constraint(Keyword, Schema, Location, State) ->
+constraint(Keyword, Schema, Position, State) ->
     case lists:member(Keyword, ?ANNOTATIONS) of
         true  -> {ok, {annotation, Keyword, maps:get(Keyword, Schema)}, State};
-        false -> asserted(Keyword, Schema, Location, State)
+        false -> asserted(Keyword, Schema, Position, State)
     end.
 
--spec asserted(binary(), #{binary() => json()}, [binary()], state()) ->
+-spec asserted(binary(), #{binary() => json()}, position(), state()) ->
           {ok, constraint(), state()} | {error, #schema_error{}}.
-asserted(Keyword, Schema, Location, State) ->
+asserted(Keyword, Schema, Position, State) ->
     case assertion(Keyword, maps:get(Keyword, Schema)) of
         {ok, Constraint} -> {ok, Constraint, State};
-        {error, Reason}  -> {error, schema_error(Reason, [Keyword | Location])}
+        {error, Reason}  -> {error, schema_error(Reason, below(Keyword, Position))}
     end.
 
 %% Три object applicators сворачиваются в один constraint: `additionalProperties`
@@ -192,13 +274,13 @@ asserted(Keyword, Schema, Location, State) ->
 %% сохранённые имена с паттернами не дают воспользоваться общим накопителем
 %% аннотаций (validator-core.md, «Составные constraints»). Ненаписанный keyword
 %% оставляет свой слот `undefined`.
--spec object(#{binary() => json()}, [binary()], state()) ->
+-spec object(#{binary() => json()}, position(), state()) ->
           {ok, constraint(), state()} | {error, #schema_error{}}.
-object(Schema, Location, State) ->
+object(Schema, Position, State) ->
     Slots = [{<<"properties">>, fun named/3},
              {<<"patternProperties">>, fun patterned/3},
              {<<"additionalProperties">>, fun subschema/3}],
-    case slots(Slots, Schema, Location, State) of
+    case slots(Slots, Schema, Position, State) of
         {ok, [Additional, Patterns, Props], Built} ->
             {ok, {properties, Props, Patterns, Additional}, Built};
         {error, _} = Error ->
@@ -207,14 +289,13 @@ object(Schema, Location, State) ->
 
 %% `then` и `else` без `if` спецификация велит игнорировать целиком и запрещает
 %% вычислять — и ради вердикта, и ради аннотаций (core.txt:2379 и 2422),
-%% поэтому constraint без `if` не собирается. State всё равно строятся: это
-%% schema positions известных keywords, на них можно сослаться, и ошибка внутри
-%% них обязана останавливать компиляцию.
--spec conditional(#{binary() => json()}, [binary()], state()) ->
+%% поэтому constraint без `if` не собирается. Сами nodes всё равно присутствуют:
+%% discovery признал эти schema positions, и общий emission их обработает.
+-spec conditional(#{binary() => json()}, position(), state()) ->
           {ok, constraint() | none, state()} | {error, #schema_error{}}.
-conditional(Schema, Location, State) ->
+conditional(Schema, Position, State) ->
     Slots = [{Keyword, fun subschema/3} || Keyword <- [<<"if">>, <<"then">>, <<"else">>]],
-    case slots(Slots, Schema, Location, State) of
+    case slots(Slots, Schema, Position, State) of
         {ok, [_Else, _Then, undefined], Built} ->
             {ok, none, Built};
         {ok, [Else, Then, If], Built} ->
@@ -228,14 +309,15 @@ conditional(Schema, Location, State) ->
 %% `prefixItems` там просто неизвестный keyword; и то и другое ждёт своей фазы,
 %% поэтому пока отвергается наравне с остальными неизвестными keywords.
 %% Одиночный `items` со schema-значением одинаков в обоих dialects.
--spec array(#{binary() => json()}, [binary()], state()) ->
+-spec array(#{binary() => json()}, position(), state()) ->
           {ok, constraint(), state()} | {error, #schema_error{}}.
-array(Schema, Location, #state{dialect = Dialect} = State) ->
+array(Schema, Position, #state{dialect = Dialect} = State) ->
     case layout(Dialect, Schema) of
-        prefix                 -> prefixed(Schema, Location, State);
-        single                 -> single(Schema, Location, State);
+        prefix                 -> prefixed(Schema, Position, State);
+        single                 -> single(Schema, Position, State);
         {unsupported, Keyword} ->
-            {error, schema_error({not_implemented, Keyword}, [Keyword | Location])}
+            {error, schema_error({not_implemented, Keyword},
+                                 below(Keyword, Position))}
     end.
 
 -spec layout(dialect(), #{binary() => json()}) -> prefix | single | {unsupported, binary()}.
@@ -253,20 +335,20 @@ layout(_Dialect, Schema) ->
 
 %% Своего сегмента у хвостового `items` нет: он стоит на самом keyword, как и
 %% `additionalProperties` рядом с `properties`.
--spec prefixed(#{binary() => json()}, [binary()], state()) ->
+-spec prefixed(#{binary() => json()}, position(), state()) ->
           {ok, constraint(), state()} | {error, #schema_error{}}.
-prefixed(Schema, Location, State) ->
+prefixed(Schema, Position, State) ->
     Slots = [{<<"prefixItems">>, fun ordered/3}, {<<"items">>, fun subschema/3}],
-    case slots(Slots, Schema, Location, State) of
+    case slots(Slots, Schema, Position, State) of
         {ok, [Tail, Addrs], Built} -> {ok, {prefix_items, Addrs, Tail}, Built};
         {error, _} = Error         -> Error
     end.
 
--spec single(#{binary() => json()}, [binary()], state()) ->
+-spec single(#{binary() => json()}, position(), state()) ->
           {ok, constraint(), state()} | {error, #schema_error{}}.
-single(Schema, Location, State) ->
+single(Schema, Position, State) ->
     Keyword = <<"items">>,
-    case subschema(maps:get(Keyword, Schema), [Keyword | Location], State) of
+    case subschema(maps:get(Keyword, Schema), below(Keyword, Position), State) of
         {ok, Addr, Built}  -> {ok, {items, Addr}, Built};
         {error, _} = Error -> Error
     end.
@@ -276,17 +358,17 @@ single(Schema, Location, State) ->
 %% всё равно разбираются: ошибка в них обязана останавливать компиляцию, как у
 %% `then` без `if`. Покрывает индексы `contains` только в Draft 2020-12 — в Draft
 %% 2019-09 его аннотация на `unevaluatedItems` не влияет.
--spec contains(#{binary() => json()}, [binary()], state()) ->
+-spec contains(#{binary() => json()}, position(), state()) ->
           {ok, constraint() | none, state()} | {error, #schema_error{}}.
-contains(Schema, Location, #state{dialect = Dialect} = State) ->
+contains(Schema, Position, #state{dialect = Dialect} = State) ->
     Keyword = <<"contains">>,
-    case bounds(Schema, Location) of
+    case bounds(Schema, Position) of
         {ok, Min, Max} ->
             case maps:find(Keyword, Schema) of
                 error ->
                     {ok, none, State};
                 {ok, Value} ->
-                    case subschema(Value, [Keyword | Location], State) of
+                    case subschema(Value, below(Keyword, Position), State) of
                         {ok, Addr, Built} ->
                             Marks = Dialect =:= ?DRAFT_2020_12,
                             {ok, {contains, Addr, Min, Max, Marks}, Built};
@@ -298,36 +380,37 @@ contains(Schema, Location, #state{dialect = Dialect} = State) ->
             Error
     end.
 
--spec bounds(#{binary() => json()}, [binary()]) ->
+-spec bounds(#{binary() => json()}, position()) ->
           {ok, non_neg_integer() | undefined, non_neg_integer() | undefined}
         | {error, #schema_error{}}.
-bounds(Schema, Location) ->
-    case {bound(<<"minContains">>, Schema, Location),
-          bound(<<"maxContains">>, Schema, Location)} of
+bounds(Schema, Position) ->
+    case {bound(<<"minContains">>, Schema, Position),
+          bound(<<"maxContains">>, Schema, Position)} of
         {{ok, Min}, {ok, Max}}  -> {ok, Min, Max};
         {{error, _} = Error, _} -> Error;
         {_, {error, _} = Error} -> Error
     end.
 
--spec bound(binary(), #{binary() => json()}, [binary()]) ->
+-spec bound(binary(), #{binary() => json()}, position()) ->
           {ok, non_neg_integer() | undefined} | {error, #schema_error{}}.
-bound(Keyword, Schema, Location) ->
+bound(Keyword, Schema, Position) ->
     case maps:find(Keyword, Schema) of
         error ->
             {ok, undefined};
         {ok, Value} ->
             case non_negative(Value) of
                 {ok, Count}     -> {ok, Count};
-                {error, Reason} -> {error, schema_error(Reason, [Keyword | Location])}
+                {error, Reason} ->
+                    {error, schema_error(Reason, below(Keyword, Position))}
             end
     end.
 
 %% Слоты составного constraint: написанный keyword строит свой кусок IR, а
-%% ненаписанный оставляет `undefined`. Обход накапливает nodes, а результат
-%% приходит в обратном порядке — так его и разбирают вызывающие.
--spec slots([{binary(), function()}], #{binary() => json()}, [binary()], state()) ->
+%% ненаписанный оставляет `undefined`. Результат приходит в обратном порядке —
+%% так его и разбирают вызывающие.
+-spec slots([{binary(), function()}], #{binary() => json()}, position(), state()) ->
           {ok, [term()], state()} | {error, #schema_error{}}.
-slots(Slots, Schema, Location, State) ->
+slots(Slots, Schema, Position, State) ->
     Step = fun(_Slot, {error, _} = Error) ->
                    Error;
               ({Keyword, Build}, {ok, Acc, Built}) ->
@@ -335,7 +418,7 @@ slots(Slots, Schema, Location, State) ->
                        error ->
                            {ok, [undefined | Acc], Built};
                        {ok, Value} ->
-                           case Build(Value, [Keyword | Location], Built) of
+                           case Build(Value, below(Keyword, Position), Built) of
                                {ok, Slot, Grown}  -> {ok, [Slot | Acc], Grown};
                                {error, _} = Error -> Error
                            end
@@ -345,38 +428,38 @@ slots(Slots, Schema, Location, State) ->
 
 %% Имя свойства становится сегментом локации. Обход идёт по отсортированным
 %% именам, чтобы первая ошибка не зависела от порядка обхода map.
--spec named(json(), [binary()], state()) ->
+-spec named(json(), position(), state()) ->
           {ok, #{binary() => addr()}, state()} | {error, #schema_error{}}.
-named(Value, Location, State) when is_map(Value) ->
+named(Value, Position, State) when is_map(Value) ->
     Step = fun(_Name, {error, _} = Error) ->
                    Error;
               (Name, {ok, Acc, Built}) ->
-                   Child = [Name | Location],
-                   case compile_node(maps:get(Name, Value), Child, Built) of
-                       {ok, Grown}        -> {ok, Acc#{Name => addr(Child)}, Grown};
+                   Child = below(Name, Position),
+                   case subschema(maps:get(Name, Value), Child, Built) of
+                       {ok, Addr, Grown}  -> {ok, Acc#{Name => Addr}, Grown};
                        {error, _} = Error -> Error
                    end
            end,
     lists:foldl(Step, {ok, #{}, State}, lists:sort(maps:keys(Value)));
-named(Value, Location, _Nodes) ->
-    {error, schema_error({bad_keyword_value, Value}, Location)}.
+named(Value, Position, _State) ->
+    {error, schema_error({bad_keyword_value, Value}, Position)}.
 
 %% Сегмент локации — исходный текст паттерна. Порядок списка задан сортировкой
 %% по нему же: от порядка обхода map наблюдаемое дерево units зависеть не должно.
--spec patterned(json(), [binary()], state()) ->
+-spec patterned(json(), position(), state()) ->
           {ok, [{regex(), addr()}], state()} | {error, #schema_error{}}.
-patterned(Value, Location, State) when is_map(Value) ->
+patterned(Value, Position, State) when is_map(Value) ->
     Step = fun(_Source, {error, _} = Error) ->
                    Error;
               (Source, {ok, Acc, Built}) ->
-                   Child = [Source | Location],
+                   Child = below(Source, Position),
                    case re:compile(Source, [unicode, dollar_endonly]) of
                        {error, Reason} ->
                            {error, schema_error({bad_pattern, Reason}, Child)};
                        {ok, Compiled} ->
-                           case compile_node(maps:get(Source, Value), Child, Built) of
-                               {ok, Grown} ->
-                                   {ok, [{{Source, Compiled}, addr(Child)} | Acc], Grown};
+                           case subschema(maps:get(Source, Value), Child, Built) of
+                               {ok, Addr, Grown} ->
+                                   {ok, [{{Source, Compiled}, Addr} | Acc], Grown};
                                {error, _} = Error ->
                                    Error
                            end
@@ -386,48 +469,49 @@ patterned(Value, Location, State) when is_map(Value) ->
         {ok, Acc, Built}   -> {ok, lists:reverse(Acc), Built};
         {error, _} = Error -> Error
     end;
-patterned(Value, Location, _Nodes) ->
-    {error, schema_error({bad_keyword_value, Value}, Location)}.
+patterned(Value, Position, _State) ->
+    {error, schema_error({bad_keyword_value, Value}, Position)}.
 
 %% Своего сегмента у такой ветви нет: она стоит на самом keyword.
--spec subschema(json(), [binary()], state()) ->
+-spec subschema(json(), position(), state()) ->
           {ok, addr(), state()} | {error, #schema_error{}}.
-subschema(Value, Location, State) ->
-    case compile_node(Value, Location, State) of
-        {ok, Built}        -> {ok, addr(Location), Built};
-        {error, _} = Error -> Error
-    end.
+subschema(Value, Position, State) when is_boolean(Value); is_map(Value) ->
+    Canonical = canonical(Position, State),
+    {ok, addr(Canonical), State};
+subschema(Value, Position, _State) ->
+    {error, schema_error({bad_keyword_value, Value}, Position)}.
 
 %% Слот из списка подсхем: сегментом становится десятичный индекс, как у ветвей
 %% списочных applicators.
--spec ordered(json(), [binary()], state()) ->
+-spec ordered(json(), position(), state()) ->
           {ok, [addr()], state()} | {error, #schema_error{}}.
-ordered(Value, Location, State) when is_list(Value) ->
-    indexed(Value, Location, State, 0, []);
-ordered(Value, Location, _State) ->
-    {error, schema_error({bad_keyword_value, Value}, Location)}.
+ordered(Value, Position, State) when is_list(Value) ->
+    indexed(Value, Position, State, 0, []);
+ordered(Value, Position, _State) ->
+    {error, schema_error({bad_keyword_value, Value}, Position)}.
 
 %% Пустой список ветвей метасхема запрещает, но в slot IR он ложится, поэтому
 %% компилятор доводит его до вычисления — как `type: []` и `enum: []`.
--spec branches(atom(), binary(), json(), [binary()], state()) ->
+-spec branches(atom(), binary(), json(), position(), state()) ->
           {ok, constraint(), state()} | {error, #schema_error{}}.
-branches(Tag, Keyword, Value, Location, State) when is_list(Value) ->
-    case indexed(Value, [Keyword | Location], State, 0, []) of
+branches(Tag, Keyword, Value, Position, State) when is_list(Value) ->
+    case indexed(Value, below(Keyword, Position), State, 0, []) of
         {ok, Addrs, Built} -> {ok, {Tag, Addrs}, Built};
         {error, _} = Error -> Error
     end;
-branches(_Tag, Keyword, Value, Location, _Nodes) ->
-    {error, schema_error({bad_keyword_value, Value}, [Keyword | Location])}.
+branches(_Tag, Keyword, Value, Position, _State) ->
+    {error, schema_error({bad_keyword_value, Value}, below(Keyword, Position))}.
 
 %% Сегмент ветви — её десятичный индекс: он же стоит в локации units.
--spec indexed([json()], [binary()], state(), non_neg_integer(), [addr()]) ->
+-spec indexed([json()], position(), state(), non_neg_integer(), [addr()]) ->
           {ok, [addr()], state()} | {error, #schema_error{}}.
-indexed([], _Location, State, _Index, Acc) ->
+indexed([], _Position, State, _Index, Acc) ->
     {ok, lists:reverse(Acc), State};
-indexed([Schema | Rest], Location, State, Index, Acc) ->
-    Child = [integer_to_binary(Index) | Location],
-    case compile_node(Schema, Child, State) of
-        {ok, Built}        -> indexed(Rest, Location, Built, Index + 1, [addr(Child) | Acc]);
+indexed([Schema | Rest], Position, State, Index, Acc) ->
+    Child = below(integer_to_binary(Index), Position),
+    case subschema(Schema, Child, State) of
+        {ok, Addr, Built}  -> indexed(Rest, Position, Built, Index + 1,
+                                      [Addr | Acc]);
         {error, _} = Error -> Error
     end.
 
@@ -543,14 +627,22 @@ type_name(<<"integer">>) -> {ok, integer};
 type_name(<<"string">>)  -> {ok, string};
 type_name(_)             -> error.
 
--spec artifact(nodes(), dialect()) -> compiled().
-artifact(Nodes, Dialect) ->
-    #{root      => anonymous,
+-spec artifact(rid(), node_sets(), dialect()) -> compiled().
+artifact(Root, NodeSets, Dialect) ->
+    Resources = maps:map(
+                  fun(Rid, Nodes) ->
+                          #resource{id               = resource_id(Rid),
+                                    dialect          = Dialect,
+                                    anchors          = #{},
+                                    dynamic_anchors  = #{},
+                                    recursive_anchor = false,
+                                    nodes            = Nodes}
+                  end,
+                  NodeSets),
+    #{root      => Root,
       sources   => [],
-      resources => #{anonymous =>
-          #resource{id               = undefined,
-                    dialect          = Dialect,
-                    anchors          = #{},
-                    dynamic_anchors  = #{},
-                    recursive_anchor = false,
-                    nodes            = Nodes}}}.
+      resources => Resources}.
+
+-spec resource_id(rid()) -> uri() | undefined.
+resource_id(anonymous) -> undefined;
+resource_id(Rid)       -> Rid.
