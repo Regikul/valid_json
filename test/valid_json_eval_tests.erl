@@ -320,6 +320,76 @@ ref_location_test() ->
     ?assertEqual({Target, [<<"type">>, <<"value">>, <<"$defs">>]},
                  TypeUnit#output_unit.absolute_location).
 
+%% Имя ищется по dynamic scope, и побеждает самый внешний resource, который его
+%% объявил: внутренняя цель переопределяется внешней (core.txt, 8.2.3.2).
+dynamic_ref_override_test_() ->
+    Artifact = dynamic_tree(#{<<"item">> => <<"/$defs/item">>}),
+    [?_assert(verdict(Artifact, 1)),
+     ?_assertNot(verdict(Artifact, <<"x">>))].
+
+%% Ни один resource dynamic scope имени не объявил — остаётся лексическая цель,
+%% проверенная компилятором.
+dynamic_ref_fallback_test_() ->
+    Artifact = dynamic_tree(#{<<"other">> => <<"/$defs/item">>}),
+    [?_assertNot(verdict(Artifact, 1)),
+     ?_assert(verdict(Artifact, <<"x">>))].
+
+%% Уровней в scope может быть больше двух, и средний не заслоняет внешний.
+dynamic_ref_outermost_test_() ->
+    Middle = <<"https://example.com/middle">>,
+    Inner = <<"https://example.com/inner">>,
+    Artifact =
+        #{root => ?RESOURCE,
+          sources => [],
+          resources =>
+              #{?RESOURCE =>
+                    dynamic_resource(?RESOURCE, #{<<"item">> => <<"/$defs/item">>},
+                                     #{<<>> => schema_node([{ref, {Middle, <<>>}}]),
+                                       <<"/$defs/item">> =>
+                                           schema_node([{type, [integer]}])}),
+                Middle =>
+                    dynamic_resource(Middle, #{<<"item">> => <<"/$defs/item">>},
+                                     #{<<>> => schema_node([{ref, {Inner, <<>>}}]),
+                                       <<"/$defs/item">> =>
+                                           schema_node([{type, [boolean]}])}),
+                Inner =>
+                    dynamic_resource(Inner, #{<<"item">> => <<"/$defs/item">>},
+                                     #{<<>> => schema_node(
+                                                 [{dynamic_ref, <<"item">>,
+                                                   {Inner, <<"/$defs/item">>}}]),
+                                       <<"/$defs/item">> =>
+                                           schema_node([{type, [string]}])})}},
+    [?_assert(verdict(Artifact, 1)),
+     ?_assertNot(verdict(Artifact, true)),
+     ?_assertNot(verdict(Artifact, <<"x">>))].
+
+%% Цель после разрешения ничем не отличается от цели `$ref`: она входит в тот же
+%% cycle guard, а keyword location продолжает путь через собственный сегмент.
+dynamic_ref_cycle_test() ->
+    Self = #{root => ?RESOURCE,
+             sources => [],
+             resources =>
+                 #{?RESOURCE =>
+                       dynamic_resource(?RESOURCE, #{<<"loop">> => <<>>},
+                                        #{<<>> => schema_node(
+                                                    [{dynamic_ref, <<"loop">>,
+                                                      {?RESOURCE, <<>>}}])})}},
+    ?assertEqual({error, {no_progress, {?RESOURCE, <<>>}}},
+                 valid_json_eval:run(Self, 1, flag)).
+
+%% Absolute location называет разрешённую цель, а не лексическую: иначе вывод
+%% указывал бы на схему, которая не применялась.
+dynamic_ref_location_test() ->
+    Artifact = dynamic_tree(#{<<"item">> => <<"/$defs/item">>}),
+    [RootUnit] = collect(Artifact, <<"x">>, basic),
+    [RefUnit] = RootUnit#output_unit.nested,
+    [InnerUnit] = RefUnit#output_unit.nested,
+    [DynamicUnit] = InnerUnit#output_unit.nested,
+    ?assertEqual([<<"$dynamicRef">>, <<"$ref">>],
+                 DynamicUnit#output_unit.keyword_location),
+    ?assertEqual({?RESOURCE, [<<"item">>, <<"$defs">>]},
+                 DynamicUnit#output_unit.absolute_location).
+
 %% Логические applicators спускаются в дочерние nodes общим входом evaluator'а и
 %% сводят их вердикты. Ветвь применяется к тому же значению, что и родитель.
 all_of_test_() ->
@@ -1301,6 +1371,31 @@ tree(Rid, Id, Nodes) ->
     #{root      => Rid,
       sources   => [],
       resources => #{Rid => resource(Id, Nodes)}}.
+
+%% Внешний resource применяет внутренний, а внутренний ссылается на своё
+%% `/$defs/item` через `$dynamicRef`. Что именно объявил внешний, и решает, чья
+%% цель победит: его собственная или лексическая.
+dynamic_tree(OuterAnchors) ->
+    Inner = <<"https://example.com/inner">>,
+    #{root => ?RESOURCE,
+      sources => [],
+      resources =>
+          #{?RESOURCE =>
+                dynamic_resource(?RESOURCE, OuterAnchors,
+                                 #{<<>> => schema_node([{ref, {Inner, <<>>}}]),
+                                   <<"/$defs/item">> =>
+                                       schema_node([{type, [integer]}])}),
+            Inner =>
+                dynamic_resource(Inner, #{<<"item">> => <<"/$defs/item">>},
+                                 #{<<>> => schema_node(
+                                             [{dynamic_ref, <<"item">>,
+                                               {Inner, <<"/$defs/item">>}}]),
+                                   <<"/$defs/item">> =>
+                                       schema_node([{type, [string]}])})}}.
+
+%% Resource с dynamic anchors: их читает только `$dynamicRef`.
+dynamic_resource(Id, Anchors, Nodes) ->
+    (resource(Id, Nodes))#resource{dynamic_anchors = Anchors}.
 
 %% Отдельный resource: артефакту из нескольких документов их нужно несколько.
 resource(Id, Nodes) ->

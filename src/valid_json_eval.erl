@@ -145,7 +145,10 @@ dispatch({if_then_else, _, _, _} = Constraint, Instance, Context) ->
 dispatch({dependent_schemas, _} = Constraint, Instance, Context) ->
     valid_json_apply:check(Constraint, Instance, Context);
 dispatch({ref, Addr}, Instance, Context) ->
-    reference(Addr, Instance, Context);
+    reference(<<"$ref">>, Addr, Instance, Context);
+dispatch({dynamic_ref, Name, Lexical}, Instance, Context) ->
+    reference(<<"$dynamicRef">>, dynamic_target(Name, Lexical, Context),
+              Instance, Context);
 dispatch({items, _} = Constraint, Instance, Context) ->
     valid_json_array:check(Constraint, Instance, Context);
 dispatch({prefix_items, _, _} = Constraint, Instance, Context) ->
@@ -161,22 +164,42 @@ dispatch({annotation, _, _} = Constraint, Instance, Context) ->
 dispatch(Constraint, Instance, Context) ->
     valid_json_assert:check(Constraint, Instance, Context).
 
-%% `$ref` применяет target к тому же instance через общий вход evaluator'а:
+%% Reference применяет target к тому же instance через общий вход evaluator'а:
 %% только так сохраняются resource scope и cycle guard. Keyword location
-%% продолжает путь через `/$ref`, а его absolute location указывает на
-%% каноническую target schema, как требует output contract.
--spec reference(addr(), json(), #eval_context{}) -> #eval_result{}.
-reference(Addr, Instance,
+%% продолжает путь через сегмент самого keyword, а его absolute location
+%% указывает на каноническую target schema, как требует output contract.
+-spec reference(binary(), addr(), json(), #eval_context{}) -> #eval_result{}.
+reference(Keyword, Addr, Instance,
           #eval_context{keyword_location = Location, mode = Mode} = Context) ->
-    Target = Context#eval_context{keyword_location = [<<"$ref">> | Location]},
+    Target = Context#eval_context{keyword_location = [Keyword | Location]},
     #eval_result{valid = Valid, units = Units} = Result = eval(Addr, Instance, Target),
     case Mode of
         flag ->
             Result;
         _ ->
-            Unit = valid_json_unit:reference(Addr, Valid, Units, Context),
+            Unit = valid_json_unit:reference(Keyword, Addr, Valid, Units, Context),
             Result#eval_result{units = [Unit]}
     end.
+
+%% Цель `$dynamicRef` — самый внешний resource dynamic scope, объявивший это имя
+%% через `$dynamicAnchor` (core.txt, 8.2.3.2). Стек лежит внутренним концом
+%% вперёд, поэтому левый fold и оставляет последним самое внешнее совпадение.
+%% Не нашлось ни одного — остаётся лексическая цель, проверенная компилятором.
+-spec dynamic_target(binary(), addr(), #eval_context{}) -> addr().
+dynamic_target(Name, Lexical,
+               #eval_context{schema = #{resources := Resources},
+                             dynamic_scope = Scope}) ->
+    dynamic_target(Scope, Name, Resources, Lexical).
+
+dynamic_target([], _Name, _Resources, Found) ->
+    Found;
+dynamic_target([Rid | Outer], Name, Resources, Found) ->
+    #resource{dynamic_anchors = Anchors} = maps:get(Rid, Resources),
+    Declared = case Anchors of
+                   #{Name := Pointer} -> {Rid, Pointer};
+                   #{}                -> Found
+               end,
+    dynamic_target(Outer, Name, Resources, Declared).
 
 %% Провалившийся schema object не отдаёт эффективных аннотаций, но свои
 %% диагностические units сохраняет.

@@ -522,8 +522,8 @@ anchor_ref_resource_test() ->
     ?assertEqual({ok, Expected}, compile(Schema)).
 
 %% `$dynamicAnchor` доходит до артефакта отдельной картой и одновременно
-%% работает как обычный plain-name fragment: `$ref` на него разрешается сейчас,
-%% до появления `$dynamicRef`. Собственного constraint keyword не даёт.
+%% работает как обычный plain-name fragment: `$ref` на него разрешается наравне
+%% с `$anchor`. Собственного constraint keyword не даёт.
 dynamic_anchor_resource_test() ->
     Schema = #{<<"$ref">> => <<"#node">>,
                <<"$defs">> =>
@@ -539,6 +539,65 @@ dynamic_anchor_resource_test() ->
                                   #{<<"node">> => <<"/$defs/value">>},
                                   Nodes)}),
     ?assertEqual({ok, Expected}, compile(Schema)).
+
+%% Динамическая форма: fragment — plain name, и лексическая цель несёт
+%% одноимённый `$dynamicAnchor`. В IR попадают оба: имя для поиска по dynamic
+%% scope и лексическая цель как запасной вариант.
+dynamic_ref_resource_test() ->
+    Schema = #{<<"$dynamicRef">> => <<"#node">>,
+               <<"$defs">> =>
+                   #{<<"value">> => #{<<"$dynamicAnchor">> => <<"node">>,
+                                      <<"type">> => <<"integer">>}}},
+    Nodes = #{<<>> => schema_node([{dynamic_ref, <<"node">>,
+                                    {anonymous, <<"/$defs/value">>}}]),
+              <<"/$defs/value">> => schema_node([{type, [integer]}])},
+    Expected = compiled(
+                 anonymous,
+                 #{anonymous => resource(
+                                  anonymous,
+                                  #{<<"node">> => <<"/$defs/value">>},
+                                  #{<<"node">> => <<"/$defs/value">>},
+                                  Nodes)}),
+    ?assertEqual({ok, Expected}, compile(Schema)).
+
+%% Лексическая цель может лежать в другом resource, и `$dynamicAnchor` там же:
+%% имя ищется в resource цели, а не в том, где написан keyword.
+dynamic_ref_other_resource_test() ->
+    Root = <<"https://example.com/root">>,
+    Child = <<"https://example.com/child">>,
+    Schema = #{<<"$id">> => Root,
+               <<"$dynamicRef">> => <<"child#node">>,
+               <<"$defs">> =>
+                   #{<<"child">> => #{<<"$id">> => Child,
+                                      <<"$dynamicAnchor">> => <<"node">>}}},
+    {ok, #{resources := Resources}} = compile(Schema),
+    #resource{nodes = #{<<>> := #node{constraints = Constraints}}} =
+        maps:get(Root, Resources),
+    ?assertEqual([{dynamic_ref, <<"node">>, {Child, <<>>}}], Constraints).
+
+%% Не выполнено хотя бы одно условие динамичности — и keyword компилируется в
+%% обычный `{ref, _}`. Дальше evaluator о его происхождении ничего не знает.
+dynamic_ref_static_forms_test_() ->
+    Target = {anonymous, <<"/$defs/value">>},
+    %% Fragment — JSON Pointer, имени у ссылки нет вовсе.
+    Pointer = #{<<"$dynamicRef">> => <<"#/$defs/value">>,
+                <<"$defs">> =>
+                    #{<<"value">> => #{<<"$dynamicAnchor">> => <<"node">>}}},
+    %% Имя есть, но цель объявила его обычным `$anchor`.
+    Static = #{<<"$dynamicRef">> => <<"#node">>,
+               <<"$defs">> => #{<<"value">> => #{<<"$anchor">> => <<"node">>}}},
+    [?_assertEqual([{ref, Target}], root_constraints(Pointer)),
+     ?_assertEqual([{ref, Target}], root_constraints(Static))].
+
+%% Разрешается ссылка так же, как `$ref`, и промахи называются теми же ошибками.
+%% В Draft 2019-09 keyword неизвестен, а неизвестные этот dialect игнорирует.
+dynamic_ref_value_test_() ->
+    [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/$dynamicRef">>),
+                   compile(#{<<"$dynamicRef">> => 42})),
+     ?_assertEqual(schema_error(unresolved_anchor, <<"/$dynamicRef">>),
+                   compile(#{<<"$dynamicRef">> => <<"#missing">>})),
+     ?_assertEqual({ok, legacy_artifact(schema_node([]))},
+                   legacy(#{<<"$dynamicRef">> => <<"#missing">>}))].
 
 pointer_ref_resource_test() ->
     Schema = #{<<"$ref">> => <<"#/$defs/value">>,
@@ -962,9 +1021,6 @@ not_implemented_test_() ->
     [?_assertEqual(schema_error({not_implemented, <<"$vocabulary">>},
                                 <<"/$vocabulary">>),
                    compile(#{<<"$vocabulary">> => #{}})),
-     ?_assertEqual(schema_error({not_implemented, <<"$dynamicRef">>},
-                                <<"/$dynamicRef">>),
-                   compile(#{<<"$dynamicRef">> => <<"#node">>})),
      ?_assertEqual(schema_error({not_implemented, <<"$recursiveRef">>},
                                 <<"/$recursiveRef">>),
                    legacy(#{<<"$recursiveRef">> => <<"#">>})),
@@ -1003,6 +1059,14 @@ schema_error(Reason, Pointer) ->
 
 addr(Pointer) ->
     {anonymous, Pointer}.
+
+%% Там, где важен только constraint корня, остальной артефакт повторяет уже
+%% проверенный случай и в ожидание не выписывается.
+root_constraints(Schema) ->
+    {ok, #{resources := Resources}} = compile(Schema),
+    #resource{nodes = #{<<>> := #node{constraints = Constraints}}} =
+        maps:get(anonymous, Resources),
+    Constraints.
 
 %% Опции повторяют validator-core.md: без них терм не совпал бы с компиляторным.
 regex(Source) ->

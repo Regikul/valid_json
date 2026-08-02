@@ -19,7 +19,7 @@
 %% составной перечисляет свои keywords списком и компилируется за один шаг.
 %% Annotation-only keywords стоят в конце: сначала идёт то, что определяет
 %% вердикт, потом то, что только описывает значение.
--define(ORDER, [<<"$ref">>,
+-define(ORDER, [<<"$ref">>, <<"$dynamicRef">>,
                 <<"type">>, <<"enum">>, <<"const">>,
                 <<"multipleOf">>,
                 <<"maximum">>, <<"exclusiveMaximum">>,
@@ -59,7 +59,8 @@
         [<<"$vocabulary">>,
          <<"format">>, <<"contentEncoding">>, <<"contentMediaType">>,
          <<"contentSchema">>]).
--define(DEFERRED_2020_12, [<<"$dynamicRef">>]).
+%% Отложенных keywords, принадлежащих только Draft 2020-12, сейчас не осталось.
+-define(DEFERRED_2020_12, []).
 -define(DEFERRED_2019_09,
         [<<"$recursiveRef">>, <<"$recursiveAnchor">>,
          <<"definitions">>, <<"dependencies">>, <<"additionalItems">>]).
@@ -320,6 +321,10 @@ keywords(Group)                           -> Group.
 -spec active_keywords(binary() | [binary()], dialect()) -> [binary()].
 active_keywords([<<"prefixItems">>, <<"items">>], ?DRAFT_2019_09) ->
     [<<"items">>];
+%% `$dynamicRef` тоже принадлежит только 2020-12. В 2019-09 он остаётся
+%% неизвестным keyword, а неизвестные этот dialect игнорирует.
+active_keywords(<<"$dynamicRef">>, ?DRAFT_2019_09) ->
+    [];
 active_keywords(Group, _Dialect) ->
     keywords(Group).
 
@@ -337,25 +342,27 @@ constraint([<<"prefixItems">>, <<"items">>], Schema, Position, State) ->
 constraint([<<"contains">>, <<"minContains">>, <<"maxContains">>],
            Schema, Position, State) ->
     contains(Schema, Position, State);
-constraint(<<"$ref">> = Keyword, Schema, {Rid, _} = Position,
-           #state{index = Index} = State) ->
-    Reference = maps:get(Keyword, Schema),
-    case is_binary(Reference) of
-        false ->
-            {error, schema_error({bad_keyword_value, Reference},
-                                 below(Keyword, Position))};
-        true ->
-            case valid_json_uri:resolve(Reference, Rid) of
-                {ok, Base, Target} ->
-                    case valid_json_resource_index:resolve_reference(Base, Target,
-                                                                     Index) of
-                        {ok, Addr}      -> {ok, {ref, Addr}, State};
-                        {error, Reason} ->
-                            {error, schema_error(Reason, below(Keyword, Position))}
-                    end;
-                {error, Reason} ->
-                    {error, schema_error(Reason, below(Keyword, Position))}
-            end
+constraint(<<"$ref">> = Keyword, Schema, Position, State) ->
+    case reference(Keyword, Schema, Position, State) of
+        {ok, _Target, Addr} -> {ok, {ref, Addr}, State};
+        {error, _} = Error  -> Error
+    end;
+%% Динамичность решается на компиляции. Keyword ведёт себя динамически только
+%% тогда, когда fragment — plain name, а лексическая цель несёт одноимённый
+%% `$dynamicAnchor` (core.txt, 8.2.3.2); во всех остальных случаях это обычный
+%% `$ref`, и IR это фиксирует прямо. Evaluator остаётся с единственным вопросом:
+%% какой resource dynamic scope объявил это имя раньше всех.
+constraint(<<"$dynamicRef">> = Keyword, Schema, Position, State) ->
+    case reference(Keyword, Schema, Position, State) of
+        {ok, {anchor, Name}, Addr} ->
+            case dynamic_anchor(Name, Addr, State) of
+                true  -> {ok, {dynamic_ref, Name, Addr}, State};
+                false -> {ok, {ref, Addr}, State}
+            end;
+        {ok, _Target, Addr} ->
+            {ok, {ref, Addr}, State};
+        {error, _} = Error ->
+            Error
     end;
 %% Своего сегмента у ветви нет: она стоит на самом keyword, как и у
 %% `additionalProperties`.
@@ -391,6 +398,38 @@ constraint(Keyword, Schema, Position, State) ->
         true  -> {ok, {annotation, Keyword, maps:get(Keyword, Schema)}, State};
         false -> asserted(Keyword, Schema, Position, State)
     end.
+
+%% Начальное разрешение у `$ref` и `$dynamicRef` одно и то же: reference берётся
+%% от base текущего resource, а промах называется той же ошибкой. Наружу уходит
+%% и сам target: по нему `$dynamicRef` отличает plain-name fragment от pointer.
+-spec reference(binary(), #{binary() => json()}, position(), state()) ->
+          {ok, valid_json_uri:target(), addr()} | {error, #schema_error{}}.
+reference(Keyword, Schema, {Rid, _} = Position, #state{index = Index}) ->
+    Value = maps:get(Keyword, Schema),
+    case is_binary(Value) of
+        false ->
+            {error, schema_error({bad_keyword_value, Value}, below(Keyword, Position))};
+        true ->
+            case valid_json_uri:resolve(Value, Rid) of
+                {ok, Base, Target} ->
+                    case valid_json_resource_index:resolve_reference(Base, Target,
+                                                                     Index) of
+                        {ok, Addr} ->
+                            {ok, Target, Addr};
+                        {error, Reason} ->
+                            {error, schema_error(Reason, below(Keyword, Position))}
+                    end;
+                {error, Reason} ->
+                    {error, schema_error(Reason, below(Keyword, Position))}
+            end
+    end.
+
+%% Совпасть должно не только имя, но и позиция: одноимённый `$anchor` в том же
+%% resource динамической цели не создаёт.
+-spec dynamic_anchor(binary(), addr(), state()) -> boolean().
+dynamic_anchor(Name, {Rid, Pointer}, #state{index = Index}) ->
+    Anchors = valid_json_resource_index:dynamic_anchors(Index),
+    maps:find(Name, maps:get(Rid, Anchors, #{})) =:= {ok, Pointer}.
 
 -spec asserted(binary(), #{binary() => json()}, position(), state()) ->
           {ok, constraint(), state()} | {error, #schema_error{}}.

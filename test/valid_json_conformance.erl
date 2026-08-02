@@ -36,21 +36,18 @@
 %% `additionalItems` из P6. По той же причине там отложен и весь
 %% `unevaluatedItems.json`: из двадцати шести групп восемнадцать написаны через
 %% array-form `items`, `additionalItems` или recursive keywords, и ?PENDING в
-%% таком объёме перестал бы читаться.
+%% таком объёме перестал бы читаться. Обоих файлов `dynamicRef.json` в
+%% Draft 2019-09 нет вовсе: keyword появился только в 2020-12.
 -define(DIALECT_FILES, [{"draft2020-12",
                          ["prefixItems.json", "uniqueItems.json", "items.json",
-                          "unevaluatedItems.json"]}]).
+                          "unevaluatedItems.json", "dynamicRef.json",
+                          "optional/dynamicRef.json"]}]).
 
 %% Группы подключённых files, которые ждут keywords следующих фаз: их схемы пока
 %% не компилируются вовсе. Фаза, снимающая группу, вычёркивает свою строку
 %% вместе с работой — так же, как отмечает выполненный пункт роадмапа.
 -define(PENDING,
-        [%% P5, `$dynamicAnchor` и `$dynamicRef`
-         {"draft2020-12", "unevaluatedProperties.json",
-          <<"unevaluatedProperties with $dynamicRef">>},
-         {"draft2020-12", "unevaluatedItems.json",
-          <<"unevaluatedItems with $dynamicRef">>},
-         %% P6, recursive keywords Draft 2019-09
+        [%% P6, recursive keywords Draft 2019-09
          {"draft2019-09", "unevaluatedProperties.json",
           <<"unevaluatedProperties with $recursiveRef">>}]).
 
@@ -67,7 +64,7 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES и
 %% ?EXCLUDED, и менять его иначе нельзя.
--define(CENSUS, {548, 1852}).
+-define(CENSUS, {572, 1902}).
 
 %% Сьют адресует свои remote documents относительно этого base, повторяя в URI
 %% раскладку директории `remotes`. Число документов закреплено по той же

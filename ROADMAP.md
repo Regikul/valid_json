@@ -232,25 +232,32 @@
 
 ## P5 — динамические ссылки Draft 2020-12
 
-- [ ] **Фаза P5 завершена**
+- [x] **Фаза P5 завершена**
 - [x] Индексировать `$dynamicAnchor` в resource: имя попадает и в
   `dynamic_anchors`, и в обычный anchor index, потому что plain-name fragment
   keyword создаёт наравне с `$anchor`. В Draft 2019-09 keyword не существует и
   не индексируется.
-- [ ] Компилировать `$dynamicRef` в лексическую цель и имя dynamic anchor.
-- [ ] Поддержать dynamic scope при переходе через границы resources.
-- [ ] Разрешать динамическую цель от внутреннего resource к внешнему с
+- [x] Компилировать `$dynamicRef` в лексическую цель и имя dynamic anchor.
+  Динамичность решается на компиляции: fragment должен быть plain name, а
+  лексическая цель — нести одноимённый `$dynamicAnchor`. Иначе keyword даёт
+  обычный `{ref, _}`.
+- [x] Поддержать dynamic scope при переходе через границы resources. Стек
+  ведётся с P3, а fixtures на несколько уровней добавлены здесь.
+- [x] Разрешать динамическую цель от внутреннего resource к внешнему с
   fallback на лексическую цель.
-- [ ] Проверить, достаточно ли пары schema/instance в cycle guard; при
-  необходимости включить dynamic scope в frame.
-- [ ] Добавить compiler и evaluator fixtures на переопределение, fallback,
+- [x] Проверить, достаточно ли пары schema/instance в cycle guard: достаточно.
+  Новый resource входит в scope только с внутреннего конца, а лексический
+  fallback сам вносит resource своей цели, поэтому у повторно встреченной пары
+  «адрес и локация инстанса» динамическая цель та же, что и в прошлый раз, и
+  повтор действительно означает отсутствие прогресса.
+- [x] Добавить compiler и evaluator fixtures на переопределение, fallback,
   циклы и несколько уровней dynamic scope.
-- [ ] Подключить к runner группы `unevaluatedProperties with $dynamicRef` и
+- [x] Подключить к runner группы `unevaluatedProperties with $dynamicRef` и
   `unevaluatedItems with $dynamicRef` Draft 2020-12: они ждут в списке
   отложенных групп с P4, потому что до `$dynamicAnchor` их схемы не
   компилируются вовсе.
-- [ ] Приёмка P5: проходит обязательный `dynamicRef.json` и выбранные
-  `optional/dynamicRef` cases.
+- [x] Приёмка P5: проходит обязательный `dynamicRef.json` и весь
+  `optional/dynamicRef.json`.
 
 ## P6 — vocabularies и Draft 2019-09
 
