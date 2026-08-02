@@ -521,6 +521,25 @@ anchor_ref_resource_test() ->
                                   Nodes)}),
     ?assertEqual({ok, Expected}, compile(Schema)).
 
+%% `$dynamicAnchor` доходит до артефакта отдельной картой и одновременно
+%% работает как обычный plain-name fragment: `$ref` на него разрешается сейчас,
+%% до появления `$dynamicRef`. Собственного constraint keyword не даёт.
+dynamic_anchor_resource_test() ->
+    Schema = #{<<"$ref">> => <<"#node">>,
+               <<"$defs">> =>
+                   #{<<"value">> => #{<<"$dynamicAnchor">> => <<"node">>,
+                                      <<"type">> => <<"integer">>}}},
+    Nodes = #{<<>> => schema_node([{ref, {anonymous, <<"/$defs/value">>}}]),
+              <<"/$defs/value">> => schema_node([{type, [integer]}])},
+    Expected = compiled(
+                 anonymous,
+                 #{anonymous => resource(
+                                  anonymous,
+                                  #{<<"node">> => <<"/$defs/value">>},
+                                  #{<<"node">> => <<"/$defs/value">>},
+                                  Nodes)}),
+    ?assertEqual({ok, Expected}, compile(Schema)).
+
 pointer_ref_resource_test() ->
     Schema = #{<<"$ref">> => <<"#/$defs/value">>,
                <<"$defs">> => #{<<"value">> => false}},
@@ -1018,10 +1037,13 @@ resource(Rid, Nodes) ->
     resource(Rid, #{}, Nodes).
 
 resource(Rid, Anchors, Nodes) ->
+    resource(Rid, Anchors, #{}, Nodes).
+
+resource(Rid, Anchors, DynamicAnchors, Nodes) ->
     Id = case Rid of anonymous -> undefined; _ -> Rid end,
     #resource{id               = Id,
               dialect          = ?DIALECT,
               anchors          = Anchors,
-              dynamic_anchors  = #{},
+              dynamic_anchors  = DynamicAnchors,
               recursive_anchor = false,
               nodes            = Nodes}.

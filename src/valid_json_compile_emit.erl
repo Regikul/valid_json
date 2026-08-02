@@ -45,8 +45,11 @@
 
 %% Полностью потребляются компилятором и собственного constraint не дают.
 %% `$defs` отдельно обходит свои schema entries до emission constraints.
+%% `$dynamicAnchor` перечислен без оговорки о dialect: в Draft 2019-09 такого
+%% keyword нет, но неизвестные keywords он и так игнорирует, поэтому результат
+%% совпадает.
 -define(CONSUMED, [<<"$schema">>, <<"$id">>, <<"$anchor">>, <<"$defs">>,
-                   <<"$comment">>]).
+                   <<"$comment">>, <<"$dynamicAnchor">>]).
 
 %% Стандартные keywords следующих фаз нельзя смешивать с неизвестными
 %% расширениями: иначе схема начнёт молча компилироваться до появления их
@@ -56,7 +59,7 @@
         [<<"$vocabulary">>,
          <<"format">>, <<"contentEncoding">>, <<"contentMediaType">>,
          <<"contentSchema">>]).
--define(DEFERRED_2020_12, [<<"$dynamicRef">>, <<"$dynamicAnchor">>]).
+-define(DEFERRED_2020_12, [<<"$dynamicRef">>]).
 -define(DEFERRED_2019_09,
         [<<"$recursiveRef">>, <<"$recursiveAnchor">>,
          <<"definitions">>, <<"dependencies">>, <<"additionalItems">>]).
@@ -92,7 +95,8 @@ emit(Index, Sources) ->
                    resources = Empty},
     case emit_resources(Root, Schemas, State) of
         {ok, #state{resources = Resources}} ->
-            Anchors = valid_json_resource_index:anchors(Index),
+            Anchors = {valid_json_resource_index:anchors(Index),
+                       valid_json_resource_index:dynamic_anchors(Index)},
             {ok, artifact(Root, Resources, Anchors, Dialects, Sources)};
         {error, _} = Error ->
             Error
@@ -752,15 +756,17 @@ type_name(<<"integer">>) -> {ok, integer};
 type_name(<<"string">>)  -> {ok, string};
 type_name(_)             -> error.
 
--spec artifact(rid(), node_sets(), valid_json_resource_index:resource_anchors(),
+-spec artifact(rid(), node_sets(),
+               {valid_json_resource_index:resource_anchors(),
+                valid_json_resource_index:resource_anchors()},
                #{rid() => dialect()}, [uri()]) -> compiled().
-artifact(Root, NodeSets, AnchorSets, Dialects, Sources) ->
+artifact(Root, NodeSets, {AnchorSets, DynamicSets}, Dialects, Sources) ->
     Resources = maps:map(
                   fun(Rid, Nodes) ->
                           #resource{id               = resource_id(Rid),
                                     dialect          = maps:get(Rid, Dialects),
                                     anchors          = maps:get(Rid, AnchorSets),
-                                    dynamic_anchors  = #{},
+                                    dynamic_anchors  = maps:get(Rid, DynamicSets),
                                     recursive_anchor = false,
                                     nodes            = Nodes}
                   end,

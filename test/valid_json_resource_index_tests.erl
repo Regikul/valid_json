@@ -151,6 +151,55 @@ anchor_resource_boundary_test() ->
     ?assertEqual({ok, {Root, <<>>}}, resolve_ref(Index, Root, <<"#same">>)),
     ?assertEqual({ok, {Child, <<>>}}, resolve_ref(Index, Child, <<"#same">>)).
 
+%% `$dynamicAnchor` объявляет ещё и обычный plain-name fragment, поэтому имя
+%% видно в обеих картах, а `$ref` на него разрешается как на статический anchor.
+dynamic_anchor_index_test() ->
+    Root = <<"https://example.com/root">>,
+    Child = <<"https://example.com/child">>,
+    Schema = #{<<"$id">> => Root,
+               <<"$dynamicAnchor">> => <<"node">>,
+               <<"$defs">> =>
+                   #{<<"child">> => #{<<"$id">> => Child,
+                                      <<"$anchor">> => <<"plain">>,
+                                      <<"$dynamicAnchor">> => <<"node">>}}},
+    {ok, Index} = discover(Schema, anonymous),
+    ?assertEqual(#{Root => #{<<"node">> => <<>>},
+                   Child => #{<<"node">> => <<>>}},
+                 valid_json_resource_index:dynamic_anchors(Index)),
+    ?assertEqual(#{Root => #{<<"node">> => <<>>},
+                   Child => #{<<"plain">> => <<>>, <<"node">> => <<>>}},
+                 valid_json_resource_index:anchors(Index)),
+    ?assertEqual({ok, {Root, <<>>}}, resolve_ref(Index, Root, <<"#node">>)),
+    ?assertEqual({ok, {Child, <<>>}}, resolve_ref(Index, Child, <<"#node">>)).
+
+%% В Draft 2019-09 keyword не существует, и dialect не индексирует его вовсе —
+%% включая имя, недопустимое по правилу Draft 2020-12.
+dynamic_anchor_legacy_test() ->
+    Schema = #{<<"$dynamicAnchor">> => <<"bad:name">>},
+    {ok, Index} = discover(Schema, anonymous, ?LEGACY),
+    ?assertEqual(#{anonymous => #{}},
+                 valid_json_resource_index:dynamic_anchors(Index)),
+    ?assertEqual(#{anonymous => #{}},
+                 valid_json_resource_index:anchors(Index)),
+    ?assertEqual(error, resolve_ref(Index, anonymous, <<"#bad:name">>)).
+
+dynamic_anchor_value_test_() ->
+    [?_assertEqual(
+         schema_error({bad_keyword_value, <<"bad:name">>},
+                      {anonymous, <<"/$dynamicAnchor">>}),
+         discover(#{<<"$dynamicAnchor">> => <<"bad:name">>}, anonymous)),
+     ?_assertEqual(
+         schema_error({bad_keyword_value, 42},
+                      {anonymous, <<"/$dynamicAnchor">>}),
+         discover(#{<<"$dynamicAnchor">> => 42}, anonymous)),
+     %% Имя проверяется на своей позиции, а не только в корне resource.
+     ?_assertEqual(
+         schema_error({bad_keyword_value, <<"9bad">>},
+                      {anonymous, <<"/$defs/leaf/$dynamicAnchor">>}),
+         discover(#{<<"$defs">> =>
+                        #{<<"leaf">> => #{<<"$dynamicAnchor">> => <<"9bad">>}}},
+                  anonymous))].
+
 anchor_value_test_() ->
     [?_assertEqual(
          schema_error({bad_keyword_value, <<"bad:name">>},

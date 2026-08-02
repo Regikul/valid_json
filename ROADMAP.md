@@ -233,7 +233,10 @@
 ## P5 — динамические ссылки Draft 2020-12
 
 - [ ] **Фаза P5 завершена**
-- [ ] Индексировать `$dynamicAnchor` в resource.
+- [x] Индексировать `$dynamicAnchor` в resource: имя попадает и в
+  `dynamic_anchors`, и в обычный anchor index, потому что plain-name fragment
+  keyword создаёт наравне с `$anchor`. В Draft 2019-09 keyword не существует и
+  не индексируется.
 - [ ] Компилировать `$dynamicRef` в лексическую цель и имя dynamic anchor.
 - [ ] Поддержать dynamic scope при переходе через границы resources.
 - [ ] Разрешать динамическую цель от внутреннего resource к внешнему с

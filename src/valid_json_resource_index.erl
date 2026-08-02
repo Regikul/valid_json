@@ -7,7 +7,8 @@
 
 -include("valid_json_resources.hrl").
 
--export([discover/3, root/1, resources/1, anchors/1, dialects/1, declaration/2,
+-export([discover/3, root/1, resources/1, anchors/1, dynamic_anchors/1,
+         dialects/1, declaration/2,
          merge/2, known/2, resolve/3, resolve_reference/3]).
 -export_type([index/0, resource_schemas/0, resource_anchors/0]).
 
@@ -22,6 +23,7 @@
 -opaque index() :: #{root := rid(),
                      resources := resource_schemas(),
                      anchors := resource_anchors(),
+                     dynamic_anchors := resource_anchors(),
                      dialects := resource_dialects(),
                      declarations := declarations(),
                      locations := locations()}.
@@ -30,6 +32,7 @@
     dialect   :: dialect(),
     resources = #{} :: resource_schemas(),
     anchors = #{} :: resource_anchors(),
+    dynamic_anchors = #{} :: resource_anchors(),
     locations = #{} :: locations(),
     declarations = #{} :: declarations(),
     %% Все URI, уже занятые resource либо retrieval alias. `anonymous` сюда не
@@ -80,6 +83,13 @@ resources(#{resources := Resources}) ->
 anchors(#{anchors := Anchors}) ->
     Anchors.
 
+%% Dynamic anchors живут отдельной картой, потому что читает её только
+%% `$dynamicRef`. Имя, объявленное через `$dynamicAnchor`, попадает и сюда, и в
+%% обычный anchor index: plain-name fragment он создаёт наравне с `$anchor`.
+-spec dynamic_anchors(index()) -> resource_anchors().
+dynamic_anchors(#{dynamic_anchors := Anchors}) ->
+    Anchors.
+
 %% Dialect пока выбирается для корня document целиком. Отдельная map нужна уже
 %% сейчас: общий compile index может содержать documents разных dialect, а в
 %% compiled() dialect хранится на каждом resource.
@@ -101,11 +111,13 @@ declaration(Rid, #{declarations := Declarations}) ->
 merge(#{root := Root,
         resources := LeftResources,
         anchors := LeftAnchors,
+        dynamic_anchors := LeftDynamic,
         dialects := LeftDialects,
         declarations := LeftDeclarations,
         locations := LeftLocations},
       #{resources := RightResources,
         anchors := RightAnchors,
+        dynamic_anchors := RightDynamic,
         dialects := RightDialects,
         declarations := RightDeclarations,
         locations := RightLocations}) ->
@@ -120,6 +132,7 @@ merge(#{root := Root,
                     {ok, #{root => Root,
                            resources => maps:merge(LeftResources, RightResources),
                            anchors => maps:merge(LeftAnchors, RightAnchors),
+                           dynamic_anchors => maps:merge(LeftDynamic, RightDynamic),
                            dialects => maps:merge(LeftDialects, RightDialects),
                            declarations => maps:merge(LeftDeclarations,
                                                       RightDeclarations),
@@ -197,15 +210,18 @@ discover_root(Schema, Retrieval, Root, Dialect) ->
     State0 = #state{dialect = Dialect,
                     resources = #{Root => #{}},
                     anchors = #{Root => #{}},
+                    dynamic_anchors = #{Root => #{}},
                     declarations = #{Root => root_declaration(Schema, Retrieval,
                                                               Root)},
                     names = Names},
     case walk(Schema, Root, [], Contexts, root, State0) of
         {ok, #state{resources = Resources, anchors = Anchors,
+                    dynamic_anchors = DynamicAnchors,
                     locations = Locations, declarations = Declarations}} ->
             {ok, #{root => Root,
                    resources => Resources,
                    anchors => Anchors,
+                   dynamic_anchors => DynamicAnchors,
                    dialects => maps:map(fun(_Rid, _Nodes) -> Dialect end,
                                         Resources),
                    declarations => Declarations,
@@ -273,6 +289,7 @@ resolve_id(Id, _Base) ->
           {ok, state()} | {error, #schema_error{}}.
 reserve_resource(Rid, Location,
                  #state{resources = Resources, anchors = Anchors,
+                        dynamic_anchors = DynamicAnchors,
                         declarations = Declarations, names = Names} = State) ->
     case maps:is_key(Rid, Names) of
         true ->
@@ -280,6 +297,7 @@ reserve_resource(Rid, Location,
         false ->
             {ok, State#state{resources = Resources#{Rid => #{}},
                              anchors = Anchors#{Rid => #{}},
+                             dynamic_anchors = DynamicAnchors#{Rid => #{}},
                              declarations = Declarations#{Rid => Location},
                              names = Names#{Rid => true}}}
     end.
@@ -291,7 +309,7 @@ place(Schema, {Rid, Pointer} = Addr, Contexts,
     Nodes = maps:get(Rid, Resources),
     WithNode = State#state{resources = Resources#{Rid => Nodes#{Pointer => Schema}}},
     case index_contexts(Contexts, Addr, WithNode) of
-        {ok, Indexed} when is_map(Schema) -> index_anchor(Schema, Addr, Indexed);
+        {ok, Indexed} when is_map(Schema) -> index_anchors(Schema, Addr, Indexed);
         {ok, Indexed}                     -> {ok, Indexed};
         {error, _} = Error                -> Error
     end.
@@ -299,25 +317,67 @@ place(Schema, {Rid, Pointer} = Addr, Contexts,
 %% Duplicate names inside one resource have undefined behavior in the drafts;
 %% the compiler deliberately does not invent a schema error for them. The walk
 %% is deterministic, so the last discovered declaration wins internally.
--spec index_anchor(#{binary() => json()}, addr(), state()) ->
+-spec index_anchors(#{binary() => json()}, addr(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
-index_anchor(Schema, {Rid, Pointer}, #state{dialect = Dialect,
-                                            anchors = Anchors} = State) ->
-    case maps:find(<<"$anchor">>, Schema) of
-        error ->
+index_anchors(Schema, Addr, State) ->
+    case anchor_name(<<"$anchor">>, Schema, Addr, State) of
+        {ok, none}         -> index_dynamic_anchor(Schema, Addr, State);
+        {ok, Name}         -> index_dynamic_anchor(Schema, Addr,
+                                                   put_anchor(Name, Addr, State));
+        {error, _} = Error -> Error
+    end.
+
+%% `$dynamicAnchor` существует только в Draft 2020-12; в Draft 2019-09 это
+%% unknown keyword, который dialect игнорирует. Кроме точки расширения для
+%% `$dynamicRef` он создаёт и обычный plain-name fragment наравне с `$anchor`,
+%% поэтому имя попадает в обе карты.
+-spec index_dynamic_anchor(#{binary() => json()}, addr(), state()) ->
+          {ok, state()} | {error, #schema_error{}}.
+index_dynamic_anchor(Schema, Addr, #state{dialect = ?DRAFT_2020_12} = State) ->
+    case anchor_name(<<"$dynamicAnchor">>, Schema, Addr, State) of
+        {ok, none} ->
             {ok, State};
         {ok, Name} ->
-            case valid_anchor(Name, Dialect) of
+            {ok, put_dynamic_anchor(Name, Addr, put_anchor(Name, Addr, State))};
+        {error, _} = Error ->
+            Error
+    end;
+index_dynamic_anchor(_Schema, _Addr, State) ->
+    {ok, State}.
+
+-spec anchor_name(binary(), #{binary() => json()}, addr(), state()) ->
+          {ok, binary() | none} | {error, #schema_error{}}.
+anchor_name(Keyword, Schema, {Rid, Pointer}, #state{dialect = Dialect}) ->
+    case maps:find(Keyword, Schema) of
+        error ->
+            {ok, none};
+        {ok, Name} ->
+            case valid_anchor(Name, anchor_dialect(Keyword, Dialect)) of
                 true ->
-                    ResourceAnchors = maps:get(Rid, Anchors),
-                    {ok, State#state{
-                           anchors = Anchors#{Rid => ResourceAnchors#{Name => Pointer}}}};
+                    {ok, Name};
                 false ->
                     Location = keyword_addr(
-                                 Rid, valid_json_location:segments(Pointer), <<"$anchor">>),
+                                 Rid, valid_json_location:segments(Pointer), Keyword),
                     {error, schema_error({bad_keyword_value, Name}, Location)}
             end
     end.
+
+%% Имя `$dynamicAnchor` пишется по правилу Draft 2020-12 всегда: в другом
+%% dialect этого keyword просто нет.
+-spec anchor_dialect(binary(), dialect()) -> dialect().
+anchor_dialect(<<"$dynamicAnchor">>, _Dialect) -> ?DRAFT_2020_12;
+anchor_dialect(<<"$anchor">>, Dialect)         -> Dialect.
+
+-spec put_anchor(binary(), addr(), state()) -> state().
+put_anchor(Name, {Rid, Pointer}, #state{anchors = Anchors} = State) ->
+    Resource = maps:get(Rid, Anchors),
+    State#state{anchors = Anchors#{Rid => Resource#{Name => Pointer}}}.
+
+-spec put_dynamic_anchor(binary(), addr(), state()) -> state().
+put_dynamic_anchor(Name, {Rid, Pointer},
+                   #state{dynamic_anchors = Anchors} = State) ->
+    Resource = maps:get(Rid, Anchors),
+    State#state{dynamic_anchors = Anchors#{Rid => Resource#{Name => Pointer}}}.
 
 -spec valid_anchor(json(), dialect()) -> boolean().
 valid_anchor(Name, Dialect) when is_binary(Name) ->
