@@ -135,6 +135,10 @@
 -type reason() :: invalid_uri
                 | invalid_percent_encoding
                 | relative_uri_without_base
+                | unresolved_anchor
+                | {dangling_ref, addr()}
+                | {non_schema_target, addr()}
+                | {unknown_document, uri()}
                 | {name_taken, uri()}
                 | {bad_keyword_value, json()}
                 | {bad_pattern, term()}

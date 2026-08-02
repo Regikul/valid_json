@@ -4,7 +4,7 @@
 
 -include("valid_json_core.hrl").
 
--export([keyword/4, keyword/5, schema/4]).
+-export([keyword/4, keyword/5, reference/4, schema/4]).
 
 %% Unit фактически написанного keyword стоит на сегмент глубже своего node.
 %% Составной constraint выпускает по одному unit на каждый фактический keyword,
@@ -20,6 +20,16 @@ keyword(Keyword, Valid, Detail, Context) ->
           #output_unit{}.
 keyword(Keyword, Valid, Detail, Nested, #eval_context{keyword_location = Location} = Context) ->
     build(Valid, [Keyword | Location], [Keyword], Detail, Nested, Context).
+
+%% `$ref` — applicator с особой absolute location: keywordLocation называет
+%% написанный `/$ref`, но absoluteKeywordLocation называет уже каноническую
+%% target schema, без синтетического сегмента `$ref`.
+-spec reference(addr(), boolean(), [#output_unit{}], #eval_context{}) ->
+          #output_unit{}.
+reference(Addr, Valid, Nested,
+          #eval_context{keyword_location = Location} = Context) ->
+    Target = Context#eval_context{node = Addr},
+    build(Valid, [<<"$ref">> | Location], [], none, Nested, Target).
 
 %% Unit самого node: своего сегмента у него нет, он стоит там же, где схема, и
 %% держит внутри units своих keywords.

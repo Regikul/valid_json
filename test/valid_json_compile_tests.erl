@@ -471,6 +471,98 @@ definitions_resource_test() ->
                    <<"/$defs/a~1b~0c">> => schema_node([{type, [string]}])}),
     ?assertEqual({ok, Expected}, compile(Schema)).
 
+%% Anchor index строится до emission, поэтому корневой `$ref` разрешает цель,
+%% объявленную позже в `$defs`, и хранит в IR только canonical addr().
+anchor_ref_resource_test() ->
+    Schema = #{<<"$ref">> => <<"#number">>,
+               <<"$defs">> =>
+                   #{<<"value">> => #{<<"$anchor">> => <<"number">>,
+                                      <<"type">> => <<"integer">>}}},
+    Nodes = #{<<>> => schema_node([{ref, {anonymous, <<"/$defs/value">>}}]),
+              <<"/$defs/value">> => schema_node([{type, [integer]}])},
+    Expected = compiled(
+                 anonymous,
+                 #{anonymous => resource(
+                                  anonymous,
+                                  #{<<"number">> => <<"/$defs/value">>},
+                                  Nodes)}),
+    ?assertEqual({ok, Expected}, compile(Schema)).
+
+pointer_ref_resource_test() ->
+    Schema = #{<<"$ref">> => <<"#/$defs/value">>,
+               <<"$defs">> => #{<<"value">> => false}},
+    Expected = artifact(
+                 #{<<>> => schema_node([{ref, {anonymous,
+                                                <<"/$defs/value">>}}]),
+                   <<"/$defs/value">> => false}),
+    ?assertEqual({ok, Expected}, compile(Schema)).
+
+self_ref_finite_ir_test() ->
+    Expected = artifact(schema_node([{ref, {anonymous, <<>>}}])),
+    ?assertEqual({ok, Expected}, compile(#{<<"$ref">> => <<"#">>})).
+
+parent_pointer_ref_resource_test() ->
+    Child = <<"https://example.com/child">>,
+    Schema = #{<<"$ref">> => <<"#/$defs/child">>,
+               <<"$defs">> =>
+                   #{<<"child">> => #{<<"$id">> => Child,
+                                        <<"type">> => <<"integer">>}}},
+    Expected = compiled(
+                 anonymous,
+                 #{anonymous => resource(
+                                  anonymous,
+                                  #{<<>> => schema_node([{ref, {Child, <<>>}}])}),
+                   Child => resource(
+                              Child,
+                              #{<<>> => schema_node([{type, [integer]}])})}),
+    ?assertEqual({ok, Expected}, compile(Schema)).
+
+%% Absolute/relative URI может выбрать embedded resource того же compound
+%% document; store для такого локального перехода не нужен.
+embedded_anchor_ref_resource_test() ->
+    Root = <<"https://example.com/schemas/root.json">>,
+    Child = <<"https://example.com/schemas/child.json">>,
+    Schema = #{<<"$id">> => Root,
+               <<"$ref">> => <<"child.json#leaf">>,
+               <<"$defs">> =>
+                   #{<<"child">> =>
+                         #{<<"$id">> => <<"child.json">>,
+                           <<"$anchor">> => <<"leaf">>,
+                           <<"type">> => <<"string">>}}},
+    Expected = compiled(
+                 Root,
+                 #{Root => resource(
+                            Root,
+                            #{<<>> => schema_node([{ref, {Child, <<>>}}])}),
+                   Child => resource(
+                             Child, #{<<"leaf">> => <<>>},
+                             #{<<>> => schema_node([{type, [string]}])})}),
+    ?assertEqual({ok, Expected}, compile(Schema)).
+
+local_ref_error_test_() ->
+    Root = <<"https://example.com/root.json">>,
+    Missing = <<"https://example.com/missing.json">>,
+    [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/$ref">>),
+                   compile(#{<<"$ref">> => 42})),
+     ?_assertEqual(schema_error(unresolved_anchor, <<"/$ref">>),
+                   compile(#{<<"$ref">> => <<"#missing">>})),
+     ?_assertEqual(schema_error({dangling_ref,
+                                 {anonymous, <<"/$defs/missing">>}},
+                                <<"/$ref">>),
+                   compile(#{<<"$ref">> => <<"#/$defs/missing">>,
+                             <<"$defs">> => #{}})),
+     ?_assertEqual(schema_error({non_schema_target,
+                                 {anonymous, <<"/const/value">>}},
+                                <<"/$ref">>),
+                   compile(#{<<"$ref">> => <<"#/const/value">>,
+                             <<"const">> => #{<<"value">> => true}})),
+     ?_assertEqual(
+         {error, #schema_error{reason = {unknown_document, Missing},
+                               location = {Root, <<"/$ref">>}}},
+         compile(#{<<"$id">> => Root, <<"$ref">> => <<"missing.json">>})),
+     ?_assertEqual(schema_error(invalid_percent_encoding, <<"/$ref">>),
+                   compile(#{<<"$ref">> => <<"#%zz">>}))].
+
 %% Подсхема с `$id` начинает новый resource: адрес в parent constraint сразу
 %% канонический, а указатели внутри child считаются от его собственного корня.
 embedded_resource_test() ->
@@ -600,9 +692,7 @@ annotation_order_test() ->
 not_implemented_test_() ->
     [?_assertEqual(schema_error({not_implemented, <<"unevaluatedItems">>},
                                 <<"/unevaluatedItems">>),
-                   compile(#{<<"unevaluatedItems">> => #{}})),
-     ?_assertEqual(schema_error({not_implemented, <<"$ref">>}, <<"/$ref">>),
-                   compile(#{<<"$ref">> => <<"#">>, <<"type">> => <<"object">>}))].
+                   compile(#{<<"unevaluatedItems">> => #{}}))].
 
 %% На позиции schema стоит значение, которое schema не является: отдельной
 %% причины у него нет, для slot IR оно просто невозможно.
@@ -665,10 +755,13 @@ compiled(Root, Resources) ->
     #{root => Root, sources => [], resources => Resources}.
 
 resource(Rid, Nodes) ->
+    resource(Rid, #{}, Nodes).
+
+resource(Rid, Anchors, Nodes) ->
     Id = case Rid of anonymous -> undefined; _ -> Rid end,
     #resource{id               = Id,
               dialect          = ?DIALECT,
-              anchors          = #{},
+              anchors          = Anchors,
               dynamic_anchors  = #{},
               recursive_anchor = false,
               nodes            = Nodes}.

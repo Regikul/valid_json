@@ -7,24 +7,30 @@
 
 -include("valid_json_core.hrl").
 
--export([discover/3, root/1, resources/1, resolve/3]).
--export_type([index/0, resource_schemas/0]).
+-export([discover/3, root/1, resources/1, anchors/1, resolve/3,
+         resolve_reference/3]).
+-export_type([index/0, resource_schemas/0, resource_anchors/0]).
 
 -define(DRAFT_2020_12,
         <<"https://json-schema.org/draft/2020-12/schema">>).
+-define(DRAFT_2019_09,
+        <<"https://json-schema.org/draft/2019-09/schema">>).
 
 -type resource_schemas() :: #{rid() => #{pointer() => json()}}.
+-type resource_anchors() :: #{rid() => #{binary() => pointer()}}.
 -type location_key() :: {rid(), pointer()}.
 -type locations() :: #{location_key() => addr()}.
 
 %% Индекс является промежуточным значением compiler и не входит в compiled().
 -opaque index() :: #{root := rid(),
                      resources := resource_schemas(),
+                     anchors := resource_anchors(),
                      locations := locations()}.
 
 -record(state, {
     dialect   :: dialect(),
     resources = #{} :: resource_schemas(),
+    anchors = #{} :: resource_anchors(),
     locations = #{} :: locations(),
     %% Все URI, уже занятые resource либо retrieval alias. `anonymous` сюда не
     %% входит: это локальная метка, а не глобальное имя.
@@ -67,16 +73,43 @@ root(#{root := Root}) ->
 resources(#{resources := Resources}) ->
     Resources.
 
+%% Static anchors входят в compiled(), но индексируются одновременно со schema
+%% positions: `$ref` может стоять раньше объявления цели. Pointer уже
+%% каноничен относительно resource, location aliases сюда не просачиваются.
+-spec anchors(index()) -> resource_anchors().
+anchors(#{anchors := Anchors}) ->
+    Anchors.
+
 %% URI-слой отделяет base от fragment. Здесь pointer ищется по физическому
-%% location index и сразу превращается в canonical addr(). Anchors появятся в
-%% следующем инкременте и пока закономерно дают `error`.
+%% location index и сразу превращается в canonical addr(). Plain-name fragment
+%% сначала выбирает canonical resource через его root alias, затем ищет anchor.
 -spec resolve(rid(), valid_json_uri:target(), index()) -> {ok, addr()} | error.
 resolve(Base, root, #{locations := Locations}) ->
     find_location(Base, <<>>, Locations);
 resolve(Base, {pointer, Segments}, #{locations := Locations}) ->
     find_location(Base, valid_json_location:pointer(Segments), Locations);
-resolve(_Base, {anchor, _Name}, _Index) ->
-    error.
+resolve(Base, {anchor, Name},
+        #{anchors := Anchors, locations := Locations}) ->
+    case find_location(Base, <<>>, Locations) of
+        {ok, {Rid, <<>>}} ->
+            case maps:get(Rid, Anchors, #{}) of
+                #{Name := Pointer} -> {ok, {Rid, Pointer}};
+                #{}                -> error
+            end;
+        error ->
+            error
+    end.
+
+%% Compiler-facing resolution keeps the successful path canonical and assigns
+%% precise compile errors to misses. Pointer to an existing non-schema JSON
+%% value is distinct from a pointer that does not exist at all.
+-spec resolve_reference(rid(), valid_json_uri:target(), index()) ->
+          {ok, addr()} | {error, reason()}.
+resolve_reference(Base, Target, Index) ->
+    case resolve(Base, Target, Index) of
+        {ok, _} = Resolved -> Resolved;
+        error              -> reference_error(Base, Target, Index)
+    end.
 
 -spec normalize_retrieval(rid()) -> {ok, rid()} | {error, reason()}.
 normalize_retrieval(anonymous) ->
@@ -103,11 +136,14 @@ discover_root(Schema, Retrieval, Root, Dialect) ->
     Names = reserve_names([Base || {Base, []} <- Contexts]),
     State0 = #state{dialect = Dialect,
                     resources = #{Root => #{}},
+                    anchors = #{Root => #{}},
                     names = Names},
     case walk(Schema, Root, [], Contexts, root, State0) of
-        {ok, #state{resources = Resources, locations = Locations}} ->
+        {ok, #state{resources = Resources, anchors = Anchors,
+                    locations = Locations}} ->
             {ok, #{root => Root,
                    resources => Resources,
+                   anchors => Anchors,
                    locations => Locations}};
         {error, _} = Error ->
             Error
@@ -171,12 +207,14 @@ resolve_id(Id, _Base) ->
 -spec reserve_resource(uri(), addr(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
 reserve_resource(Rid, Location,
-                 #state{resources = Resources, names = Names} = State) ->
+                 #state{resources = Resources, anchors = Anchors,
+                        names = Names} = State) ->
     case maps:is_key(Rid, Names) of
         true ->
             {error, schema_error({name_taken, Rid}, Location)};
         false ->
             {ok, State#state{resources = Resources#{Rid => #{}},
+                             anchors = Anchors#{Rid => #{}},
                              names = Names#{Rid => true}}}
     end.
 
@@ -186,7 +224,104 @@ place(Schema, {Rid, Pointer} = Addr, Contexts,
       #state{resources = Resources} = State) ->
     Nodes = maps:get(Rid, Resources),
     WithNode = State#state{resources = Resources#{Rid => Nodes#{Pointer => Schema}}},
-    index_contexts(Contexts, Addr, WithNode).
+    case index_contexts(Contexts, Addr, WithNode) of
+        {ok, Indexed} when is_map(Schema) -> index_anchor(Schema, Addr, Indexed);
+        {ok, Indexed}                     -> {ok, Indexed};
+        {error, _} = Error                -> Error
+    end.
+
+%% Duplicate names inside one resource have undefined behavior in the drafts;
+%% the compiler deliberately does not invent a schema error for them. The walk
+%% is deterministic, so the last discovered declaration wins internally.
+-spec index_anchor(#{binary() => json()}, addr(), state()) ->
+          {ok, state()} | {error, #schema_error{}}.
+index_anchor(Schema, {Rid, Pointer}, #state{dialect = Dialect,
+                                            anchors = Anchors} = State) ->
+    case maps:find(<<"$anchor">>, Schema) of
+        error ->
+            {ok, State};
+        {ok, Name} ->
+            case valid_anchor(Name, Dialect) of
+                true ->
+                    ResourceAnchors = maps:get(Rid, Anchors),
+                    {ok, State#state{
+                           anchors = Anchors#{Rid => ResourceAnchors#{Name => Pointer}}}};
+                false ->
+                    Location = keyword_addr(
+                                 Rid, valid_json_location:segments(Pointer), <<"$anchor">>),
+                    {error, schema_error({bad_keyword_value, Name}, Location)}
+            end
+    end.
+
+-spec valid_anchor(json(), dialect()) -> boolean().
+valid_anchor(Name, Dialect) when is_binary(Name) ->
+    Pattern = case Dialect of
+                  ?DRAFT_2019_09 -> <<"\\A[A-Za-z][-A-Za-z0-9.:_]*\\z">>;
+                  _              -> <<"\\A[A-Za-z_][-A-Za-z0-9._]*\\z">>
+              end,
+    re:run(Name, Pattern, [{capture, none}]) =:= match;
+valid_anchor(_Name, _Dialect) ->
+    false.
+
+-spec reference_error(rid(), valid_json_uri:target(), index()) ->
+          {error, reason()}.
+reference_error(Base, Target,
+                #{resources := Resources, locations := Locations}) ->
+    case find_location(Base, <<>>, Locations) of
+        error ->
+            {error, {unknown_document, Base}};
+        {ok, {Rid, <<>>}} ->
+            reference_target_error(Rid, Target, maps:get(Rid, Resources))
+    end.
+
+-spec reference_target_error(rid(), valid_json_uri:target(),
+                             #{pointer() => json()}) -> {error, reason()}.
+reference_target_error(_Rid, {anchor, _Name}, _Schemas) ->
+    {error, unresolved_anchor};
+reference_target_error(Rid, root, _Schemas) ->
+    %% Известный resource всегда имеет корневой schema node; сюда можно попасть
+    %% только при нарушенном внутреннем индексе.
+    {error, {dangling_ref, {Rid, <<>>}}};
+reference_target_error(Rid, {pointer, Segments}, Schemas) ->
+    Pointer = valid_json_location:pointer(Segments),
+    Root = maps:get(<<>>, Schemas),
+    Reason = case json_at(lists:reverse(Segments), Root) of
+                 {ok, _Value} -> {non_schema_target, {Rid, Pointer}};
+                 error        -> {dangling_ref, {Rid, Pointer}}
+             end,
+    {error, Reason}.
+
+%% JSON Pointer lookup нужен только для классификации compile error. Успешная
+%% ссылка всё равно определяется location index, а не повторным обходом JSON.
+-spec json_at([binary()], json()) -> {ok, json()} | error.
+json_at([], Value) ->
+    {ok, Value};
+json_at([Segment | Rest], Value) when is_map(Value) ->
+    case maps:find(Segment, Value) of
+        {ok, Child} -> json_at(Rest, Child);
+        error       -> error
+    end;
+json_at([Segment | Rest], Value) when is_list(Value) ->
+    case array_index(Segment) of
+        {ok, Index} when Index < length(Value) ->
+            json_at(Rest, lists:nth(Index + 1, Value));
+        _ ->
+            error
+    end;
+json_at(_Segments, _Value) ->
+    error.
+
+-spec array_index(binary()) -> {ok, non_neg_integer()} | error.
+array_index(<<"0">>) ->
+    {ok, 0};
+array_index(<<First, _/binary>> = Segment) when First >= $1, First =< $9 ->
+    try binary_to_integer(Segment) of
+        Index when Index >= 0 -> {ok, Index}
+    catch
+        error:badarg -> error
+    end;
+array_index(_Segment) ->
+    error.
 
 -spec index_contexts([context()], addr(), state()) ->
           {ok, state()} | {error, #schema_error{}}.

@@ -33,6 +33,20 @@ store_reason_test_() ->
      ?_assert(contains(format({name_taken, <<"https://example.com/schema">>}, undefined),
                        <<"https://example.com/schema">>))].
 
+reference_reason_test_() ->
+    Target = {<<"https://example.com/schema">>, <<"/$defs/value">>},
+    [?_assert(contains(format(unresolved_anchor, {anonymous, <<"/$ref">>}),
+                       <<"anchor">>)),
+     ?_assert(contains(format({dangling_ref, Target}, {anonymous, <<"/$ref">>}),
+                       <<"https://example.com/schema#/$defs/value">>)),
+     ?_assert(contains(format({non_schema_target, Target},
+                              {anonymous, <<"/$ref">>}),
+                       <<"not a schema">>)),
+     ?_assert(contains(format({unknown_document,
+                               <<"https://example.com/missing">>},
+                              {anonymous, <<"/$ref">>}),
+                       <<"https://example.com/missing">>))].
+
 format(Reason, Location) ->
     iolist_to_binary(
       valid_json_error:format_error(#schema_error{reason = Reason, location = Location})).

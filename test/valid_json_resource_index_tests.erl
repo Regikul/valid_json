@@ -116,6 +116,68 @@ schema_positions_only_test() ->
                  valid_json_resource_index:resources(Index)),
     ?assertEqual(error, resolve_ref(Index, anonymous, <<"#/unknown">>)).
 
+anchor_index_test() ->
+    Root = <<"https://example.com/root">>,
+    Schema = #{<<"$id">> => Root,
+               <<"$anchor">> => <<"root_anchor">>,
+               <<"$defs">> =>
+                   #{<<"leaf">> => #{<<"$anchor">> => <<"leaf.anchor">>,
+                                      <<"type">> => <<"integer">>}}},
+    {ok, Index} = discover(Schema, <<"https://example.com/retrieval">>),
+    ?assertEqual(#{Root => #{<<"root_anchor">> => <<>>,
+                             <<"leaf.anchor">> => <<"/$defs/leaf">>}},
+                 valid_json_resource_index:anchors(Index)),
+    ?assertEqual({ok, {Root, <<>>}},
+                 resolve_ref(Index, Root, <<"#root_anchor">>)),
+    ?assertEqual({ok, {Root, <<"/$defs/leaf">>}},
+                 resolve_ref(Index, Root, <<"#leaf.anchor">>)),
+    %% Retrieval alias выбирает тот же canonical resource и его anchors.
+    ?assertEqual({ok, {Root, <<"/$defs/leaf">>}},
+                 resolve_ref(Index, <<"https://example.com/retrieval">>,
+                             <<"#leaf.anchor">>)).
+
+anchor_resource_boundary_test() ->
+    Root = <<"https://example.com/root">>,
+    Child = <<"https://example.com/child">>,
+    Schema = #{<<"$id">> => Root,
+               <<"$anchor">> => <<"same">>,
+               <<"$defs">> =>
+                   #{<<"child">> => #{<<"$id">> => Child,
+                                        <<"$anchor">> => <<"same">>}}},
+    {ok, Index} = discover(Schema, anonymous),
+    ?assertEqual(#{Root => #{<<"same">> => <<>>},
+                   Child => #{<<"same">> => <<>>}},
+                 valid_json_resource_index:anchors(Index)),
+    ?assertEqual({ok, {Root, <<>>}}, resolve_ref(Index, Root, <<"#same">>)),
+    ?assertEqual({ok, {Child, <<>>}}, resolve_ref(Index, Child, <<"#same">>)).
+
+anchor_value_test_() ->
+    [?_assertEqual(
+         schema_error({bad_keyword_value, <<"bad:name">>},
+                      {anonymous, <<"/$anchor">>}),
+         discover(#{<<"$anchor">> => <<"bad:name">>}, anonymous)),
+     ?_assertEqual(
+         schema_error({bad_keyword_value, <<"9bad">>},
+                      {anonymous, <<"/$anchor">>}),
+         discover(#{<<"$anchor">> => <<"9bad">>}, anonymous)),
+     ?_assertEqual(
+         schema_error({bad_keyword_value, 42},
+                      {anonymous, <<"/$anchor">>}),
+         discover(#{<<"$anchor">> => 42}, anonymous)),
+     %% Draft 2019-09 допускает двоеточие в имени anchor.
+     ?_assertMatch({ok, _},
+                   discover(#{<<"$anchor">> => <<"valid:name">>},
+                            anonymous, ?LEGACY)),
+     ?_assertEqual(
+         schema_error({bad_keyword_value, <<"_legacy">>},
+                      {anonymous, <<"/$anchor">>}),
+         discover(#{<<"$anchor">> => <<"_legacy">>}, anonymous, ?LEGACY)),
+     %% Похожее объявление вне schema position не индексируется и не проверяется.
+     ?_assertMatch({ok, _},
+                   discover(#{<<"const">> =>
+                                  #{<<"$anchor">> => <<"bad:name">>}},
+                            anonymous))].
+
 dialect_schema_positions_test() ->
     Root = <<"https://example.com/root.json">>,
     Item = #{<<"$id">> => <<"item.json">>},

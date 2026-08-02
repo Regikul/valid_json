@@ -148,7 +148,7 @@
 - [~] Закрыть решение об адресации встроенных resources через parent pointer:
   выбраны эфемерные compile-time location aliases с немедленной
   канонизацией в `addr()`; индекс подключён к emission дочерних applicators в
-  `compile/2`, осталось подключить его к emission `$ref` в production
+  `compile/2` и локальных `$ref`, осталось провести тот же путь через production
   `compile/3`.
 - [x] Реализовать URI-слой: resolution, normalization, fragment handling и
   JSON Pointer/anchor lookup.
@@ -159,12 +159,12 @@
   `$id`: `compile/2` переносит найденные nodes в итоговые `#resource{}` и
   канонизирует переходы через границу; осталось использовать этот путь в
   `compile/3`.
-- [~] Индексировать `$anchor`, `$defs` и nodes каждого resource: `$defs`, nodes
-  и physical location aliases индексируются, а nodes уже переносятся в
-  итоговый `compiled()`; остались anchors.
-- [ ] Разрешать `$ref` в `addr()` на этапе компиляции; dangling и non-schema
-  targets возвращать как compile errors.
-- [ ] Реализовать переходы evaluator через `{ref, Addr}` с сохранением
+- [x] Индексировать `$anchor`, `$defs` и nodes каждого resource.
+- [~] Разрешать `$ref` в `addr()` на этапе компиляции; локальные pointer/anchor
+  refs и ссылки на embedded resources уже канонизируются, dangling и non-schema
+  targets дают compile errors; осталась загрузка remote targets через
+  `compile/3`.
+- [x] Реализовать переходы evaluator через `{ref, Addr}` с сохранением
   keyword location и сменой absolute location на границе resource.
 - [ ] Подключить remote fixtures к conformance runner без сетевых обращений во
   время `validate/3`.
@@ -177,11 +177,12 @@
   объемлющий корень и retrieval URI, anchors, remotes, ошибки ссылок и
   циклический конечный IR: discovery fixtures закрывают physical aliases и
   конфликты `$id`, emission fixtures — named root, `$defs`, embedded и relative
-  `$id`, canonical child addresses и errors; остались anchors, remotes, ref
-  errors и циклический IR.
-- [ ] Добавить evaluator fixtures на resource boundary, обе ветви `#node{}` и
-  cycle guard через реальные `$ref`: self-reference возвращает
-  `{error, {no_progress, Addr}}`, повтор адреса в соседней ветви разрешён.
+  `$id`, anchors, local refs, canonical addresses, ref errors и конечный
+  циклический IR; остались remotes и production-путь с retrieval URI.
+- [~] Добавить evaluator fixtures на resource boundary, обе ветви `#node{}` и
+  cycle guard через реальные `$ref`: переход между resources, перенос покрытия,
+  self-reference и повтор адреса в соседней ветви закрыты; ветвь с будущими
+  `unevaluated` constraints остаётся до P4.
 - [ ] Подключить к runner `items.json` Draft 2020-12: его группа «items and
   subitems» написана через `$defs` и `$ref` и потому ждала адресации ссылок.
 - [ ] Приёмка P3: проходят `ref`, `defs`, `anchor`, `refRemote`,

@@ -1,7 +1,6 @@
 %% Компиляция schema JSON в канонические resources. Первая фаза выделяет
 %% границы `$id` и индексирует физические schema locations, вторая выпускает IR
-%% и немедленно заменяет каждый дочерний переход каноническим addr(). Anchors и
-%% ссылки здесь ещё не реализованы.
+%% и немедленно заменяет каждый дочерний переход и `$ref` каноническим addr().
 %% Инварианты компиляции — okf/architecture/validator-core.md.
 -module(valid_json_compile).
 
@@ -21,7 +20,8 @@
 %% составной перечисляет свои keywords списком и компилируется за один шаг.
 %% Annotation-only keywords стоят в конце: сначала идёт то, что определяет
 %% вердикт, потом то, что только описывает значение.
--define(ORDER, [<<"type">>, <<"enum">>, <<"const">>,
+-define(ORDER, [<<"$ref">>,
+                <<"type">>, <<"enum">>, <<"const">>,
                 <<"multipleOf">>,
                 <<"maximum">>, <<"exclusiveMaximum">>,
                 <<"minimum">>, <<"exclusiveMinimum">>,
@@ -39,7 +39,8 @@
 
 %% Полностью потребляются компилятором и собственного constraint не дают.
 %% `$defs` отдельно обходит свои schema entries до emission constraints.
--define(CONSUMED, [<<"$schema">>, <<"$id">>, <<"$defs">>, <<"$comment">>]).
+-define(CONSUMED, [<<"$schema">>, <<"$id">>, <<"$anchor">>, <<"$defs">>,
+                   <<"$comment">>]).
 
 %% Единственное место, где компилятор смотрит на dialect: раскладку array
 %% applicators и покрытие `contains` спецификации задают по-разному.
@@ -70,7 +71,8 @@ compile(Schema, Dialect) ->
             State = #state{dialect = Dialect, index = Index, resources = Empty},
             case emit_resources(Root, Schemas, State) of
                 {ok, #state{resources = Resources}} ->
-                    {ok, artifact(Root, Resources, Dialect)};
+                    Anchors = valid_json_resource_index:anchors(Index),
+                    {ok, artifact(Root, Resources, Anchors, Dialect)};
                 {error, _} = Error ->
                     Error
             end;
@@ -226,6 +228,26 @@ constraint([<<"prefixItems">>, <<"items">>], Schema, Position, State) ->
 constraint([<<"contains">>, <<"minContains">>, <<"maxContains">>],
            Schema, Position, State) ->
     contains(Schema, Position, State);
+constraint(<<"$ref">> = Keyword, Schema, {Rid, _} = Position,
+           #state{index = Index} = State) ->
+    Reference = maps:get(Keyword, Schema),
+    case is_binary(Reference) of
+        false ->
+            {error, schema_error({bad_keyword_value, Reference},
+                                 below(Keyword, Position))};
+        true ->
+            case valid_json_uri:resolve(Reference, Rid) of
+                {ok, Base, Target} ->
+                    case valid_json_resource_index:resolve_reference(Base, Target,
+                                                                     Index) of
+                        {ok, Addr}      -> {ok, {ref, Addr}, State};
+                        {error, Reason} ->
+                            {error, schema_error(Reason, below(Keyword, Position))}
+                    end;
+                {error, Reason} ->
+                    {error, schema_error(Reason, below(Keyword, Position))}
+            end
+    end;
 %% Своего сегмента у ветви нет: она стоит на самом keyword, как и у
 %% `additionalProperties`.
 constraint(<<"propertyNames">> = Keyword, Schema, Position, State) ->
@@ -627,13 +649,14 @@ type_name(<<"integer">>) -> {ok, integer};
 type_name(<<"string">>)  -> {ok, string};
 type_name(_)             -> error.
 
--spec artifact(rid(), node_sets(), dialect()) -> compiled().
-artifact(Root, NodeSets, Dialect) ->
+-spec artifact(rid(), node_sets(), valid_json_resource_index:resource_anchors(),
+               dialect()) -> compiled().
+artifact(Root, NodeSets, AnchorSets, Dialect) ->
     Resources = maps:map(
                   fun(Rid, Nodes) ->
                           #resource{id               = resource_id(Rid),
                                     dialect          = Dialect,
-                                    anchors          = #{},
+                                    anchors          = maps:get(Rid, AnchorSets),
                                     dynamic_anchors  = #{},
                                     recursive_anchor = false,
                                     nodes            = Nodes}

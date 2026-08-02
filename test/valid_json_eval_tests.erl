@@ -256,6 +256,70 @@ resolve_test_() ->
      ?_assertEqual(Child, valid_json_eval:resolve(addr(<<"/allOf/0">>), Artifact)),
      ?_assertEqual(false, valid_json_eval:resolve(addr(<<"/allOf/1">>), Artifact))].
 
+%% `$ref` применяет canonical target к тому же instance и переносит его
+%% verdict/coverage без повторного URI resolution в evaluator.
+ref_test_() ->
+    Target = addr(<<"/$defs/value">>),
+    Integer = ref_tree([{type, [integer]}]),
+    Covering = tree(
+                 #{<<>> => schema_node([{ref, Target}]),
+                   <<"/$defs/value">> =>
+                       schema_node([{properties,
+                                     #{<<"a">> => addr(
+                                                    <<"/$defs/value/properties/a">>)},
+                                     undefined, undefined}]),
+                   <<"/$defs/value/properties/a">> => true}),
+    [?_assert(verdict(Integer, 1)),
+     ?_assertNot(verdict(Integer, <<"1">>)),
+     ?_assertEqual({[<<"a">>], 0, []},
+                   coverage_of(Covering, #{<<"a">> => 1}))].
+
+%% Guard хранит active frame, а не множество когда-либо посещённых адресов:
+%% self-reference останавливается, два последовательных перехода к одной цели
+%% разрешены.
+ref_cycle_guard_test_() ->
+    Self = artifact(schema_node([{ref, addr(<<>>)}])),
+    Target = addr(<<"/$defs/value">>),
+    Repeated = tree(
+                 #{<<>> => schema_node([{ref, Target}, {ref, Target}]),
+                   <<"/$defs/value">> => true}),
+    [?_assertEqual({error, {no_progress, addr(<<>>)}},
+                   valid_json_eval:run(Self, 1, flag)),
+     ?_assertMatch({ok, #eval_result{valid = true}},
+                   valid_json_eval:run(Repeated, 1, flag))].
+
+%% keywordLocation продолжает syntactic path через `/$ref`, а absolute location
+%% ref unit и target keywords строится от target resource.
+ref_location_test() ->
+    Source = <<"https://example.com/source">>,
+    Target = <<"https://example.com/target">>,
+    TargetAddr = {Target, <<"/$defs/value">>},
+    Artifact =
+        #{root => Source,
+          sources => [],
+          resources =>
+              #{Source => #resource{id = Source, dialect = ?DIALECT,
+                                     anchors = #{}, dynamic_anchors = #{},
+                                     recursive_anchor = false,
+                                     nodes = #{<<>> => schema_node([{ref, TargetAddr}])}},
+                Target => #resource{id = Target, dialect = ?DIALECT,
+                                     anchors = #{}, dynamic_anchors = #{},
+                                     recursive_anchor = false,
+                                     nodes =
+                                         #{<<"/$defs/value">> =>
+                                               schema_node([{type, [string]}])}}}},
+    [RootUnit] = collect(Artifact, 1, basic),
+    [RefUnit] = RootUnit#output_unit.nested,
+    [TargetUnit] = RefUnit#output_unit.nested,
+    [TypeUnit] = TargetUnit#output_unit.nested,
+    ?assertEqual([<<"$ref">>], RefUnit#output_unit.keyword_location),
+    ?assertEqual({Target, [<<"value">>, <<"$defs">>]},
+                 RefUnit#output_unit.absolute_location),
+    ?assertEqual([<<"type">>, <<"$ref">>],
+                 TypeUnit#output_unit.keyword_location),
+    ?assertEqual({Target, [<<"type">>, <<"value">>, <<"$defs">>]},
+                 TypeUnit#output_unit.absolute_location).
+
 %% Логические applicators спускаются в дочерние nodes общим входом evaluator'а и
 %% сводят их вердикты. Ветвь применяется к тому же значению, что и родитель.
 all_of_test_() ->
@@ -955,6 +1019,11 @@ negated(Child, Instance) ->
 branching(Constraints, Children) ->
     Nodes = maps:from_list([{Pointer, child(Child)} || {Pointer, Child} <- Children]),
     tree(Nodes#{<<>> => schema_node(Constraints)}).
+
+ref_tree(Target) ->
+    Pointer = <<"/$defs/value">>,
+    tree(#{<<>> => schema_node([{ref, addr(Pointer)}]),
+           Pointer => child(Target)}).
 
 %% Дочерняя schema задаётся списком constraints, boolean или готовым node.
 child(Node) when is_boolean(Node) -> Node;
