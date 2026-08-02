@@ -8,8 +8,10 @@
                    {"draft2019-09", <<"https://json-schema.org/draft/2019-09/schema">>}]).
 
 %% Файл подключается целиком и только когда его схемы компилируются полностью.
-%% Из applicator-файлов ждут своего: `not.json` — `unevaluatedProperties`,
-%% `items.json` — `$defs` из P3.
+%% Поэтому своей фазы ждут `not.json` — его последняя группа написана через
+%% `unevaluatedProperties` из P4, — а также `ref.json` и `defs.json`: у обоих
+%% есть группа с `$ref` на корневую метасхему, а она сама компилируется не
+%% раньше P6.
 -define(FILES, ["boolean_schema.json", "type.json", "const.json", "enum.json",
                 "multipleOf.json",
                 "maximum.json", "exclusiveMaximum.json",
@@ -23,12 +25,16 @@
                 "contains.json", "maxContains.json", "minContains.json",
                 "allOf.json", "anyOf.json", "oneOf.json",
                 "if-then-else.json", "dependentSchemas.json",
-                "default.json", "optional/unknownKeyword.json"]).
+                "default.json",
+                "anchor.json", "refRemote.json", "infinite-loop-detection.json",
+                "optional/id.json", "optional/unknownKeyword.json"]).
 
 %% Files, подключённые только к одному dialect: раскладка второго ждёт своей
-%% фазы. `prefixItems.json` в Draft 2019-09 не существует вовсе, а тамошний
-%% `uniqueItems.json` опирается на array-form `items` и `additionalItems` из P6.
--define(DIALECT_FILES, [{"draft2020-12", ["prefixItems.json", "uniqueItems.json"]}]).
+%% фазы. `prefixItems.json` в Draft 2019-09 не существует вовсе, а тамошние
+%% `uniqueItems.json` и `items.json` опираются на array-form `items` и
+%% `additionalItems` из P6.
+-define(DIALECT_FILES, [{"draft2020-12",
+                         ["prefixItems.json", "uniqueItems.json", "items.json"]}]).
 
 %% Объявленные расхождения основного набора: okf/testing/conformance-policy.md,
 %% раздел «Известные расхождения». Группа исключается поимённо, чтобы остальные
@@ -43,12 +49,36 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES и
 %% ?EXCLUDED, и менять его иначе нельзя.
--define(CENSUS, {364, 1332}).
+-define(CENSUS, {416, 1449}).
+
+%% Сьют адресует свои remote documents относительно этого base, повторяя в URI
+%% раскладку директории `remotes`. Число документов закреплено по той же
+%% причине, что и перепись: потерянная директория не должна давать зелёный
+%% прогон, в котором remote refs просто перестали проверяться.
+-define(REMOTE_BASE, <<"http://localhost:1234/">>).
+-define(REMOTES, 41).
 
 validation_test_() ->
-    Tests = [file_tests(Dir, Dialect, File)
+    {Loaded, Store} = remotes_store(),
+    Tests = [file_tests(Store, Dir, Dialect, File)
              || {Dir, Dialect} <- ?DIALECTS, File <- files(Dir)],
-    [census_test(Tests), {inparallel, Tests}].
+    [remotes_test(Loaded), census_test(Tests), {inparallel, Tests}].
+
+%% Все remote documents регистрируются заранее и целиком: во время прогона сети
+%% нет, а замыкание берёт из store только то, что достижимо по `$ref`. Сам
+%% `validate/3` store не принимает вовсе — artifact уже толстый.
+remotes_store() ->
+    Files = filelib:wildcard(filename:join(remotes_dir(), "**/*.json")),
+    Entries = [{remote_uri(File), read_json(File)} || File <- Files],
+    {ok, _Names, Store} = valid_json_store:add(valid_json_store:new([]), Entries),
+    {length(Files), Store}.
+
+remotes_test(Loaded) ->
+    {"remotes", ?_assertEqual(?REMOTES, Loaded)}.
+
+remote_uri(Path) ->
+    Relative = string:prefix(Path, remotes_dir() ++ "/"),
+    unicode:characters_to_binary([?REMOTE_BASE, Relative]).
 
 %% Общий список плюс files, подключённые только к этому dialect.
 files(Dir) ->
@@ -67,19 +97,22 @@ count_file({_Name, Groups}, {Files, Cases}) ->
 count_group({_Title, Cases}) when is_list(Cases)     -> length(Cases);
 count_group({_Title, Fun}) when is_function(Fun, 0)  -> 1.
 
-file_tests(Dir, Dialect, File) ->
-    Path = filename:join([suite_dir(), Dir, File]),
+file_tests(Store, Dir, Dialect, File) ->
+    Path = filename:join([tests_dir(), Dir, File]),
     {filename:join(Dir, File),
-     [group_tests(Dialect, Group) || Group <- read_groups(Path), included(File, Group)]}.
+     [group_tests(Store, Dialect, Group)
+      || Group <- read_json(Path), included(File, Group)]}.
 
 included(File, #{<<"description">> := Description}) ->
     not lists:member({File, Description}, ?EXCLUDED).
 
-group_tests(Dialect, #{<<"description">> := Description,
-                       <<"schema">> := Schema,
-                       <<"tests">> := Cases}) ->
+%% Dialect директории задаётся опцией, а не подставляется вместо `$schema`:
+%% схема, которая называет свой dialect сама, остаётся сильнее раскладки сьюта.
+group_tests(Store, Dialect, #{<<"description">> := Description,
+                              <<"schema">> := Schema,
+                              <<"tests">> := Cases}) ->
     Title = unicode:characters_to_list(Description),
-    case valid_json_compile:compile(Schema, Dialect) of
+    case valid_json_compile:compile(Store, Schema, [{default_dialect, Dialect}]) of
         {ok, Compiled} ->
             {Title, [case_test(Compiled, Case) || Case <- Cases]};
         {error, Reason} ->
@@ -96,12 +129,18 @@ case_test(Compiled, #{<<"description">> := Description,
                       valid_json:validate(Compiled, Data, [{output, flag}]))
      end}.
 
-read_groups(Path) ->
+read_json(Path) ->
     {ok, Binary} = file:read_file(Path),
     json:decode(Binary).
 
+tests_dir() ->
+    filename:join(suite_dir(), "tests").
+
+remotes_dir() ->
+    filename:join(suite_dir(), "remotes").
+
 suite_dir() ->
-    Relative = ["test", "fixtures", "json-schema-test-suite", "tests"],
+    Relative = ["test", "fixtures", "json-schema-test-suite"],
     Candidates =
         case code:lib_dir(valid_json) of
             {error, _} -> [filename:join(Relative)];

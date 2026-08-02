@@ -144,7 +144,7 @@
 
 ## P3 — resources и обычные ссылки
 
-- [ ] **Фаза P3 завершена**
+- [x] **Фаза P3 завершена**
 - [x] Закрыть решение об адресации встроенных resources через parent pointer:
   выбраны эфемерные compile-time location aliases с немедленной
   канонизацией в `addr()`; индекс подключён к emission дочерних applicators в
@@ -167,14 +167,19 @@
   non-schema и отсутствующие targets дают compile errors.
 - [x] Реализовать переходы evaluator через `{ref, Addr}` с сохранением
   keyword location и сменой absolute location на границе resource.
-- [ ] Подключить remote fixtures к conformance runner без сетевых обращений во
-  время `validate/3`.
+- [x] Подключить remote fixtures к conformance runner без сетевых обращений во
+  время `validate/3`: документы `remotes` регистрируются в store заранее и
+  целиком, замыкание берёт из него только достижимое по `$ref`, а `validate/3`
+  store не принимает вовсе. Число загруженных документов закреплено рядом с
+  переписью прогона.
 - [x] Обрабатывать неизвестные keywords согласно dialect и не обходить schema,
   случайно записанные внутри их значений: Draft 2020-12 сохраняет их как
   детерминированно упорядоченные annotations, Draft 2019-09 игнорирует; точные
   compiler fixtures и `optional/unknownKeyword.json` обоих dialects проходят.
-- [ ] Заменить boolean-only заглушку компилятора в conformance runner на
-  production compiler.
+- [x] Заменить boolean-only заглушку компилятора в conformance runner на
+  production compiler: группы компилируются через `compile/3` со store, а
+  dialect директории сьюта передаётся опцией и потому уступает написанному в
+  схеме `$schema`.
 - [x] Добавить compiler fixtures на anonymous root, embedded resources,
   parent pointers через непосредственный и более внешний resource, анонимный
   объемлющий корень и retrieval URI, anchors, remotes, ошибки ссылок и
@@ -182,14 +187,18 @@
   `$id`, named root, `$defs`, embedded и relative `$id`, local/remote refs,
   retrieval URI, canonical addresses, `sources`, ref errors и циклы между
   documents.
-- [~] Добавить evaluator fixtures на resource boundary, обе ветви `#node{}` и
-  cycle guard через реальные `$ref`: переход между resources, перенос покрытия,
-  self-reference и повтор адреса в соседней ветви закрыты; ветвь с будущими
-  `unevaluated` constraints остаётся до P4.
-- [ ] Подключить к runner `items.json` Draft 2020-12: его группа «items and
+- [x] Добавить evaluator fixtures на resource boundary, ветвь `#node{}` без
+  unevaluated constraints и cycle guard через реальные `$ref`: закрыты переход
+  между resources, перенос покрытия, self-reference и повтор адреса в соседней
+  ветви. Вторая ветвь `#node{}` появляется только вместе с constraints P4 и
+  покрывается там.
+- [x] Подключить к runner `items.json` Draft 2020-12: его группа «items and
   subitems» написана через `$defs` и `$ref` и потому ждала адресации ссылок.
-- [ ] Приёмка P3: проходят `ref`, `defs`, `anchor`, `refRemote`,
-  `infinite-loop-detection`, `optional/id` и `optional/unknownKeyword`.
+- [x] Приёмка P3: проходят `anchor`, `refRemote`, `infinite-loop-detection`,
+  `optional/id` и `optional/unknownKeyword`. Файл подключается целиком, поэтому
+  `ref.json` и `defs.json` принимаются в P6: обоим нужна группа с `$ref` на
+  корневую метасхему, а та компилируется только после `$dynamicRef` из P5,
+  `$vocabulary`, `format`-аннотации и recursive keywords из P6.
 
 ## P4 — unevaluated keywords
 
@@ -206,7 +215,9 @@
 - [ ] Не переносить coverage из провалившегося schema object и из внутренней
   успешной схемы `not`.
 - [ ] Покрыть evaluator fixtures вложенными applicators, ссылками и
-  разреженными совпадениями `contains`.
+  разреженными совпадениями `contains`, а также ветвью `#node{}` с unevaluated
+  constraints на границе resource: до этой фазы такой ветви просто не из чего
+  собрать.
 - [ ] Подключить к runner `not.json` обоих dialects: его последняя группа
   написана через `unevaluatedProperties`.
 - [ ] Приёмка P4: проходят `unevaluatedProperties.json` и
@@ -225,7 +236,6 @@
   необходимости включить dynamic scope в frame.
 - [ ] Добавить compiler и evaluator fixtures на переопределение, fallback,
   циклы и несколько уровней dynamic scope.
-- [ ] Включить проверку schema resources метасхемой Draft 2020-12.
 - [ ] Приёмка P5: проходит обязательный `dynamicRef.json` и выбранные
   `optional/dynamicRef` cases.
 
@@ -238,6 +248,9 @@
   схемой/компилятором.
 - [ ] Реализовать разбор `$vocabulary` и включение keywords по активным
   vocabularies.
+- [ ] Реализовать `format` как чистую annotation: в обоих dialects это поведение
+  по умолчанию, и без него не компилируется ни одна корневая метасхема. Выбор
+  между annotation и assertion по vocabulary и compile options остаётся в P8.
 - [ ] Реализовать array-form `items` и `additionalItems` Draft 2019-09.
 - [ ] Реализовать `$recursiveAnchor` и `$recursiveRef` отдельным IR и правилом
   разрешения.
@@ -245,11 +258,17 @@
   между Draft 2019-09 и Draft 2020-12.
 - [ ] Реализовать cross-draft переходы и наследование dialect для embedded и
   remote resources.
-- [ ] Включить проверку schema resources метасхемой Draft 2019-09.
+- [ ] Включить проверку schema resources метасхемами Draft 2020-12 и
+  Draft 2019-09. Проверка 2020-12 стоит здесь, а не в P5: кроме `$dynamicRef`
+  метасхеме нужны `$vocabulary` и `format` этой фазы, а метасхеме 2019-09 — ещё
+  и recursive keywords.
 - [ ] Добавить compiler fixtures для vocabulary errors, recursive scope и
   cross-draft closure.
 - [ ] Подключить к runner `uniqueItems.json` и `items.json` Draft 2019-09: обе
   раскладки опираются на array-form `items` и `additionalItems`.
+- [ ] Подключить к runner `ref.json` и `defs.json` обоих dialects: у каждого
+  есть группа с `$ref` на корневую метасхему, и она ждала, пока та станет
+  компилируемой.
 - [ ] Приёмка P6: проходят обязательные files Draft 2019-09 и выбранные
   `optional/cross-draft`, compatibility и recursive cases.
 
@@ -279,8 +298,8 @@
 - [ ] Выбрать алгоритмы и состав поддерживаемых Format-Assertion attributes.
 - [ ] Зафиксировать таблицу: format name, dialect, annotation/assertion,
   алгоритм и ограничения.
-- [ ] Реализовать `format` как annotation или assertion в зависимости от
-  vocabulary и compile options.
+- [ ] Реализовать выбор между annotation и assertion для `format` по активным
+  vocabularies и compile options: сама annotation сделана в P6.
 - [ ] Реализовать выбранную обработку `contentEncoding`, `contentMediaType` и
   `contentSchema`, сохранив обязательные annotations.
 - [ ] Явно выбрать остальные optional profiles, поддерживаемые библиотекой.
@@ -307,8 +326,13 @@ Runtime не входит в conformance-фазы и развивается от
 - [ ] Реализовать transactional reload: пересборка по пересечению `sources`,
   commit только при полном успехе.
 - [ ] Реализовать удаление с ошибкой `{referenced_by, Uri, Refs}`.
-- [ ] Хранить встроенные метасхемы отдельно и публиковать их compiled form через
-  `persistent_term`.
+- [~] Хранить встроенные метасхемы отдельно и публиковать их compiled form через
+  `persistent_term`: `store()` уже отдаёт документы метасхем из `priv` мимо
+  пользовательского реестра, и переписать или удалить их нельзя. Осталась
+  публикация — сейчас каждый промах заново читает и разбирает файл. Раньше P6 её
+  не сделать: корневая метасхема Draft 2020-12 написана через `$dynamicRef`,
+  `$vocabulary` и `format` в позиции keyword, а метасхема Draft 2019-09 — ещё и
+  через recursive keywords.
 - [ ] Покрыть storage, ownership transfer, restart, reload, rollback и
   invalidation отдельными тестами без evaluator.
 

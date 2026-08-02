@@ -13,7 +13,7 @@
 
 Валидатор находится на этапе реализации. Нормативные документы, runtime-схемы и официальный набор conformance-тестов уже закреплены в репозитории. Текущее состояние работ и порядок фаз — в [roadmap](ROADMAP.md).
 
-На сегодня закрыты фазы P0–P2. Оба диалекта поддержаны в части assertion keywords, applicators, составных constraints и annotation-only keywords; результат подтверждён соответствующими файлами официального сьюта в формате `flag`. Ещё не поддержаны resources и ссылки (`$id`, `$anchor`, `$ref`, remotes), `unevaluatedProperties` с `unevaluatedItems`, `$dynamicRef`, `$vocabulary` вместе с array-form `items` и `additionalItems` Draft 2019-09, форматы результата `basic`, `detailed` и `verbose`, а также `format` и content keywords.
+На сегодня закрыты фазы P0–P3. Оба диалекта поддержаны в части assertion keywords, applicators, составных constraints, annotation-only keywords, а также resources и обычных ссылок: `$id`, `$anchor`, `$defs`, `$ref` на локальные и удалённые документы. Схемы компилируются из реестра документов, который ничего не загружает по сети: всё, до чего дотягиваются ссылки, должно быть зарегистрировано заранее. Результат подтверждён соответствующими файлами официального сьюта в формате `flag`. Ещё не поддержаны `unevaluatedProperties` с `unevaluatedItems`, `$dynamicRef`, `$vocabulary` вместе с array-form `items`, `additionalItems` и recursive keywords Draft 2019-09, форматы результата `basic`, `detailed` и `verbose`, а также `format` и content keywords. Проверка схем метасхемой пока не включена — она ждёт `$vocabulary`.
 
 ## Сборка
 
