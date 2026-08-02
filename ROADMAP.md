@@ -147,7 +147,7 @@
 - [ ] **Фаза P3 завершена**
 - [ ] Закрыть решение об адресации встроенных resources через parent pointer:
   location aliases или явное исключение из профиля.
-- [ ] Реализовать URI-слой: resolution, normalization, fragment handling и
+- [x] Реализовать URI-слой: resolution, normalization, fragment handling и
   JSON Pointer/anchor lookup.
 - [ ] Реализовать чистый `store()` с регистрацией retrieval и canonical URI.
 - [ ] Реализовать `compile/3`: dialect по `$schema` или опции, обход schema
