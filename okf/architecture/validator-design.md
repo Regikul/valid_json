@@ -66,11 +66,12 @@ status: draft
 | Child applicators | `properties`, `patternProperties`, `additionalProperties`, `propertyNames`, `prefixItems`, `items`, `contains` | `items` также принимает массив; есть `additionalItems`; нет `prefixItems`; `contains` не отмечает элементы |
 | Annotation-dependent | `unevaluatedProperties`, `unevaluatedItems` | входят в applicator vocabulary; покрытие массива считается иначе |
 | Core/referencing | `$schema`, `$id`, `$anchor`, `$ref`, `$defs`, `$comment`, `$vocabulary`, `$dynamicRef`, `$dynamicAnchor` | вместо dynamic — `$recursiveRef`, `$recursiveAnchor` |
+| Compatibility | `definitions` — location-reserving alias `$defs`; `dependencies` не входит в основной профиль; recursive keywords остаются неизвестными annotations | `definitions` — тот же alias; `dependencies` игнорируется как неподдерживаемый; recursive keywords принадлежат Core |
 | Annotation-only | `title`, `description`, `default`, `deprecated`, `readOnly`, `writeOnly`, `examples`, content keywords | идентично |
 | Format | annotation vocabulary по умолчанию и отдельная assertion vocabulary | одна vocabulary; assertion включается опцией реализации |
 | Неизвестные | SHOULD стать аннотацией со своим значением | SHOULD игнорироваться |
 
-`additionalProperties`, оба варианта `items`, `additionalItems`, `minContains`, `maxContains`, `then` и `else` поглощаются составными constraints. `$id`, `$anchor`, `$defs`, `$schema`, `$vocabulary`, `$dynamicAnchor` и `$comment` потребляются компилятором и собственного constraint не дают.
+`additionalProperties`, оба варианта `items`, `additionalItems`, `minContains`, `maxContains`, `then` и `else` поглощаются составными constraints. `$id`, `$anchor`, `$defs`, совместимый `definitions`, `$schema`, `$vocabulary`, `$dynamicAnchor` и `$comment` потребляются компилятором и собственного constraint не дают.
 
 # Зависимости и порядок вычисления
 
@@ -155,12 +156,26 @@ Runtime-слой не входит в conformance-фазы. `pattern` компи
 - Владение таблицей. Процессов два: хранитель, который держит таблицу между воплощениями, и управляющий, который забирает её через `ets:give_away/3` и единственный в неё пишет. Storage сведён к `lookup`, `put` и `delete` над переданной таблицей. Разбор — в [ETS и процессах](validator-resources-runtime.md#ets-и-процессы).
 - Лимиты. Валидатор не ограничивает ни глубину обхода, ни размер замыкания, ни число output units, ни время работы. Мы исходим из того, что схема обрабатывается за разумное время и в разумной памяти, а бюджет исполнения принадлежит вызывающему. От бесконечного обхода защищает cycle guard, описанный в [validator-core](validator-core.md#контекст-и-cycle-guard), и его срабатывание остаётся единственной причиной, по которой `validate/3` возвращает ошибку.
 
-Остальные пункты не закрыты.
+Остальные пункты не закрыты. Compatibility profile зафиксирован отдельно:
+
+- `definitions` ведёт как `$defs`, когда выбран один из двух стандартных
+  dialects: его entries являются schema positions и собственного output unit у
+  контейнера нет;
+- `dependencies` не входит в основной профиль. В Draft 2019-09 он остаётся
+  неподдерживаемым неизвестным keyword и игнорируется, в Draft 2020-12 —
+  неизвестной annotation. Если профиль совместимости будет выбран позже, обе
+  старые формы получат один составной constraint и один unit фактического
+  keyword;
+- `$recursiveRef` и `$recursiveAnchor` исполняются только в Draft 2019-09. В
+  Draft 2020-12 они не получают семантику `$dynamicRef` / `$dynamicAnchor` и
+  остаются неизвестными annotations;
+- `$recursiveAnchor` влияет только в корне schema resource. Некорневое
+  boolean-значение принимается, но не меняет resource: `$recursiveRef: "#"`
+  всё равно сначала адресует корень resource. Подсхема с `$id` уже является
+  корнем нового resource и потому не считается некорневой.
 
 | Владелец | Срок | Вопрос |
 | --- | --- | --- |
-| `resources` | до P6 | Решить строгость некорневого `$recursiveAnchor`: игнорировать либо отвергать схемой/компилятором. |
-| `core` | до P6 | Определить compatibility profile для legacy `definitions`, `dependencies` и recursive keywords из корневых meta-schemas. |
 | `core` | до P7 | Зафиксировать Draft 2019-09 `instanceLocation`: локальная спецификация требует URI-fragment form ([rfc6901.txt:261](../references/rfc/rfc6901.txt)), fixtures — обычный JSON Pointer. |
 | `core` | до P7 | Добавить собственные structure/golden tests для `flag`, `detailed`, `verbose`, `$ref`, no-op keywords и отброшенных annotations. |
 | `core` | до P8 | Для Format-Assertion выбрать алгоритмы и полную таблицу поддержанных стандартных format attributes. |

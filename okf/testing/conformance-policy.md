@@ -25,6 +25,14 @@ Test runner выполняет сценарии из:
 
 Файлы непосредственно в директории dialect составляют основной conformance-набор. Дополнительные capability profiles используют соответствующие сценарии из `optional/`. Cross-draft профиль выполняет сценарии, связывающие Draft 2020-12 и Draft 2019-09.
 
+Legacy `definitions` поддерживается как совместимое имя `$defs` в обоих
+стандартных dialects. Capability profile
+`optional/dependencies-compatibility.json` в основной профиль не входит:
+поддержка старого `dependencies` будет объявлена отдельно, если для обеих его
+форм будет реализован единый наблюдаемый keyword unit. Recursive keywords
+исполняются только в Draft 2019-09; в Draft 2020-12 они остаются unknown
+annotations и не подменяются dynamic keywords.
+
 Для каждого test case runner:
 
 1. загружает `schema` в контексте dialect директории;

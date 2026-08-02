@@ -201,7 +201,7 @@ IR различает отсутствующий keyword и написанное
 | `minLength: 0` | `{min_length, 0}` и собственный unit |
 | `minContains: 1` | явный `1`; отсутствие остаётся `undefined` |
 
-Defaults применяет handler, а не compiler. Это сохраняет hierarchy для `verbose` и видимые в `basic` пустые annotations. Исключения ограничены keywords, которые спецификация велит игнорировать или которые полностью потребляются compiler (`$id`, `$schema`, anchors, `$defs`, `$vocabulary`, `$comment`).
+Defaults применяет handler, а не compiler. Это сохраняет hierarchy для `verbose` и видимые в `basic` пустые annotations. Исключения ограничены keywords, которые спецификация велит игнорировать или которые полностью потребляются compiler (`$id`, `$schema`, anchors, `$defs`, совместимый `definitions`, `$vocabulary`, `$comment`).
 
 ## Инварианты компиляции IR
 
@@ -209,13 +209,13 @@ Defaults применяет handler, а не compiler. Это сохраняет
 - Parent-pointer и retrieval-pointer locations embedded resources
   канонизируются compile-time индексом до построения constraints; aliases в
   `compiled()` не сохраняются.
-- Компилятор посещает только schema positions активных keywords и location-reserving `$defs` ([core.txt:2169](../references/json-schema/draft-2020-12/core.txt)); внутрь unknown, `enum`, `const`, `default` и property names он не спускается.
+- Компилятор посещает только schema positions активных keywords и location-reserving `$defs` с совместимым `definitions` ([validation.txt:1416](../references/json-schema/draft-2020-12/validation.txt)); внутрь unknown, `enum`, `const`, `default` и property names он не спускается.
 - Dangling и non-schema targets — compile errors. `optional/refOfUnknownKeyword` остаётся вне профиля как undefined behavior.
 - Подсхема с `$id` получает новый `rid`; поэтому дочерние переходы всегда хранят полный `addr()`, не голый pointer.
 - `#node.unevaluated` отделяет constraints, которые обязаны выполняться последними.
 - Написанный keyword сохраняется даже при no-op значении. `undefined` в составном constraint означает только отсутствие keyword; спецификационное default применяет обработчик.
 - `additionalProperties`, `prefix/items`, array-form `items/additionalItems`, `contains/min/maxContains` и `if/then/else` сворачиваются статически, но каждый фактический keyword получает собственный output unit.
-- `{recursive_ref, ...}` и `{dynamic_ref, ...}` разведены. Флаг `recursive_anchor` принадлежит корню resource; открытая строгость некорневого anchor описана в [overview](validator-design.md#открытые-вопросы-и-аудит).
+- `{recursive_ref, ...}` и `{dynamic_ref, ...}` разведены. Флаг `recursive_anchor` принадлежит корню resource. Некорневой `$recursiveAnchor` проверяется как boolean, но флаг не меняет; подсхема с `$id` уже образует новый resource и может объявить собственный флаг.
 
 Разрешение адреса в готовом артефакте тотально:
 
@@ -249,6 +249,14 @@ Compiler и evaluator проверяются раздельно, не через
 `{dynamic_ref, Name, Lexical}` сначала имеет валидную лексическую цель, затем ищет одноимённый dynamic anchor по `dynamic_scope`. В стек входят resources, а не произвольные nodes. Если подходящей динамической цели нет, используется `Lexical`.
 
 `{recursive_ref, LexicalRoot}` — отдельная форма Draft 2019-09. Если лексический resource не помечен `recursive_anchor`, она ведёт как обычный ref. Иначе выбирается корень самого внешнего помеченного resource в dynamic scope. Имени anchor в теге нет: `$recursiveAnchor` boolean, а допустимая форма `$recursiveRef` целит в `#`.
+
+Legacy compatibility не смешивается с vocabulary semantics. `definitions` у
+двух стандартных dialects — location-reserving alias `$defs`; оба контейнера
+могут присутствовать одновременно и сохраняют собственные pointer locations.
+Старый `dependencies` не входит в основной профиль: Draft 2019-09 игнорирует
+его, Draft 2020-12 сохраняет как unknown annotation. Recursive keywords имеют
+описанную выше семантику только в Draft 2019-09; в Draft 2020-12 они являются
+unknown annotations, а не псевдонимами dynamic keywords.
 
 Ни один тег не хранит target node термом. Это сохраняет конечность cycles, независимость compile order и один механизм для static/dynamic references.
 

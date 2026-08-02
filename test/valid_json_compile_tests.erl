@@ -504,6 +504,16 @@ definitions_resource_test() ->
                    <<"/$defs/a~1b~0c">> => schema_node([{type, [string]}])}),
     ?assertEqual({ok, Expected}, compile(Schema)).
 
+%% `definitions` сохраняет собственную pointer location, но во всём остальном
+%% ведёт как `$defs`: контейнер unit не выпускает, entries становятся nodes.
+compat_definitions_resource_test_() ->
+    Schema = #{<<"definitions">> =>
+                   #{<<"value">> => #{<<"type">> => <<"integer">>}}},
+    Nodes = #{<<>> => schema_node([]),
+              <<"/definitions/value">> => schema_node([{type, [integer]}])},
+    [?_assertEqual({ok, artifact(Nodes)}, compile(Schema)),
+     ?_assertEqual({ok, legacy_artifact(Nodes)}, legacy(Schema))].
+
 %% Anchor index строится до emission, поэтому корневой `$ref` разрешает цель,
 %% объявленную позже в `$defs`, и хранит в IR только canonical addr().
 anchor_ref_resource_test() ->
@@ -598,6 +608,64 @@ dynamic_ref_value_test_() ->
                    compile(#{<<"$dynamicRef">> => <<"#missing">>})),
      ?_assertEqual({ok, legacy_artifact(schema_node([]))},
                    legacy(#{<<"$dynamicRef">> => <<"#missing">>}))].
+
+%% Recursive IR не зависит от наличия anchor у лексической цели: этот флаг
+%% решает, будет ли evaluator переигрывать цель в runtime scope.
+recursive_ref_resource_test_() ->
+    Recursive = #{<<"$recursiveAnchor">> => true,
+                  <<"$recursiveRef">> => <<"#">>},
+    Plain = #{<<"$recursiveRef">> => <<"#">>},
+    Node = schema_node([{recursive_ref, {anonymous, <<>>}}]),
+    [?_assertEqual({ok, legacy_artifact(Node, true)}, legacy(Recursive)),
+     ?_assertEqual({ok, legacy_artifact(Node, false)}, legacy(Plain))].
+
+recursive_anchor_resources_test() ->
+    Root = <<"https://example.com/root">>,
+    Child = <<"https://example.com/child">>,
+    Schema = #{<<"$id">> => Root,
+               <<"$recursiveAnchor">> => false,
+               <<"definitions">> =>
+                   #{<<"nested">> => #{<<"$recursiveAnchor">> => true},
+                     <<"resource">> => #{<<"$id">> => Child,
+                                          <<"$recursiveAnchor">> => true}}},
+    Expected = compiled(
+                 Root,
+                 #{Root => legacy_resource(
+                             Root, false,
+                             #{<<>> => schema_node([]),
+                               <<"/definitions/nested">> => schema_node([])}),
+                   Child => legacy_resource(Child, true,
+                                            #{<<>> => schema_node([])})}),
+    ?assertEqual({ok, Expected}, legacy(Schema)).
+
+recursive_ref_dialect_and_value_test_() ->
+    Current = #{<<"$recursiveAnchor">> => true,
+                <<"$recursiveRef">> => <<"#">>},
+    [?_assertEqual(
+         {ok, artifact(schema_node(
+                         [{annotation, <<"$recursiveAnchor">>, true},
+                          {annotation, <<"$recursiveRef">>, <<"#">>}]))},
+         compile(Current)),
+     ?_assertEqual(schema_error({bad_keyword_value, <<"other#">>},
+                                <<"/$recursiveRef">>),
+                   legacy(#{<<"$recursiveRef">> => <<"other#">>})),
+     ?_assertEqual(schema_error({bad_keyword_value, 42},
+                                <<"/$recursiveRef">>),
+                   legacy(#{<<"$recursiveRef">> => 42})),
+     ?_assertEqual(schema_error({bad_keyword_value, <<"yes">>},
+                                <<"/$recursiveAnchor">>),
+                   legacy(#{<<"$recursiveAnchor">> => <<"yes">>}))].
+
+%% Старый `dependencies` не является keyword двух заявленных vocabularies.
+%% Разница unknown-policy уже впечатана в IR: 2019-09 игнорирует, 2020-12
+%% сохраняет значение как annotation.
+dependencies_compatibility_profile_test_() ->
+    Value = #{<<"a">> => [<<"b">>]},
+    Schema = #{<<"dependencies">> => Value},
+    [?_assertEqual({ok, legacy_artifact(schema_node([]))}, legacy(Schema)),
+     ?_assertEqual({ok, artifact(schema_node(
+                                   [{annotation, <<"dependencies">>, Value}]))},
+                   compile(Schema))].
 
 pointer_ref_resource_test() ->
     Schema = #{<<"$ref">> => <<"#/$defs/value">>,
@@ -931,7 +999,9 @@ embedded_resource_error_test() ->
 
 definitions_error_test() ->
     ?assertEqual(schema_error({bad_keyword_value, 42}, <<"/$defs">>),
-                 compile(#{<<"$defs">> => 42})).
+                 compile(#{<<"$defs">> => 42})),
+    ?assertEqual(schema_error({bad_keyword_value, 42}, <<"/definitions">>),
+                 legacy(#{<<"definitions">> => 42})).
 
 %% Потребляются компилятором и собственного constraint не дают.
 consumed_keywords_test() ->
@@ -1021,9 +1091,6 @@ not_implemented_test_() ->
     [?_assertEqual(schema_error({not_implemented, <<"$vocabulary">>},
                                 <<"/$vocabulary">>),
                    compile(#{<<"$vocabulary">> => #{}})),
-     ?_assertEqual(schema_error({not_implemented, <<"$recursiveRef">>},
-                                <<"/$recursiveRef">>),
-                   legacy(#{<<"$recursiveRef">> => <<"#">>})),
      %% Keyword другого dialect — действительно unknown.
      ?_assertEqual({ok, artifact(schema_node(
                                    [{annotation, <<"additionalItems">>, false}]))},
@@ -1081,9 +1148,17 @@ artifact(Node) ->
 legacy_artifact(Node) ->
     artifact(Node, ?LEGACY).
 
+legacy_artifact(Node, Recursive) ->
+    artifact(Node, ?LEGACY, Recursive).
+
 artifact(Node, Dialect) when not is_map(Node) ->
     artifact(#{<<>> => Node}, Dialect);
 artifact(Nodes, Dialect) ->
+    artifact(Nodes, Dialect, false).
+
+artifact(Node, Dialect, Recursive) when not is_map(Node) ->
+    artifact(#{<<>> => Node}, Dialect, Recursive);
+artifact(Nodes, Dialect, Recursive) ->
     #{root      => anonymous,
       sources   => [],
       resources => #{anonymous =>
@@ -1091,7 +1166,7 @@ artifact(Nodes, Dialect) ->
                     dialect          = Dialect,
                     anchors          = #{},
                     dynamic_anchors  = #{},
-                    recursive_anchor = false,
+                    recursive_anchor = Recursive,
                     nodes            = Nodes}}}.
 
 compiled(Root, Resources) ->
@@ -1110,4 +1185,13 @@ resource(Rid, Anchors, DynamicAnchors, Nodes) ->
               anchors          = Anchors,
               dynamic_anchors  = DynamicAnchors,
               recursive_anchor = false,
+              nodes            = Nodes}.
+
+legacy_resource(Rid, Recursive, Nodes) ->
+    Id = case Rid of anonymous -> undefined; _ -> Rid end,
+    #resource{id               = Id,
+              dialect          = ?LEGACY,
+              anchors          = #{},
+              dynamic_anchors  = #{},
+              recursive_anchor = Recursive,
               nodes            = Nodes}.

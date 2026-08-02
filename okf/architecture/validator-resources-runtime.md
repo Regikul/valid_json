@@ -252,6 +252,14 @@ Dialect resource выбирается так:
 
 Dispatcher компилятора — функция `(active vocabularies, keyword)`. Keyword активного vocabulary создаёт constraint; прочий keyword становится неизвестным — annotation в 2020-12, no-op в 2019-09. Различия впечатаны в IR; evaluator dialect не читает.
 
+Две корневые стандартные метасхемы добавляют compatibility-имена сверх
+формальных vocabularies. `definitions` включается как location-reserving alias
+`$defs` в обоих dialects. `dependencies` намеренно не включается в основной
+профиль: он игнорируется в 2019-09 и становится unknown annotation в 2020-12.
+`$recursiveRef` и `$recursiveAnchor` активны только в Core vocabulary Draft
+2019-09; одноимённые deprecated properties корневой метасхемы 2020-12 лишь
+резервируют форму и не дают им recursive-семантики.
+
 `assert_format` меняет IR и потому является compile option. По умолчанию `format` аннотирует. Format-Assertion vocabulary требует проверки независимо от опции; неизвестное имя при ней — compile error, а при опции остаётся annotation-only. Полная таблица format algorithms открыта до P8.
 
 # Проверка схем и ошибки

@@ -262,33 +262,41 @@
 ## P6 — vocabularies и Draft 2019-09
 
 - [ ] **Фаза P6 завершена**
-- [ ] Закрыть compatibility profile для legacy `definitions`, `dependencies`
-  и recursive keywords из корневых метасхем.
-- [ ] Решить судьбу некорневого `$recursiveAnchor`: игнорировать или отвергать
-  схемой/компилятором.
+- [x] Закрыть compatibility profile для legacy `definitions`, `dependencies`
+  и recursive keywords из корневых метасхем: `definitions` — alias `$defs`,
+  `dependencies` остаётся вне основного профиля, recursive keywords активны
+  только в Draft 2019-09.
+- [x] Решить судьбу некорневого `$recursiveAnchor`: принимать boolean-значение
+  без эффекта; подсхема с `$id` уже считается корнем отдельного resource.
 - [ ] Реализовать разбор `$vocabulary` и включение keywords по активным
   vocabularies.
 - [ ] Реализовать `format` как чистую annotation: в обоих dialects это поведение
   по умолчанию, и без него не компилируется ни одна корневая метасхема. Выбор
   между annotation и assertion по vocabulary и compile options остаётся в P8.
 - [ ] Реализовать array-form `items` и `additionalItems` Draft 2019-09.
-- [ ] Реализовать `$recursiveAnchor` и `$recursiveRef` отдельным IR и правилом
-  разрешения.
-- [ ] Учесть различия annotations, unknown keywords и покрытия `contains`
-  между Draft 2019-09 и Draft 2020-12.
+- [x] Реализовать `$recursiveAnchor` и `$recursiveRef` отдельным IR и правилом
+  разрешения: корневой флаг resource и лексическая цель строятся compiler'ом,
+  evaluator выбирает самый внешний помеченный resource, а обязательный
+  `recursiveRef.json` Draft 2019-09 проходит.
+- [~] Учесть различия annotations, unknown keywords и покрытия `contains`
+  между Draft 2019-09 и Draft 2020-12: recursive compatibility теперь
+  исполняется в 2019-09 и становится unknown annotations в 2020-12; остались
+  annotations array-form `items` и `additionalItems`.
 - [ ] Реализовать cross-draft переходы и наследование dialect для embedded и
   remote resources.
 - [ ] Включить проверку schema resources метасхемами Draft 2020-12 и
   Draft 2019-09. Проверка 2020-12 стоит здесь, а не в P5: кроме `$dynamicRef`
   метасхеме нужны `$vocabulary` и `format` этой фазы, а метасхеме 2019-09 — ещё
   и recursive keywords.
-- [ ] Добавить compiler fixtures для vocabulary errors, recursive scope и
-  cross-draft closure.
+- [~] Добавить compiler fixtures для vocabulary errors, recursive scope и
+  cross-draft closure: recursive scope покрыт точными resource-index, compiler
+  и evaluator fixtures; остались vocabulary errors и cross-draft closure.
 - [ ] Подключить к runner `uniqueItems.json` и `items.json` Draft 2019-09: обе
   раскладки опираются на array-form `items` и `additionalItems`.
-- [ ] Подключить к runner `unevaluatedItems.json` Draft 2019-09 целиком и
-  группу `unevaluatedProperties with $recursiveRef`: они ждут той же
-  array-form `items` с `additionalItems` и recursive keywords этой фазы.
+- [~] Подключить к runner `unevaluatedItems.json` Draft 2019-09 целиком и
+  группу `unevaluatedProperties with $recursiveRef`: recursive-группа
+  `unevaluatedProperties` подключена и проходит; `unevaluatedItems.json`
+  остаётся до array-form `items` с `additionalItems`.
 - [ ] Подключить к runner `ref.json` и `defs.json` обоих dialects: у каждого
   есть группа с `$ref` на корневую метасхему, и она ждала, пока та станет
   компилируемой.

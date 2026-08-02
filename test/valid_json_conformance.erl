@@ -37,19 +37,18 @@
 %% `unevaluatedItems.json`: из двадцати шести групп восемнадцать написаны через
 %% array-form `items`, `additionalItems` или recursive keywords, и ?PENDING в
 %% таком объёме перестал бы читаться. Обоих файлов `dynamicRef.json` в
-%% Draft 2019-09 нет вовсе: keyword появился только в 2020-12.
+%% Draft 2019-09 нет вовсе: keyword появился только в 2020-12. Обязательный
+%% `recursiveRef.json`, наоборот, существует только в Draft 2019-09.
 -define(DIALECT_FILES, [{"draft2020-12",
                          ["prefixItems.json", "uniqueItems.json", "items.json",
                           "unevaluatedItems.json", "dynamicRef.json",
-                          "optional/dynamicRef.json"]}]).
+                          "optional/dynamicRef.json"]},
+                        {"draft2019-09", ["recursiveRef.json"]}]).
 
 %% Группы подключённых files, которые ждут keywords следующих фаз: их схемы пока
 %% не компилируются вовсе. Фаза, снимающая группу, вычёркивает свою строку
 %% вместе с работой — так же, как отмечает выполненный пункт роадмапа.
--define(PENDING,
-        [%% P6, recursive keywords Draft 2019-09
-         {"draft2019-09", "unevaluatedProperties.json",
-          <<"unevaluatedProperties with $recursiveRef">>}]).
+-define(PENDING, []).
 
 %% Объявленные расхождения основного набора: okf/testing/conformance-policy.md,
 %% раздел «Известные расхождения». Группа исключается поимённо, чтобы остальные
@@ -64,7 +63,7 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES и
 %% ?EXCLUDED, и менять его иначе нельзя.
--define(CENSUS, {572, 1902}).
+-define(CENSUS, {582, 1938}).
 
 %% Сьют адресует свои remote documents относительно этого base, повторяя в URI
 %% раскладку директории `remotes`. Число документов закреплено по той же

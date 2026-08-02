@@ -8,12 +8,14 @@
 -include("valid_json_resources.hrl").
 
 -export([discover/3, root/1, resources/1, anchors/1, dynamic_anchors/1,
+         recursive_anchors/1,
          dialects/1, declaration/2,
          merge/2, known/2, resolve/3, resolve_reference/3]).
 -export_type([index/0, resource_schemas/0, resource_anchors/0]).
 
 -type resource_schemas() :: #{rid() => #{pointer() => json()}}.
 -type resource_anchors() :: #{rid() => #{binary() => pointer()}}.
+-type resource_recursive_anchors() :: #{rid() => boolean()}.
 -type resource_dialects() :: #{rid() => dialect()}.
 -type declarations() :: #{rid() => addr()}.
 -type location_key() :: {rid(), pointer()}.
@@ -24,6 +26,7 @@
                      resources := resource_schemas(),
                      anchors := resource_anchors(),
                      dynamic_anchors := resource_anchors(),
+                     recursive_anchors := resource_recursive_anchors(),
                      dialects := resource_dialects(),
                      declarations := declarations(),
                      locations := locations()}.
@@ -33,6 +36,7 @@
     resources = #{} :: resource_schemas(),
     anchors = #{} :: resource_anchors(),
     dynamic_anchors = #{} :: resource_anchors(),
+    recursive_anchors = #{} :: resource_recursive_anchors(),
     locations = #{} :: locations(),
     declarations = #{} :: declarations(),
     %% Все URI, уже занятые resource либо retrieval alias. `anonymous` сюда не
@@ -90,6 +94,13 @@ anchors(#{anchors := Anchors}) ->
 dynamic_anchors(#{dynamic_anchors := Anchors}) ->
     Anchors.
 
+%% Recursive anchor — boolean-флаг корня resource, а не именованный fragment.
+%% Карта всё равно строится в index phase: здесь уже известны границы `$id`, и
+%% emitter не должен повторно решать, является ли schema корнем resource.
+-spec recursive_anchors(index()) -> resource_recursive_anchors().
+recursive_anchors(#{recursive_anchors := Anchors}) ->
+    Anchors.
+
 %% Dialect пока выбирается для корня document целиком. Отдельная map нужна уже
 %% сейчас: общий compile index может содержать documents разных dialect, а в
 %% compiled() dialect хранится на каждом resource.
@@ -112,12 +123,14 @@ merge(#{root := Root,
         resources := LeftResources,
         anchors := LeftAnchors,
         dynamic_anchors := LeftDynamic,
+        recursive_anchors := LeftRecursive,
         dialects := LeftDialects,
         declarations := LeftDeclarations,
         locations := LeftLocations},
       #{resources := RightResources,
         anchors := RightAnchors,
         dynamic_anchors := RightDynamic,
+        recursive_anchors := RightRecursive,
         dialects := RightDialects,
         declarations := RightDeclarations,
         locations := RightLocations}) ->
@@ -133,6 +146,8 @@ merge(#{root := Root,
                            resources => maps:merge(LeftResources, RightResources),
                            anchors => maps:merge(LeftAnchors, RightAnchors),
                            dynamic_anchors => maps:merge(LeftDynamic, RightDynamic),
+                           recursive_anchors => maps:merge(LeftRecursive,
+                                                           RightRecursive),
                            dialects => maps:merge(LeftDialects, RightDialects),
                            declarations => maps:merge(LeftDeclarations,
                                                       RightDeclarations),
@@ -211,17 +226,20 @@ discover_root(Schema, Retrieval, Root, Dialect) ->
                     resources = #{Root => #{}},
                     anchors = #{Root => #{}},
                     dynamic_anchors = #{Root => #{}},
+                    recursive_anchors = #{Root => false},
                     declarations = #{Root => root_declaration(Schema, Retrieval,
                                                               Root)},
                     names = Names},
     case walk(Schema, Root, [], Contexts, root, State0) of
         {ok, #state{resources = Resources, anchors = Anchors,
                     dynamic_anchors = DynamicAnchors,
+                    recursive_anchors = RecursiveAnchors,
                     locations = Locations, declarations = Declarations}} ->
             {ok, #{root => Root,
                    resources => Resources,
                    anchors => Anchors,
                    dynamic_anchors => DynamicAnchors,
+                   recursive_anchors => RecursiveAnchors,
                    dialects => maps:map(fun(_Rid, _Nodes) -> Dialect end,
                                         Resources),
                    declarations => Declarations,
@@ -290,6 +308,7 @@ resolve_id(Id, _Base) ->
 reserve_resource(Rid, Location,
                  #state{resources = Resources, anchors = Anchors,
                         dynamic_anchors = DynamicAnchors,
+                        recursive_anchors = RecursiveAnchors,
                         declarations = Declarations, names = Names} = State) ->
     case maps:is_key(Rid, Names) of
         true ->
@@ -298,6 +317,7 @@ reserve_resource(Rid, Location,
             {ok, State#state{resources = Resources#{Rid => #{}},
                              anchors = Anchors#{Rid => #{}},
                              dynamic_anchors = DynamicAnchors#{Rid => #{}},
+                             recursive_anchors = RecursiveAnchors#{Rid => false},
                              declarations = Declarations#{Rid => Location},
                              names = Names#{Rid => true}}}
     end.
@@ -321,9 +341,19 @@ place(Schema, {Rid, Pointer} = Addr, Contexts,
           {ok, state()} | {error, #schema_error{}}.
 index_anchors(Schema, Addr, State) ->
     case anchor_name(<<"$anchor">>, Schema, Addr, State) of
-        {ok, none}         -> index_dynamic_anchor(Schema, Addr, State);
-        {ok, Name}         -> index_dynamic_anchor(Schema, Addr,
-                                                   put_anchor(Name, Addr, State));
+        {ok, none} ->
+            index_special_anchors(Schema, Addr, State);
+        {ok, Name} ->
+            index_special_anchors(Schema, Addr, put_anchor(Name, Addr, State));
+        {error, _} = Error ->
+            Error
+    end.
+
+-spec index_special_anchors(#{binary() => json()}, addr(), state()) ->
+          {ok, state()} | {error, #schema_error{}}.
+index_special_anchors(Schema, Addr, State) ->
+    case index_dynamic_anchor(Schema, Addr, State) of
+        {ok, Dynamic}     -> index_recursive_anchor(Schema, Addr, Dynamic);
         {error, _} = Error -> Error
     end.
 
@@ -343,6 +373,30 @@ index_dynamic_anchor(Schema, Addr, #state{dialect = ?DRAFT_2020_12} = State) ->
             Error
     end;
 index_dynamic_anchor(_Schema, _Addr, State) ->
+    {ok, State}.
+
+%% Draft 2019-09 задаёт boolean anchor, который может влиять только из корня
+%% schema resource. `$id` уже перенёс такой node в pointer <<>>, поэтому
+%% некорневое объявление можно принять без эффекта, не угадывая его намерение.
+%% В Draft 2020-12 это неизвестный keyword и его значение не проверяется.
+-spec index_recursive_anchor(#{binary() => json()}, addr(), state()) ->
+          {ok, state()} | {error, #schema_error{}}.
+index_recursive_anchor(Schema, {Rid, Pointer},
+                       #state{dialect = ?DRAFT_2019_09,
+                              recursive_anchors = Anchors} = State) ->
+    case maps:find(<<"$recursiveAnchor">>, Schema) of
+        error ->
+            {ok, State};
+        {ok, true} when Pointer =:= <<>> ->
+            {ok, State#state{recursive_anchors = Anchors#{Rid => true}}};
+        {ok, Value} when is_boolean(Value) ->
+            {ok, State};
+        {ok, Other} ->
+            Location = keyword_addr(Rid, valid_json_location:segments(Pointer),
+                                    <<"$recursiveAnchor">>),
+            {error, schema_error({bad_keyword_value, Other}, Location)}
+    end;
+index_recursive_anchor(_Schema, _Addr, State) ->
     {ok, State}.
 
 -spec anchor_name(binary(), #{binary() => json()}, addr(), state()) ->
@@ -532,6 +586,7 @@ walk_children([{Segments, Schema} | Rest], Rid, Location, Contexts, State) ->
 children(Schema, Dialect) ->
     lists:append([
         named_children(<<"$defs">>, Schema),
+        named_children(<<"definitions">>, Schema),
         named_children(<<"properties">>, Schema),
         named_children(<<"patternProperties">>, Schema),
         named_children(<<"dependentSchemas">>, Schema),

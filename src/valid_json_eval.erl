@@ -149,6 +149,9 @@ dispatch({ref, Addr}, Instance, Context) ->
 dispatch({dynamic_ref, Name, Lexical}, Instance, Context) ->
     reference(<<"$dynamicRef">>, dynamic_target(Name, Lexical, Context),
               Instance, Context);
+dispatch({recursive_ref, Lexical}, Instance, Context) ->
+    reference(<<"$recursiveRef">>, recursive_target(Lexical, Context),
+              Instance, Context);
 dispatch({items, _} = Constraint, Instance, Context) ->
     valid_json_array:check(Constraint, Instance, Context);
 dispatch({prefix_items, _, _} = Constraint, Instance, Context) ->
@@ -200,6 +203,31 @@ dynamic_target([Rid | Outer], Name, Resources, Found) ->
                    #{}                -> Found
                end,
     dynamic_target(Outer, Name, Resources, Declared).
+
+%% Draft 2019-09 переигрывает цель только тогда, когда лексический resource сам
+%% разрешает recursion. Затем выбирается корень самого внешнего помеченного
+%% resource в dynamic scope. Стек лежит внутренним концом вперёд, поэтому тот же
+%% левый fold, что у dynamic anchors, оставляет последним внешнюю цель.
+-spec recursive_target(addr(), #eval_context{}) -> addr().
+recursive_target({LexicalRid, _} = Lexical,
+                 #eval_context{schema = #{resources := Resources},
+                               dynamic_scope = Scope}) ->
+    #resource{recursive_anchor = Recursive} = maps:get(LexicalRid, Resources),
+    case Recursive of
+        false -> Lexical;
+        true  -> recursive_target(Scope, Resources, Lexical)
+    end.
+
+-spec recursive_target([rid()], #{rid() => #resource{}}, addr()) -> addr().
+recursive_target([], _Resources, Found) ->
+    Found;
+recursive_target([Rid | Outer], Resources, Found) ->
+    #resource{recursive_anchor = Recursive} = maps:get(Rid, Resources),
+    Declared = case Recursive of
+                   true  -> {Rid, <<>>};
+                   false -> Found
+               end,
+    recursive_target(Outer, Resources, Declared).
 
 %% Провалившийся schema object не отдаёт эффективных аннотаций, но свои
 %% диагностические units сохраняет.

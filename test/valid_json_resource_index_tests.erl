@@ -105,6 +105,23 @@ escaped_physical_pointer_test() ->
     %% `$defs` — контейнер, но не schema node.
     ?assertEqual(error, resolve_ref(Index, Root, <<"#/$defs">>)).
 
+%% Стандартные корневые метасхемы сохраняют `definitions` как совместимый
+%% location-reserving alias `$defs`. Физическое имя контейнера остаётся частью
+%% pointer: алиас относится к семантике, а не к переписыванию адреса.
+definitions_schema_positions_test_() ->
+    Schema = #{<<"$defs">> => #{<<"current">> => true},
+               <<"definitions">> => #{<<"legacy">> => false}},
+    Check = fun(Dialect) ->
+                    {ok, Index} = discover(Schema, anonymous, Dialect),
+                    ?assertEqual(
+                       #{anonymous => #{<<>> => Schema,
+                                        <<"/$defs/current">> => true,
+                                        <<"/definitions/legacy">> => false}},
+                       valid_json_resource_index:resources(Index))
+            end,
+    [{atom_to_list(Name), fun() -> Check(Dialect) end}
+     || {Name, Dialect} <- [{current, ?DIALECT}, {legacy, ?LEGACY}]].
+
 schema_positions_only_test() ->
     Ghost = <<"https://example.com/ghost">>,
     Schema = #{<<"unknown">> => #{<<"$id">> => Ghost,
@@ -182,6 +199,38 @@ dynamic_anchor_legacy_test() ->
     ?assertEqual(#{anonymous => #{}},
                  valid_json_resource_index:anchors(Index)),
     ?assertEqual(error, resolve_ref(Index, anonymous, <<"#bad:name">>)).
+
+%% Некорневой recursive anchor не меняет объемлющий resource. `$id` сначала
+%% создаёт новую границу и только затем превращает объявление в корневое.
+recursive_anchor_resource_roots_test() ->
+    Root = <<"https://example.com/root">>,
+    Child = <<"https://example.com/child">>,
+    Schema = #{<<"$id">> => Root,
+               <<"$recursiveAnchor">> => false,
+               <<"definitions">> =>
+                   #{<<"nested">> => #{<<"$recursiveAnchor">> => true},
+                     <<"resource">> => #{<<"$id">> => Child,
+                                          <<"$recursiveAnchor">> => true}}},
+    {ok, Index} = discover(Schema, anonymous, ?LEGACY),
+    ?assertEqual(#{Root => false, Child => true},
+                 valid_json_resource_index:recursive_anchors(Index)).
+
+recursive_anchor_dialect_test_() ->
+    [?_assertEqual(
+         schema_error({bad_keyword_value, <<"yes">>},
+                      {anonymous, <<"/$recursiveAnchor">>}),
+         discover(#{<<"$recursiveAnchor">> => <<"yes">>}, anonymous, ?LEGACY)),
+     ?_assertEqual(
+         schema_error({bad_keyword_value, 1},
+                      {anonymous, <<"/definitions/x/$recursiveAnchor">>}),
+         discover(#{<<"definitions">> =>
+                        #{<<"x">> => #{<<"$recursiveAnchor">> => 1}}},
+                  anonymous, ?LEGACY)),
+     %% В 2020-12 это неизвестная annotation, а index её значение не толкует.
+     ?_assertMatch(
+         {ok, _},
+         discover(#{<<"$recursiveAnchor">> => <<"any-json">>},
+                  anonymous, ?DIALECT))].
 
 dynamic_anchor_value_test_() ->
     [?_assertEqual(

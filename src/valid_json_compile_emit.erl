@@ -19,7 +19,7 @@
 %% составной перечисляет свои keywords списком и компилируется за один шаг.
 %% Annotation-only keywords стоят в конце: сначала идёт то, что определяет
 %% вердикт, потом то, что только описывает значение.
--define(ORDER, [<<"$ref">>, <<"$dynamicRef">>,
+-define(ORDER, [<<"$ref">>, <<"$dynamicRef">>, <<"$recursiveRef">>,
                 <<"type">>, <<"enum">>, <<"const">>,
                 <<"multipleOf">>,
                 <<"maximum">>, <<"exclusiveMaximum">>,
@@ -49,6 +49,7 @@
 %% keyword нет, но неизвестные keywords он и так игнорирует, поэтому результат
 %% совпадает.
 -define(CONSUMED, [<<"$schema">>, <<"$id">>, <<"$anchor">>, <<"$defs">>,
+                   <<"definitions">>,
                    <<"$comment">>, <<"$dynamicAnchor">>]).
 
 %% Стандартные keywords следующих фаз нельзя смешивать с неизвестными
@@ -62,8 +63,7 @@
 %% Отложенных keywords, принадлежащих только Draft 2020-12, сейчас не осталось.
 -define(DEFERRED_2020_12, []).
 -define(DEFERRED_2019_09,
-        [<<"$recursiveRef">>, <<"$recursiveAnchor">>,
-         <<"definitions">>, <<"dependencies">>, <<"additionalItems">>]).
+        [<<"additionalItems">>]).
 
 %% Единственное место, где emitter смотрит на dialect: раскладку array
 %% applicators и покрытие `contains` спецификации задают по-разному.
@@ -97,7 +97,8 @@ emit(Index, Sources) ->
     case emit_resources(Root, Schemas, State) of
         {ok, #state{resources = Resources}} ->
             Anchors = {valid_json_resource_index:anchors(Index),
-                       valid_json_resource_index:dynamic_anchors(Index)},
+                       valid_json_resource_index:dynamic_anchors(Index),
+                       valid_json_resource_index:recursive_anchors(Index)},
             {ok, artifact(Root, Resources, Anchors, Dialects, Sources)};
         {error, _} = Error ->
             Error
@@ -140,7 +141,7 @@ compile_node(Schema, Position, #state{dialect = Dialect} = State)
   when is_map(Schema) ->
     case extra_constraints(Schema, Dialect, Position) of
         {ok, ExtraConstraints} ->
-            case definitions(Schema, Position, State) of
+            case definition_containers(Schema, Position, State) of
                 {ok, WithDefinitions} ->
                     case node_constraints(Schema, Position, WithDefinitions) of
                         {ok, Constraints, Unevaluated, Built} ->
@@ -168,8 +169,9 @@ compile_node(Other, Position, _State) ->
 -spec extra_constraints(#{binary() => json()}, dialect(), position()) ->
           {ok, [constraint()]} | {error, #schema_error{}}.
 extra_constraints(Schema, Dialect, Position) ->
+    Active = lists:append([active_keywords(Group, Dialect) || Group <- ?ORDER]),
     Extras = lists:sort(maps:keys(Schema) --
-                        (lists:flatten(?ORDER) ++ ?UNEVALUATED ++ ?CONSUMED)),
+                        (Active ++ ?UNEVALUATED ++ ?CONSUMED)),
     case [Keyword || Keyword <- Extras, deferred(Keyword, Dialect)] of
         [Keyword | _] ->
             {error, schema_error({not_implemented, Keyword},
@@ -199,20 +201,28 @@ place({Rid, Location}, Node, #state{resources = Resources} = State) ->
     Pointer = valid_json_location:pointer(Location),
     State#state{resources = Resources#{Rid => Nodes#{Pointer => Node}}}.
 
-%% `$defs` — schema container без собственного constraint. Entries уже лежат в
-%% discovery map и будут выпущены общим проходом; здесь остаётся только проверка
-%% формы самого контейнера.
--spec definitions(#{binary() => json()}, position(), state()) ->
+%% `$defs` и совместимый `definitions` — schema containers без собственного
+%% constraint. Entries уже лежат в discovery map и будут выпущены общим
+%% проходом; здесь остаётся только проверка формы самих контейнеров.
+-spec definition_containers(#{binary() => json()}, position(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
-definitions(Schema, Position, State) ->
-    case maps:find(<<"$defs">>, Schema) of
+definition_containers(Schema, Position, State) ->
+    definition_containers([<<"$defs">>, <<"definitions">>], Schema,
+                          Position, State).
+
+-spec definition_containers([binary()], #{binary() => json()}, position(), state()) ->
+          {ok, state()} | {error, #schema_error{}}.
+definition_containers([], _Schema, _Position, State) ->
+    {ok, State};
+definition_containers([Keyword | Rest], Schema, Position, State) ->
+    case maps:find(Keyword, Schema) of
         error ->
-            {ok, State};
+            definition_containers(Rest, Schema, Position, State);
         {ok, Definitions} when is_map(Definitions) ->
-            {ok, State};
+            definition_containers(Rest, Schema, Position, State);
         {ok, Other} ->
             {error, schema_error({bad_keyword_value, Other},
-                                 below(<<"$defs">>, Position))}
+                                 below(Keyword, Position))}
     end.
 
 -spec below(binary(), position()) -> position().
@@ -325,6 +335,10 @@ active_keywords([<<"prefixItems">>, <<"items">>], ?DRAFT_2019_09) ->
 %% неизвестным keyword, а неизвестные этот dialect игнорирует.
 active_keywords(<<"$dynamicRef">>, ?DRAFT_2019_09) ->
     [];
+%% Recursive keywords заменены dynamic keywords в Draft 2020-12. Корневая
+%% метасхема лишь резервирует deprecated properties; evaluator их не исполняет.
+active_keywords(<<"$recursiveRef">>, ?DRAFT_2020_12) ->
+    [];
 active_keywords(Group, _Dialect) ->
     keywords(Group).
 
@@ -363,6 +377,20 @@ constraint(<<"$dynamicRef">> = Keyword, Schema, Position, State) ->
             {ok, {ref, Addr}, State};
         {error, _} = Error ->
             Error
+    end;
+%% Draft 2019-09 определяет recursive resolution только для пустого fragment.
+%% Лексическая цель всегда канонический корень resource; динамический выбор
+%% остаётся evaluator'у, потому что зависит от runtime scope.
+constraint(<<"$recursiveRef">> = Keyword, Schema, Position, State) ->
+    case maps:get(Keyword, Schema) of
+        <<"#">> ->
+            case reference(Keyword, Schema, Position, State) of
+                {ok, _Target, Addr} -> {ok, {recursive_ref, Addr}, State};
+                {error, _} = Error  -> Error
+            end;
+        Other ->
+            {error, schema_error({bad_keyword_value, Other},
+                                 below(Keyword, Position))}
     end;
 %% Своего сегмента у ветви нет: она стоит на самом keyword, как и у
 %% `additionalProperties`.
@@ -797,16 +825,17 @@ type_name(_)             -> error.
 
 -spec artifact(rid(), node_sets(),
                {valid_json_resource_index:resource_anchors(),
-                valid_json_resource_index:resource_anchors()},
+                valid_json_resource_index:resource_anchors(),
+                #{rid() => boolean()}},
                #{rid() => dialect()}, [uri()]) -> compiled().
-artifact(Root, NodeSets, {AnchorSets, DynamicSets}, Dialects, Sources) ->
+artifact(Root, NodeSets, {AnchorSets, DynamicSets, RecursiveSets}, Dialects, Sources) ->
     Resources = maps:map(
                   fun(Rid, Nodes) ->
                           #resource{id               = resource_id(Rid),
                                     dialect          = maps:get(Rid, Dialects),
                                     anchors          = maps:get(Rid, AnchorSets),
                                     dynamic_anchors  = maps:get(Rid, DynamicSets),
-                                    recursive_anchor = false,
+                                    recursive_anchor = maps:get(Rid, RecursiveSets),
                                     nodes            = Nodes}
                   end,
                   NodeSets),

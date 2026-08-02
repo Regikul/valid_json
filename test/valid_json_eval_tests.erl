@@ -9,6 +9,7 @@
 eunit_wrapper_(Tests) -> {inparallel, Tests}.
 
 -define(DIALECT, <<"https://json-schema.org/draft/2020-12/schema">>).
+-define(LEGACY, <<"https://json-schema.org/draft/2019-09/schema">>).
 -define(RESOURCE, <<"https://example.com/s">>).
 
 type_test_() ->
@@ -389,6 +390,61 @@ dynamic_ref_location_test() ->
                  DynamicUnit#output_unit.keyword_location),
     ?assertEqual({?RESOURCE, [<<"item">>, <<"$defs">>]},
                  DynamicUnit#output_unit.absolute_location).
+
+%% Лексическая цель помечена, поэтому recursive reference выбирает самый
+%% внешний помеченный resource. Внешнее `required` применяется и к `next`.
+recursive_ref_override_test_() ->
+    Artifact = recursive_tree(true, true),
+    [?_assertNot(verdict(Artifact,
+                         #{<<"outer">> => true, <<"next">> => #{}})),
+     ?_assert(verdict(Artifact,
+                      #{<<"outer">> => true,
+                        <<"next">> => #{<<"outer">> => true}}))].
+
+%% Непомеченная лексическая цель запрещает переигрывать ссылку, даже если во
+%% внешнем scope есть recursive anchor.
+recursive_ref_fallback_test() ->
+    Artifact = recursive_tree(true, false),
+    ?assert(verdict(Artifact,
+                    #{<<"outer">> => true, <<"next">> => #{}})).
+
+%% Три resource в scope: внутренний и средний помечены, но победить обязан
+%% внешний. `next` только с middle прошёл бы при ошибочном выборе средней цели.
+recursive_ref_outermost_test_() ->
+    Artifact = recursive_outermost_tree(),
+    Root = #{<<"outer">> => true, <<"middle">> => true},
+    [?_assertNot(verdict(Artifact,
+                         Root#{<<"next">> => #{<<"middle">> => true}})),
+     ?_assert(verdict(
+                Artifact,
+                Root#{<<"next">> => #{<<"outer">> => true,
+                                         <<"middle">> => true}}))].
+
+recursive_ref_cycle_test() ->
+    Artifact = #{root => ?RESOURCE,
+                 sources => [],
+                 resources =>
+                     #{?RESOURCE =>
+                           recursive_resource(
+                             ?RESOURCE, true,
+                             #{<<>> => schema_node(
+                                         [{recursive_ref, {?RESOURCE, <<>>}}])})}},
+    ?assertEqual({error, {no_progress, {?RESOURCE, <<>>}}},
+                 valid_json_eval:run(Artifact, 1, flag)).
+
+%% Keyword location остаётся синтаксическим путём, а absolute location называет
+%% реально выбранный внешний корень, не лексический inner resource.
+recursive_ref_location_test() ->
+    Artifact = recursive_tree(true, true),
+    Instance = #{<<"outer">> => true,
+                 <<"next">> => #{<<"outer">> => true}},
+    RecursiveLocation = [<<"$recursiveRef">>, <<"next">>,
+                         <<"properties">>, <<"$ref">>],
+    [RecursiveUnit] =
+        [Unit || Unit <- keywords(collect(Artifact, Instance, basic)),
+                 Unit#output_unit.keyword_location =:= RecursiveLocation],
+    ?assertEqual({?RESOURCE, []}, RecursiveUnit#output_unit.absolute_location),
+    ?assertEqual([<<"next">>], RecursiveUnit#output_unit.instance_location).
 
 %% Логические applicators спускаются в дочерние nodes общим входом evaluator'а и
 %% сводят их вердикты. Ветвь применяется к тому же значению, что и родитель.
@@ -1396,6 +1452,66 @@ dynamic_tree(OuterAnchors) ->
 %% Resource с dynamic anchors: их читает только `$dynamicRef`.
 dynamic_resource(Id, Anchors, Nodes) ->
     (resource(Id, Nodes))#resource{dynamic_anchors = Anchors}.
+
+%% Внешний resource применяет внутренний к тому же объекту. Внутренний спускает
+%% `$recursiveRef` в свойство `next`, поэтому повтор внешнего корня происходит
+%% уже на новой instance location и не является cycle.
+recursive_tree(OuterRecursive, InnerRecursive) ->
+    Inner = <<"https://example.com/inner-recursive">>,
+    #{root => ?RESOURCE,
+      sources => [],
+      resources =>
+          #{?RESOURCE =>
+                recursive_resource(
+                  ?RESOURCE, OuterRecursive,
+                  #{<<>> => schema_node(
+                              [{required, [<<"outer">>]},
+                               {ref, {Inner, <<>>}}])}),
+            Inner =>
+                recursive_resource(
+                  Inner, InnerRecursive,
+                  #{<<>> => schema_node(
+                              [{properties,
+                                #{<<"next">> => {Inner, <<"/properties/next">>}},
+                                undefined, undefined}]),
+                    <<"/properties/next">> =>
+                        schema_node([{recursive_ref, {Inner, <<>>}}])})}}.
+
+recursive_outermost_tree() ->
+    Middle = <<"https://example.com/middle-recursive">>,
+    Inner = <<"https://example.com/inner-recursive">>,
+    #{root => ?RESOURCE,
+      sources => [],
+      resources =>
+          #{?RESOURCE =>
+                recursive_resource(
+                  ?RESOURCE, true,
+                  #{<<>> => schema_node(
+                              [{required, [<<"outer">>]},
+                               {ref, {Middle, <<>>}}])}),
+            Middle =>
+                recursive_resource(
+                  Middle, true,
+                  #{<<>> => schema_node(
+                              [{required, [<<"middle">>]},
+                               {ref, {Inner, <<>>}}])}),
+            Inner =>
+                recursive_resource(
+                  Inner, true,
+                  #{<<>> => schema_node(
+                              [{properties,
+                                #{<<"next">> => {Inner, <<"/properties/next">>}},
+                                undefined, undefined}]),
+                    <<"/properties/next">> =>
+                        schema_node([{recursive_ref, {Inner, <<>>}}])})}}.
+
+recursive_resource(Id, Recursive, Nodes) ->
+    #resource{id               = Id,
+              dialect          = ?LEGACY,
+              anchors          = #{},
+              dynamic_anchors  = #{},
+              recursive_anchor = Recursive,
+              nodes            = Nodes}.
 
 %% Отдельный resource: артефакту из нескольких документов их нужно несколько.
 resource(Id, Nodes) ->
