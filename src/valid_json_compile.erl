@@ -21,7 +21,8 @@
                 <<"maxProperties">>, <<"minProperties">>,
                 <<"required">>, <<"dependentRequired">>,
                 [<<"properties">>, <<"patternProperties">>, <<"additionalProperties">>],
-                <<"allOf">>, <<"anyOf">>, <<"oneOf">>, <<"not">>]).
+                <<"allOf">>, <<"anyOf">>, <<"oneOf">>, <<"not">>,
+                [<<"if">>, <<"then">>, <<"else">>]]).
 
 %% Полностью потребляются компилятором и собственного constraint не дают.
 -define(CONSUMED, [<<"$schema">>, <<"$comment">>]).
@@ -75,7 +76,8 @@ schema_error(Reason, Location) ->
 
 %% Обход групп несёт накопленные nodes: applicator дописывает в них свои
 %% дочерние schemas, assertion передаёт дальше без изменений. Группа, ни один
-%% keyword которой не написан, constraint не даёт.
+%% keyword которой не написан, constraint не даёт. Ответ `none` означает
+%% обратное: keywords написаны и их nodes построены, но вычислять по ним нечего.
 -spec constraints(#{binary() => json()}, [binary()], nodes()) ->
           {ok, [constraint()], nodes()} | {error, #schema_error{}}.
 constraints(Schema, Location, Nodes) ->
@@ -88,6 +90,7 @@ constraints(Schema, Location, Nodes) ->
                            {ok, Acc, Built};
                        true ->
                            case constraint(Group, Schema, Location, Built) of
+                               {ok, none, Grown}       -> {ok, Acc, Grown};
                                {ok, Constraint, Grown} -> {ok, [Constraint | Acc], Grown};
                                {error, _} = Error      -> Error
                            end
@@ -106,10 +109,12 @@ keywords(Group)                           -> Group.
 %% Разбор идёт по элементу ?ORDER целиком, а не по написанному подмножеству:
 %% элемент — статический литерал, и по нему видно, какой constraint собирается.
 -spec constraint(binary() | [binary()], #{binary() => json()}, [binary()], nodes()) ->
-          {ok, constraint(), nodes()} | {error, #schema_error{}}.
+          {ok, constraint() | none, nodes()} | {error, #schema_error{}}.
 constraint([<<"properties">>, <<"patternProperties">>, <<"additionalProperties">>],
            Schema, Location, Nodes) ->
     object(Schema, Location, Nodes);
+constraint([<<"if">>, <<"then">>, <<"else">>], Schema, Location, Nodes) ->
+    conditional(Schema, Location, Nodes);
 constraint(<<"allOf">> = Keyword, Schema, Location, Nodes) ->
     branches(all_of, Keyword, maps:get(Keyword, Schema), Location, Nodes);
 constraint(<<"anyOf">> = Keyword, Schema, Location, Nodes) ->
@@ -138,7 +143,38 @@ constraint(Keyword, Schema, Location, Nodes) ->
 object(Schema, Location, Nodes) ->
     Slots = [{<<"properties">>, fun named/3},
              {<<"patternProperties">>, fun patterned/3},
-             {<<"additionalProperties">>, fun additional/3}],
+             {<<"additionalProperties">>, fun subschema/3}],
+    case slots(Slots, Schema, Location, Nodes) of
+        {ok, [Additional, Patterns, Props], Built} ->
+            {ok, {properties, Props, Patterns, Additional}, Built};
+        {error, _} = Error ->
+            Error
+    end.
+
+%% `then` и `else` без `if` спецификация велит игнорировать целиком и запрещает
+%% вычислять — и ради вердикта, и ради аннотаций (core.txt:2379 и 2422),
+%% поэтому constraint без `if` не собирается. Nodes всё равно строятся: это
+%% schema positions известных keywords, на них можно сослаться, и ошибка внутри
+%% них обязана останавливать компиляцию.
+-spec conditional(#{binary() => json()}, [binary()], nodes()) ->
+          {ok, constraint() | none, nodes()} | {error, #schema_error{}}.
+conditional(Schema, Location, Nodes) ->
+    Slots = [{Keyword, fun subschema/3} || Keyword <- [<<"if">>, <<"then">>, <<"else">>]],
+    case slots(Slots, Schema, Location, Nodes) of
+        {ok, [_Else, _Then, undefined], Built} ->
+            {ok, none, Built};
+        {ok, [Else, Then, If], Built} ->
+            {ok, {if_then_else, If, Then, Else}, Built};
+        {error, _} = Error ->
+            Error
+    end.
+
+%% Слоты составного constraint: написанный keyword строит свой кусок IR, а
+%% ненаписанный оставляет `undefined`. Обход накапливает nodes, а результат
+%% приходит в обратном порядке — так его и разбирают вызывающие.
+-spec slots([{binary(), function()}], #{binary() => json()}, [binary()], nodes()) ->
+          {ok, [term()], nodes()} | {error, #schema_error{}}.
+slots(Slots, Schema, Location, Nodes) ->
     Step = fun(_Slot, {error, _} = Error) ->
                    Error;
               ({Keyword, Build}, {ok, Acc, Built}) ->
@@ -152,12 +188,7 @@ object(Schema, Location, Nodes) ->
                            end
                    end
            end,
-    case lists:foldl(Step, {ok, [], Nodes}, Slots) of
-        {ok, [Additional, Patterns, Props], Built} ->
-            {ok, {properties, Props, Patterns, Additional}, Built};
-        {error, _} = Error ->
-            Error
-    end.
+    lists:foldl(Step, {ok, [], Nodes}, Slots).
 
 %% Имя свойства становится сегментом локации. Обход идёт по отсортированным
 %% именам, чтобы первая ошибка не зависела от порядка обхода map.
@@ -205,10 +236,10 @@ patterned(Value, Location, Nodes) when is_map(Value) ->
 patterned(Value, Location, _Nodes) ->
     {error, schema_error({bad_keyword_value, Value}, Location)}.
 
-%% Своего сегмента у ветви нет: она стоит на самом keyword.
--spec additional(json(), [binary()], nodes()) ->
+%% Своего сегмента у такой ветви нет: она стоит на самом keyword.
+-spec subschema(json(), [binary()], nodes()) ->
           {ok, addr(), nodes()} | {error, #schema_error{}}.
-additional(Value, Location, Nodes) ->
+subschema(Value, Location, Nodes) ->
     case compile_node(Value, Location, Nodes) of
         {ok, Built}        -> {ok, addr(Location), Built};
         {error, _} = Error -> Error

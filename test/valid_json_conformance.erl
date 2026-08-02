@@ -20,7 +20,8 @@
                 "maxProperties.json", "minProperties.json",
                 "required.json", "dependentRequired.json",
                 "properties.json", "patternProperties.json",
-                "allOf.json", "anyOf.json", "oneOf.json"]).
+                "allOf.json", "anyOf.json", "oneOf.json",
+                "if-then-else.json"]).
 
 %% Объявленные расхождения основного набора: okf/testing/conformance-policy.md,
 %% раздел «Известные расхождения». Группа исключается поимённо, чтобы остальные
@@ -35,7 +36,7 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES и
 %% ?EXCLUDED, и менять его иначе нельзя.
--define(CENSUS, {244, 920}).
+-define(CENSUS, {268, 980}).
 
 validation_test_() ->
     Tests = [file_tests(Dir, Dialect, File)

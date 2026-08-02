@@ -106,7 +106,7 @@
   вынести текст в `format_error/1`.
 - [x] Реализовать `allOf`, `anyOf`, `oneOf` и `not` с корректным объединением и
   отбрасыванием effective coverage.
-- [ ] Реализовать составной constraint `if` / `then` / `else`.
+- [x] Реализовать составной constraint `if` / `then` / `else`.
 - [ ] Реализовать `dependentSchemas`.
 - [x] Реализовать составной object constraint: `properties`,
   `patternProperties` и `additionalProperties`.
@@ -127,8 +127,9 @@
   структурных режимах и правила покрытия ветвей.
 - [~] Подключить соответствующие обязательные applicator, annotation и content
   validation files обоих dialects: подключены `properties.json`,
-  `patternProperties.json`, `allOf.json`, `anyOf.json`, `oneOf.json`, а также
-  дождавшиеся applicators `enum.json` и `required.json`. `not.json` ждёт
+  `patternProperties.json`, `allOf.json`, `anyOf.json`, `oneOf.json`,
+  `if-then-else.json`, а также дождавшиеся applicators `enum.json` и
+  `required.json`. `not.json` ждёт
   `unevaluatedProperties` из P4, `additionalProperties.json` —
   `dependentSchemas` и `propertyNames`, `uniqueItems.json` — array applicators.
 - [ ] Приёмка P2: обязательные files этой фазы проходят, а `contains` оставляет

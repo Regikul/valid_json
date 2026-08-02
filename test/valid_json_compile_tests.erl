@@ -211,6 +211,47 @@ object_error_test_() ->
      ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/additionalProperties">>),
                    compile(#{<<"additionalProperties">> => 1}))].
 
+%% Условные keywords тоже дают один constraint, и своего сегмента у ветви нет:
+%% каждая стоит на собственном keyword.
+conditional_test_() ->
+    [?_assertEqual({ok, artifact(#{<<>>       => schema_node([{if_then_else, addr(<<"/if">>),
+                                                               addr(<<"/then">>),
+                                                               addr(<<"/else">>)}]),
+                                   <<"/if">>   => schema_node([{type, [integer]}]),
+                                   <<"/then">> => schema_node([{minimum, 0}]),
+                                   <<"/else">> => false})},
+                   compile(#{<<"if">> => #{<<"type">> => <<"integer">>},
+                             <<"then">> => #{<<"minimum">> => 0},
+                             <<"else">> => false})),
+     %% `if` без ветвей остаётся constraint'ом: аннотации он собирает и один.
+     ?_assertEqual({ok, artifact(#{<<>>      => schema_node([{if_then_else, addr(<<"/if">>),
+                                                              undefined, undefined}]),
+                                   <<"/if">> => true})},
+                   compile(#{<<"if">> => true})),
+     ?_assertEqual({ok, artifact(#{<<>>        => schema_node([{if_then_else, addr(<<"/if">>),
+                                                                undefined, addr(<<"/else">>)}]),
+                                   <<"/if">>   => true,
+                                   <<"/else">> => true})},
+                   compile(#{<<"if">> => true, <<"else">> => true}))].
+
+%% `then` и `else` без `if` спецификация велит игнорировать целиком, поэтому
+%% constraint не собирается. Nodes у них всё равно есть: это адресуемые schema
+%% positions известных keywords.
+conditional_without_if_test() ->
+    Schema = #{<<"then">> => #{<<"type">> => <<"null">>}, <<"else">> => true},
+    ?assertEqual({ok, artifact(#{<<>>        => schema_node([]),
+                                 <<"/then">> => schema_node([{type, [null]}]),
+                                 <<"/else">> => true})},
+                 compile(Schema)).
+
+%% Раз позиция компилируется, ошибка в ней останавливает компиляцию — и тогда,
+%% когда вычислять эту ветвь никто не станет.
+conditional_error_test_() ->
+    [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/if">>),
+                   compile(#{<<"if">> => 42})),
+     ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/then/maximum">>),
+                   compile(#{<<"then">> => #{<<"maximum">> => null}}))].
+
 %% Все nodes строятся до вычисления, поэтому вложенность произвольной глубины
 %% полностью лежит в одной map, а не разворачивается на ходу.
 nested_test() ->
@@ -236,16 +277,19 @@ order_test() ->
                <<"maximum">> => 4, <<"type">> => <<"number">>,
                <<"multipleOf">> => 1, <<"pattern">> => <<"a">>,
                <<"required">> => [<<"a">>], <<"uniqueItems">> => true,
-               <<"maxLength">> => 5, <<"not">> => true, <<"allOf">> => [true]},
+               <<"maxLength">> => 5, <<"not">> => true, <<"allOf">> => [true],
+               <<"if">> => true},
     Expected = schema_node([{type, [number]}, {enum, [1]}, {const, 1},
                             {multiple_of, 1}, {maximum, 4},
                             {exclusive_minimum, 0}, {max_length, 5},
                             {pattern, regex(<<"a">>)}, {unique_items, true},
                             {required, [<<"a">>]},
-                            {all_of, [addr(<<"/allOf/0">>)]}, {'not', addr(<<"/not">>)}]),
+                            {all_of, [addr(<<"/allOf/0">>)]}, {'not', addr(<<"/not">>)},
+                            {if_then_else, addr(<<"/if">>), undefined, undefined}]),
     ?assertEqual({ok, artifact(#{<<>>           => Expected,
                                  <<"/allOf/0">> => true,
-                                 <<"/not">>     => true})},
+                                 <<"/not">>     => true,
+                                 <<"/if">>      => true})},
                  compile(Schema)).
 
 %% Потребляются компилятором и собственного constraint не дают.

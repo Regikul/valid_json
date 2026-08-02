@@ -238,6 +238,70 @@ not_test_() ->
      ?_assert(negated([{type, [string]}], 1)),
      ?_assertNot(negated([{type, [integer]}], 1))].
 
+%% Вердикта `if` не даёт: он выбирает ветвь. Ненаписанная ветвь оставляет успех,
+%% поэтому один `if` не ограничивает ничего.
+conditional_test_() ->
+    Both = conditional([{type, [integer]}], [{minimum, 0}], [{type, [string]}]),
+    Positive = conditional([{type, [integer]}], [{minimum, 0}], undefined),
+    Negative = conditional([{type, [integer]}], undefined, [{type, [string]}]),
+    [?_assert(verdict(Both, 1)),
+     ?_assertNot(verdict(Both, -1)),
+     ?_assert(verdict(Both, <<"a">>)),
+     ?_assertNot(verdict(Both, 1.5)),
+     ?_assertNot(verdict(Positive, -1)),
+     %% Условие не выполнено, а ветвиться некуда.
+     ?_assert(verdict(Positive, <<"a">>)),
+     ?_assertNot(verdict(Negative, 1.5)),
+     ?_assert(verdict(Negative, 1)),
+     ?_assert(verdict(conditional(true, undefined, undefined), 1)),
+     ?_assert(verdict(conditional(false, undefined, undefined), 1))].
+
+%% Невыбранная ветвь не вычисляется вовсе — ни ради вердикта, ни ради аннотаций.
+%% Ловушка падает при вычислении, поэтому её обход был бы виден сразу.
+conditional_unselected_test_() ->
+    Skipped = conditional([{type, [integer]}], tripwire(), [{type, [string]}]),
+    Untaken = conditional([{type, [integer]}], [{minimum, 0}], tripwire()),
+    [?_assert(verdict(Skipped, <<"a">>)),
+     ?_assert(verdict(Untaken, 1)),
+     %% В basic дерево units полное, но невыбранной ветви в нём всё равно нет.
+     ?_assertMatch({ok, #eval_result{valid = true}},
+                   valid_json_eval:run(Skipped, <<"a">>, basic))].
+
+%% Собственный unit `if` выпускает всегда и всегда успешный: ошибки у этого
+%% keyword не бывает, а units опровергнувшей его подсхемы остаются
+%% диагностическими. Невыбранная ветвь не выпускает ничего.
+conditional_units_test_() ->
+    Artifact = conditional([{type, [integer]}], [{minimum, 0}], [{type, [string]}]),
+    [?_assertMatch([{<<"/if">>, true, none},
+                    {<<"/if/type">>, true, none},
+                    {<<"/then">>, false, {error, _}},
+                    {<<"/then/minimum">>, false, {error, _}}],
+                   printed(collect(Artifact, -1, basic))),
+     ?_assertMatch([{<<"/if">>, true, none},
+                    {<<"/if/type">>, false, {error, _}},
+                    {<<"/else">>, true, none},
+                    {<<"/else/type">>, true, none}],
+                   printed(collect(Artifact, <<"a">>, basic)))].
+
+%% Покрытие складывается из вклада `if` и вклада выбранной ветви. Провалившийся
+%% `if` не вносит ничего: его подсхема очистила покрытие сама.
+conditional_coverage_test_() ->
+    Named = fun(Name, Pointer) ->
+                    [{properties, #{Name => addr(Pointer)}, undefined, undefined}]
+            end,
+    Artifact = branching([{if_then_else, addr(<<"/if">>), addr(<<"/then">>),
+                           addr(<<"/else">>)}],
+                         [{<<"/if">>, Named(<<"a">>, <<"/if/properties/a">>)},
+                          {<<"/if/properties/a">>, [{type, [integer]}]},
+                          {<<"/then">>, Named(<<"b">>, <<"/then/properties/b">>)},
+                          {<<"/then/properties/b">>, true},
+                          {<<"/else">>, Named(<<"c">>, <<"/else/properties/c">>)},
+                          {<<"/else/properties/c">>, true}]),
+    [?_assertEqual({[<<"a">>, <<"b">>], 0, []},
+                   coverage_of(Artifact, #{<<"a">> => 1, <<"b">> => 2})),
+     ?_assertEqual({[<<"c">>], 0, []},
+                   coverage_of(Artifact, #{<<"a">> => <<"x">>, <<"c">> => 3}))].
+
 %% Object applicators применяются каждый к своим именам: `properties` — к
 %% точному, `patternProperties` — ко всем совпавшим паттернам,
 %% `additionalProperties` — только к остатку.
@@ -487,6 +551,17 @@ object() ->
               [{<<"/properties/a">>, [{type, [integer]}]},
                {<<"/patternProperties/^b">>, [{type, [string]}]},
                {<<"/additionalProperties">>, [{type, [integer]}]}]).
+
+%% Составной условный constraint: каждая ветвь стоит на своём keyword, а
+%% ненаписанная задаётся `undefined` и в артефакт не попадает.
+conditional(If, Then, Else) ->
+    Slots = [{<<"/if">>, If}, {<<"/then">>, Then}, {<<"/else">>, Else}],
+    branching([{if_then_else, addr(<<"/if">>), slot(<<"/then">>, Then),
+                slot(<<"/else">>, Else)}],
+              [Slot || {_Pointer, Child} = Slot <- Slots, Child =/= undefined]).
+
+slot(_Pointer, undefined) -> undefined;
+slot(Pointer, _Child)     -> addr(Pointer).
 
 verdict(Artifact, Instance) ->
     {ok, #eval_result{valid = Valid}} = valid_json_eval:run(Artifact, Instance, flag),

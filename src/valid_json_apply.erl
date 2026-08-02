@@ -34,7 +34,53 @@ check({'not', Addr}, Instance, Context) ->
     #eval_result{valid = Valid, units = Units} =
         branch(Addr, <<"not">>, [], Instance, Context),
     result(<<"not">>, not Valid, <<"value matches the subschema">>,
-           valid_json_evaluated:neutral(), Units, Context).
+           valid_json_evaluated:neutral(), Units, Context);
+check({if_then_else, If, Then, Else}, Instance, Context) ->
+    conditional(If, Then, Else, Instance, Context).
+
+%% Вердикта `if` не меняет: он выбирает ветвь (core.txt:2388). Собственный unit
+%% он выпускает всегда и всегда успешный — ошибки у этого keyword не бывает, а
+%% units опровергнувшей его подсхемы остаются рядом диагностикой. Аннотации он
+%% отдаёт и без ветвей (core.txt:2400); при провале своё покрытие подсхема уже
+%% очистила сама, поэтому отдельного условия здесь нет.
+-spec conditional(addr(), addr() | undefined, addr() | undefined, json(),
+                  #eval_context{}) -> #eval_result{}.
+conditional(If, Then, Else, Instance, Context) ->
+    #eval_result{evaluated = Evaluated, units = Units, valid = Matched} =
+        branch(If, <<"if">>, [], Instance, Context),
+    Condition = result(<<"if">>, true, none, Evaluated, Units, Context),
+    case taken(Matched, Then, Else) of
+        undefined       -> Condition;
+        {Keyword, Addr} -> both(Condition, selected(Keyword, Addr, Instance, Context))
+    end.
+
+%% Ветвь выбирает вердикт `if`, и невыбранная не вычисляется вовсе — ни ради
+%% валидации, ни ради аннотаций (core.txt:2422). Ненаписанная ветвь оставляет
+%% успех и не выпускает units: применяться было нечему.
+-spec taken(boolean(), addr() | undefined, addr() | undefined) ->
+          {binary(), addr()} | undefined.
+taken(true, Then, _Else) when Then =/= undefined  -> {<<"then">>, Then};
+taken(false, _Then, Else) when Else =/= undefined -> {<<"else">>, Else};
+taken(_Matched, _Then, _Else)                     -> undefined.
+
+-spec selected(binary(), addr(), json(), #eval_context{}) -> #eval_result{}.
+selected(Keyword, Addr, Instance, Context) ->
+    #eval_result{valid = Valid, evaluated = Evaluated, units = Units} =
+        branch(Addr, Keyword, [], Instance, Context),
+    result(Keyword, Valid, message(Keyword), Evaluated, Units, Context).
+
+-spec message(binary()) -> binary().
+message(<<"then">>) -> <<"value matches the condition but not the \"then\" subschema">>;
+message(<<"else">>) -> <<"value fails the condition and the \"else\" subschema">>.
+
+%% Покрытие дают обе части — сам `if` и выбранная ветвь
+%% (validator-core.md, «Покрытие при успехе»), — а вердикт только ветвь.
+-spec both(#eval_result{}, #eval_result{}) -> #eval_result{}.
+both(#eval_result{evaluated = Condition, units = Before},
+     #eval_result{valid = Valid, evaluated = Branch, units = After}) ->
+    #eval_result{valid     = Valid,
+                 evaluated = valid_json_evaluated:merge(Condition, Branch),
+                 units     = Before ++ After}.
 
 -spec matches(non_neg_integer()) -> binary().
 matches(0) -> <<"value does not match any subschema">>;
@@ -84,8 +130,9 @@ branch(Addr, Keyword, Tail, Instance, #eval_context{keyword_location = Location}
     valid_json_eval:eval(Addr, Instance, Nested).
 
 %% Applicator выпускает собственный unit написанного keyword, а units ветвей
-%% остаются рядом с ним. В режиме flag units не собираются вовсе.
--spec result(binary(), boolean(), binary(), evaluated(), [#output_unit{}],
+%% остаются рядом с ним. В режиме flag units не собираются вовсе. Сообщение
+%% `none` принадлежит keyword, который провалиться не может.
+-spec result(binary(), boolean(), binary() | none, evaluated(), [#output_unit{}],
              #eval_context{}) -> #eval_result{}.
 result(_Keyword, Valid, _Message, Evaluated, _Units, #eval_context{mode = flag}) ->
     #eval_result{valid = Valid, evaluated = Evaluated, units = []};
@@ -93,6 +140,6 @@ result(Keyword, Valid, Message, Evaluated, Units, Context) ->
     Unit = valid_json_unit:keyword(Keyword, Valid, detail(Valid, Message), Context),
     #eval_result{valid = Valid, evaluated = Evaluated, units = [Unit | Units]}.
 
--spec detail(boolean(), binary()) -> detail().
+-spec detail(boolean(), binary() | none) -> detail().
 detail(true, _Message)  -> none;
 detail(false, Message) -> {error, Message}.
