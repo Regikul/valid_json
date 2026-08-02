@@ -88,9 +88,9 @@
   `maxLength.json`, `minLength.json`, `pattern.json`, `maxItems.json`,
   `minItems.json`, `maxProperties.json`, `minProperties.json`,
   `dependentRequired.json`, а после object applicators — `enum.json` и
-  `required.json`. `uniqueItems.json` содержит группы со схемами `prefixItems`,
-  `items` и `additionalItems`, поэтому целиком подключается только после array
-  applicators.
+  `required.json`. `uniqueItems.json` подключён для Draft 2020-12; в Draft
+  2019-09 он опирается на array-form `items` и `additionalItems`, поэтому ждёт
+  P6.
 - [x] Научить runner исключать группы, объявленные расхождениями в
   conformance-policy: сейчас это `^\p{Letter}+$` в `pattern.json` и
   `patternProperties.json`.
@@ -111,9 +111,9 @@
 - [x] Реализовать составной object constraint: `properties`,
   `patternProperties` и `additionalProperties`.
 - [x] Реализовать `propertyNames`.
-- [ ] Реализовать schema-form `items` для обоих dialects.
-- [ ] Реализовать `prefixItems` и хвостовой `items` для Draft 2020-12.
-- [ ] Реализовать `contains`, `minContains` и `maxContains`; в Draft 2020-12
+- [x] Реализовать schema-form `items` для обоих dialects.
+- [x] Реализовать `prefixItems` и хвостовой `items` для Draft 2020-12.
+- [x] Реализовать `contains`, `minContains` и `maxContains`; в Draft 2020-12
   записывать совпавшие индексы в разреженную часть маски.
 - [ ] Реализовать annotation-only keywords: `title`, `description`, `default`,
   `deprecated`, `readOnly`, `writeOnly`, `examples` и content annotations.
@@ -128,11 +128,12 @@
 - [~] Подключить соответствующие обязательные applicator, annotation и content
   validation files обоих dialects: подключены `properties.json`,
   `patternProperties.json`, `additionalProperties.json`, `propertyNames.json`,
-  `allOf.json`, `anyOf.json`, `oneOf.json`, `if-then-else.json`,
-  `dependentSchemas.json`, а также дождавшиеся applicators `enum.json` и
-  `required.json`. `not.json` ждёт `unevaluatedProperties` из P4,
-  `uniqueItems.json` — array applicators. Annotation и content files ждут своих
-  keywords.
+  `contains.json`, `minContains.json`, `maxContains.json`, `allOf.json`,
+  `anyOf.json`, `oneOf.json`, `if-then-else.json`, `dependentSchemas.json`, а
+  также дождавшиеся applicators `enum.json`, `required.json` и — для Draft
+  2020-12 — `prefixItems.json` с `uniqueItems.json`. `not.json` ждёт
+  `unevaluatedProperties` из P4, `items.json` — `$defs` из P3, а его группы с
+  array-form `items` — ещё и P6. Annotation и content files ждут своих keywords.
 - [ ] Приёмка P2: обязательные files этой фазы проходят, а `contains` оставляет
   каноническую маску для P4.
 

@@ -473,6 +473,158 @@ dependent_schemas_coverage_test_() ->
      %% Свойства нет — применять нечего, покрытия не появляется.
      ?_assertEqual(neutral(), coverage_of(Artifact, #{<<"b">> => 1}))].
 
+%% Одиночный `items` применяется ко всем элементам массива, `prefixItems` — к
+%% элементам с теми же индексами, а его хвостовой `items` — к остатку.
+items_test_() ->
+    Integers = items([{type, [integer]}]),
+    [?_assert(verdict(Integers, [1, 2])),
+     ?_assertNot(verdict(Integers, [1, <<"a">>])),
+     %% Применять нечего: пустой массив проходит и false-схему.
+     ?_assert(verdict(items(false), [])),
+     ?_assertNot(verdict(items(false), [1])),
+     %% Не-массив constraint не ограничивает.
+     ?_assert(verdict(items(false), 1)),
+     ?_assert(verdict(items(false), #{<<"a">> => 1}))].
+
+prefix_items_test_() ->
+    Pair = prefix_items([[{type, [integer]}], [{type, [string]}]], undefined),
+    Closed = prefix_items([true], false),
+    [?_assert(verdict(Pair, [1, <<"a">>])),
+     ?_assertNot(verdict(Pair, [1, 2])),
+     %% Длину массива keyword не ограничивает: лишние схемы остаются без пары,
+     %% лишние элементы — без схемы.
+     ?_assert(verdict(Pair, [1])),
+     ?_assert(verdict(Pair, [])),
+     ?_assert(verdict(Pair, [1, <<"a">>, true])),
+     %% Остаток за префиксом достаётся хвостовому `items`.
+     ?_assert(verdict(Closed, [1])),
+     ?_assertNot(verdict(Closed, [1, 2])),
+     ?_assert(verdict(prefix_items([], undefined), [1])),
+     ?_assert(verdict(Closed, <<"ab">>))].
+
+%% Локация keyword следует схеме, локация инстанса — индексу элемента.
+%% Собственный unit написанного keyword стоит перед units своих ветвей.
+array_units_test_() ->
+    Tail = prefix_items([[{type, [integer]}]], [{type, [string]}]),
+    [?_assertEqual([{<<"/items">>, <<>>},
+                    {<<"/items/type">>, <<"/0">>},
+                    {<<"/items/type">>, <<"/1">>}],
+                   paired(collect(items([{type, [integer]}]), [1, <<"a">>], basic))),
+     ?_assertEqual([{<<"/prefixItems">>, <<>>},
+                    {<<"/prefixItems/0/type">>, <<"/0">>},
+                    {<<"/items">>, <<>>},
+                    {<<"/items/type">>, <<"/1">>},
+                    {<<"/items/type">>, <<"/2">>}],
+                   paired(collect(Tail, [1, <<"a">>, <<"b">>], basic))),
+     %% Не-массив: units написанных keywords остаются, но без деталей.
+     ?_assertEqual([{<<"/prefixItems">>, true, none}, {<<"/items">>, true, none}],
+                   printed(collect(Tail, 1, basic)))].
+
+%% Аннотация `prefixItems` — наибольший индекс, к которому он применился, либо
+%% `true`, если он применился ко всему массиву. Аннотация `items` — всегда
+%% `true`. Не применявшийся keyword аннотации не производит.
+array_annotation_test_() ->
+    Own = fun(Artifact, Instance) ->
+                  [{valid_json_location:pointer(Keywords), Detail}
+                   || #output_unit{keyword_location = Keywords, detail = Detail}
+                          <- collect(Artifact, Instance, basic),
+                      length(Keywords) =:= 1]
+          end,
+    Pair = prefix_items([true, true], undefined),
+    [?_assertEqual([{<<"/prefixItems">>, {annotation, 1}}], Own(Pair, [1, 2, 3])),
+     ?_assertEqual([{<<"/prefixItems">>, {annotation, true}}], Own(Pair, [1, 2])),
+     ?_assertEqual([{<<"/prefixItems">>, {annotation, true}}], Own(Pair, [1])),
+     ?_assertEqual([{<<"/prefixItems">>, none}], Own(Pair, [])),
+     ?_assertEqual([{<<"/items">>, {annotation, true}}], Own(items([]), [1])),
+     ?_assertEqual([{<<"/items">>, none}], Own(items([]), [])),
+     %% Хвостовому `items` применяться не к чему, а сам префикс аннотацию даёт.
+     ?_assertEqual([{<<"/prefixItems">>, {annotation, true}}, {<<"/items">>, none}],
+                   Own(prefix_items([true], false), [1]))].
+
+%% `items` покрывает весь массив, `prefixItems` — свой префикс. Провалившийся
+%% keyword аннотации не даёт, поэтому и покрытия не вносит.
+array_coverage_test_() ->
+    [?_assertEqual({[], all, []}, coverage_of(items(true), [1, 2])),
+     ?_assertEqual(neutral(), coverage_of(items(false), [1])),
+     ?_assertEqual({[], 2, []}, coverage_of(prefix_items([true, true], undefined), [1, 2, 3])),
+     %% Схем хватило на весь массив — покрыт весь массив.
+     ?_assertEqual({[], all, []}, coverage_of(prefix_items([true, true], undefined), [1, 2])),
+     ?_assertEqual({[], all, []}, coverage_of(prefix_items([true], true), [1, 2, 3]))].
+
+%% Обрыв разрешён только в режиме flag; в остальных режимах обходятся все
+%% элементы, потому что дерево units должно быть полным.
+array_short_circuit_test_() ->
+    Artifact = prefix_items([false, tripwire()], undefined),
+    [?_assertMatch({ok, #eval_result{valid = false}},
+                   valid_json_eval:run(Artifact, [1, 2], flag)),
+     ?_assertError({not_implemented, _}, valid_json_eval:run(Artifact, [1, 2], basic))].
+
+%% Вердикт `contains` — хотя бы одно совпадение, и снимает это требование только
+%% `minContains: 0`. Границы считают совпадения и отвечают за свои вердикты сами.
+contains_test_() ->
+    Integer = [{type, [integer]}],
+    [?_assert(verdict(contains(Integer, undefined, undefined), [<<"a">>, 1])),
+     ?_assertNot(verdict(contains(Integer, undefined, undefined), [<<"a">>])),
+     ?_assertNot(verdict(contains(Integer, undefined, undefined), [])),
+     ?_assert(verdict(contains(Integer, 0, undefined), [])),
+     ?_assert(verdict(contains(Integer, 2, undefined), [1, <<"a">>, 2])),
+     ?_assertNot(verdict(contains(Integer, 2, undefined), [1, <<"a">>])),
+     ?_assert(verdict(contains(Integer, undefined, 1), [1, <<"a">>])),
+     %% Совпадения считаются до конца массива: с обрывом на первом из них
+     %% `maxContains` не увидел бы второго.
+     ?_assertNot(verdict(contains(Integer, undefined, 1), [1, <<"a">>, 2])),
+     %% Не-массив constraint не ограничивает.
+     ?_assert(verdict(contains(false, undefined, undefined), 1))].
+
+%% Собственные units выпускают все три написанных keyword'а, а units подсхемы
+%% стоят под ними и несут в локации индекс элемента.
+contains_units_test_() ->
+    Artifact = contains([{type, [integer]}], 2, undefined),
+    [?_assertEqual([{<<"/contains">>, <<>>},
+                    {<<"/minContains">>, <<>>},
+                    {<<"/contains/type">>, <<"/0">>},
+                    {<<"/contains/type">>, <<"/1">>}],
+                   paired(collect(Artifact, [1, <<"a">>], basic))),
+     %% Совпадение нашлось, поэтому сам `contains` успешен, а граница — нет.
+     ?_assertMatch([{<<"/contains">>, true, {annotation, [0]}},
+                    {<<"/minContains">>, false, {error, _}} | _],
+                   printed(collect(Artifact, [1, <<"a">>], basic))),
+     %% Совпали все элементы — аннотация вырождается в `true`.
+     ?_assertMatch([{<<"/contains">>, true, {annotation, true}} | _],
+                   printed(collect(Artifact, [1, 2], basic))),
+     %% На пустом массиве аннотация обязана присутствовать. Пройти его сам
+     %% `contains` может только с `minContains: 0`.
+     ?_assertEqual([{<<"/contains">>, true, {annotation, []}},
+                    {<<"/minContains">>, true, none}],
+                   messaged(collect(contains([], 0, undefined), [], basic))),
+     ?_assertEqual([{<<"/contains">>, false,
+                     <<"array does not contain a matching element">>},
+                    {<<"/minContains">>, false,
+                     <<"array contains too few matching elements">>}],
+                   messaged(collect(contains([], 2, undefined), [], basic))),
+     %% Units не совпавших элементов остаются рядом диагностическими.
+     ?_assertEqual([{<<"/contains">>, false,
+                     <<"array does not contain a matching element">>},
+                    {<<"/contains/type">>, false, <<"expected integer, got string">>}],
+                   messaged(collect(contains([{type, [integer]}], undefined, undefined),
+                                    [<<"a">>], basic))),
+     ?_assertEqual([{<<"/contains">>, true, none}, {<<"/maxContains">>, true, none}],
+                   printed(collect(contains(true, undefined, 1), 1, basic)))].
+
+%% Разреженную часть маски порождает только `contains` и только в Draft 2020-12:
+%% в Draft 2019-09 его аннотация на `unevaluatedItems` не влияет.
+contains_coverage_test_() ->
+    Integer = [{type, [integer]}],
+    [?_assertEqual({[], 1, [2]}, coverage_of(contains(Integer, undefined, undefined),
+                                             [1, <<"a">>, 2])),
+     %% Совпали все элементы — покрыт весь массив.
+     ?_assertEqual({[], all, []}, coverage_of(contains(Integer, undefined, undefined), [1, 2])),
+     ?_assertEqual(neutral(), coverage_of(contains(Integer, undefined, undefined), [<<"a">>])),
+     %% Пустой массив покрывать нечем даже при `minContains: 0`.
+     ?_assertEqual(neutral(), coverage_of(contains(Integer, 0, undefined), [])),
+     ?_assertEqual(neutral(), coverage_of(contains(Integer, undefined, undefined, false),
+                                          [1, <<"a">>, 2]))].
+
 %% Обрыв разрешён только в режиме flag. Ветвь-ловушка при вычислении падает,
 %% поэтому её достижение видно прямо в результате.
 short_circuit_test_() ->
@@ -647,6 +799,29 @@ dependent_schemas(Deps) ->
     branching([{dependent_schemas, Addrs}],
               [{Pointer(Name), Child} || {Name, Child} <- Deps]).
 
+%% Своего сегмента у ветви нет: она стоит на самом keyword.
+items(Child) ->
+    branching([{items, addr(<<"/items">>)}], [{<<"/items">>, Child}]).
+
+%% Схемы префикса адресуются по индексу, как их кладёт компилятор, а хвостовой
+%% `items` стоит на собственном keyword и задаётся `undefined`, если не написан.
+prefix_items(Children, Tail) ->
+    Pointer = fun(Index) -> <<"/prefixItems/", (integer_to_binary(Index))/binary>> end,
+    Prefix = lists:enumerate(0, Children),
+    branching([{prefix_items, [addr(Pointer(Index)) || {Index, _Child} <- Prefix],
+                slot(<<"/items">>, Tail)}],
+              [{Pointer(Index), Child} || {Index, Child} <- Prefix]
+              ++ [{<<"/items">>, Tail} || Tail =/= undefined]).
+
+contains(Child, Min, Max) ->
+    contains(Child, Min, Max, true).
+
+%% Последнее поле — покрывает ли keyword индексы: решение принято компилятором по
+%% dialect, и evaluator читает его как данные.
+contains(Child, Min, Max, Marks) ->
+    branching([{contains, addr(<<"/contains">>), Min, Max, Marks}],
+              [{<<"/contains">>, Child}]).
+
 %% Составной условный constraint: каждая ветвь стоит на своём keyword, а
 %% ненаписанная задаётся `undefined` и в артефакт не попадает.
 conditional(If, Then, Else) ->
@@ -721,6 +896,18 @@ run(Node, Instance) ->
 validate(Node, Instance) ->
     valid_json:validate(artifact(Node), Instance, [{output, flag}]).
 
+%% Сообщение провалившегося keyword рядом с его локацией: у успеха деталей может
+%% не быть вовсе, поэтому оно печатается только там, где есть.
+messaged(Units) ->
+    [{Pointer, Valid, detail(Detail)} || {Pointer, Valid, Detail} <- printed(Units)].
+
+detail({error, Message}) -> Message;
+detail(Detail)           -> Detail.
+
+%% `all` — покрыт весь массив; отдельного префикса и разреженной части у такой
+%% маски нет.
+expand(#{properties := Properties, items := all}) ->
+    {lists:sort(sets:to_list(Properties)), all, []};
 expand(#{properties := Properties, items := {Prefix, Sparse}}) ->
     {lists:sort(sets:to_list(Properties)), Prefix, lists:sort(sets:to_list(Sparse))}.
 

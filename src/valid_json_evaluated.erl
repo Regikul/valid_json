@@ -5,7 +5,7 @@
 
 -include("valid_json_core.hrl").
 
--export([neutral/0, properties/1, merge/2, merge_items/2]).
+-export([neutral/0, properties/1, items/1, merge/2, merge_items/2]).
 
 -spec neutral() -> evaluated().
 neutral() ->
@@ -17,6 +17,15 @@ neutral() ->
 -spec properties([binary()]) -> evaluated().
 properties(Names) ->
     (neutral())#{properties := sets:from_list(Names, [{version, 2}])}.
+
+%% Покрытие, внесённое одним array applicator: непрерывный префикс и совпавшие
+%% индексы `contains`. Список индексов нормализуется здесь, чтобы обработчики не
+%% собирали каноническую маску руками. Имён свойств такой applicator не трогает.
+-spec items(all | {non_neg_integer(), [non_neg_integer()]}) -> evaluated().
+items(all) ->
+    (neutral())#{items := all};
+items({Prefix, Indexes}) ->
+    (neutral())#{items := normalize(Prefix, sets:from_list(Indexes, [{version, 2}]))}.
 
 -spec merge(evaluated(), evaluated()) -> evaluated().
 merge(#{properties := P1, items := I1}, #{properties := P2, items := I2}) ->

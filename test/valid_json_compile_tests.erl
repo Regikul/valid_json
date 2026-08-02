@@ -8,6 +8,7 @@
 eunit_wrapper_(Tests) -> {inparallel, Tests}.
 
 -define(DIALECT, <<"https://json-schema.org/draft/2020-12/schema">>).
+-define(LEGACY, <<"https://json-schema.org/draft/2019-09/schema">>).
 
 boolean_schema_test_() ->
     [?_assertEqual({ok, artifact(true)},  compile(true)),
@@ -257,6 +258,104 @@ dependent_schemas_error_test_() ->
                    compile(#{<<"dependentSchemas">> =>
                                  #{<<"a">> => #{<<"maximum">> => null}}}))].
 
+%% Одиночный `items` — своя раскладка: ветвь одна и стоит на самом keyword.
+%% Вместе с `prefixItems` он становится хвостом составного constraint, а сегмент
+%% каждой схемы префикса — её десятичный индекс.
+array_test_() ->
+    [?_assertEqual({ok, artifact(#{<<>>        => schema_node([{items, addr(<<"/items">>)}]),
+                                   <<"/items">> => schema_node([{type, [integer]}])})},
+                   compile(#{<<"items">> => #{<<"type">> => <<"integer">>}})),
+     ?_assertEqual({ok, artifact(#{<<>>        => schema_node([{items, addr(<<"/items">>)}]),
+                                   <<"/items">> => false})},
+                   compile(#{<<"items">> => false})),
+     ?_assertEqual({ok, artifact(#{<<>> => schema_node([{prefix_items,
+                                                         [addr(<<"/prefixItems/0">>),
+                                                          addr(<<"/prefixItems/1">>)],
+                                                         undefined}]),
+                                   <<"/prefixItems/0">> => true,
+                                   <<"/prefixItems/1">> => schema_node([{const, 1}])})},
+                   compile(#{<<"prefixItems">> => [true, #{<<"const">> => 1}]})),
+     %% У хвостового `items` своего сегмента нет, как и у additionalProperties.
+     ?_assertEqual({ok, artifact(#{<<>> => schema_node([{prefix_items,
+                                                         [addr(<<"/prefixItems/0">>)],
+                                                         addr(<<"/items">>)}]),
+                                   <<"/prefixItems/0">> => true,
+                                   <<"/items">>         => false})},
+                   compile(#{<<"prefixItems">> => [true], <<"items">> => false})),
+     %% Пустой префикс метасхема запрещает, но в IR он ложится, как `allOf: []`.
+     ?_assertEqual({ok, artifact(schema_node([{prefix_items, [], undefined}]))},
+                   compile(#{<<"prefixItems">> => []}))].
+
+array_error_test_() ->
+    [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/prefixItems">>),
+                   compile(#{<<"prefixItems">> => 42})),
+     %% В Draft 2020-12 массив на позиции `items` схемой не является.
+     ?_assertEqual(schema_error({bad_keyword_value, [true]}, <<"/items">>),
+                   compile(#{<<"items">> => [true]})),
+     ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/items/maximum">>),
+                   compile(#{<<"items">> => #{<<"maximum">> => null}})),
+     ?_assertEqual(schema_error({bad_keyword_value, null},
+                                <<"/prefixItems/1/maximum">>),
+                   compile(#{<<"prefixItems">> => [true, #{<<"maximum">> => null}]}))].
+
+%% Раскладку выбирает dialect: schema-form `items` одинаков в обоих, а
+%% `prefixItems` и array-form `items` принадлежат разным фазам и пока отвергаются
+%% наравне с остальными неизвестными keywords.
+array_dialect_test_() ->
+    [?_assertEqual({ok, legacy_artifact(#{<<>>        => schema_node([{items,
+                                                                       addr(<<"/items">>)}]),
+                                          <<"/items">> => true})},
+                   legacy(#{<<"items">> => true})),
+     ?_assertEqual(schema_error({not_implemented, <<"items">>}, <<"/items">>),
+                   legacy(#{<<"items">> => [true]})),
+     ?_assertEqual(schema_error({not_implemented, <<"prefixItems">>}, <<"/prefixItems">>),
+                   legacy(#{<<"prefixItems">> => [true]})),
+     ?_assertEqual(schema_error({not_implemented, <<"prefixItems">>}, <<"/prefixItems">>),
+                   legacy(#{<<"prefixItems">> => [true], <<"items">> => true}))].
+
+%% Границы попадают в тот же constraint отдельными слотами, а ненаписанная
+%% остаётся `undefined`. Последнее поле — покрывает ли `contains` индексы: это
+%% решение dialect, и evaluator его уже не пересматривает.
+contains_test_() ->
+    [?_assertEqual({ok, artifact(#{<<>> => schema_node([{contains, addr(<<"/contains">>),
+                                                         undefined, undefined, true}]),
+                                   <<"/contains">> => schema_node([{type, [integer]}])})},
+                   compile(#{<<"contains">> => #{<<"type">> => <<"integer">>}})),
+     ?_assertEqual({ok, artifact(#{<<>> => schema_node([{contains, addr(<<"/contains">>),
+                                                         0, 2, true}]),
+                                   <<"/contains">> => true})},
+                   compile(#{<<"contains">> => true,
+                             <<"minContains">> => 0, <<"maxContains">> => 2})),
+     %% Десятичная форма — то же целое, как и у остальных nonNegativeInteger.
+     ?_assertEqual({ok, artifact(#{<<>> => schema_node([{contains, addr(<<"/contains">>),
+                                                         2, undefined, true}]),
+                                   <<"/contains">> => true})},
+                   compile(#{<<"contains">> => true, <<"minContains">> => 2.0})),
+     ?_assertEqual({ok, legacy_artifact(#{<<>> => schema_node([{contains,
+                                                                addr(<<"/contains">>),
+                                                                undefined, undefined, false}]),
+                                          <<"/contains">> => true})},
+                   legacy(#{<<"contains">> => true}))].
+
+%% Без `contains` границы спецификация оставляет без эффекта, поэтому constraint
+%% не собирается. Значение всё равно разбирается: ошибка в нём обязана
+%% останавливать компиляцию.
+contains_without_schema_test_() ->
+    [?_assertEqual({ok, artifact(schema_node([]))},
+                   compile(#{<<"minContains">> => 1, <<"maxContains">> => 3})),
+     ?_assertEqual(schema_error({bad_keyword_value, -1}, <<"/minContains">>),
+                   compile(#{<<"minContains">> => -1}))].
+
+contains_error_test_() ->
+    [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/contains">>),
+                   compile(#{<<"contains">> => 42})),
+     ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/contains/maximum">>),
+                   compile(#{<<"contains">> => #{<<"maximum">> => null}})),
+     ?_assertEqual(schema_error({bad_keyword_value, 1.5}, <<"/minContains">>),
+                   compile(#{<<"contains">> => true, <<"minContains">> => 1.5})),
+     ?_assertEqual(schema_error({bad_keyword_value, <<"2">>}, <<"/maxContains">>),
+                   compile(#{<<"contains">> => true, <<"maxContains">> => <<"2">>}))].
+
 %% Условные keywords тоже дают один constraint, и своего сегмента у ветви нет:
 %% каждая стоит на собственном keyword.
 conditional_test_() ->
@@ -325,12 +424,16 @@ order_test() ->
                <<"required">> => [<<"a">>], <<"uniqueItems">> => true,
                <<"maxLength">> => 5, <<"not">> => true, <<"allOf">> => [true],
                <<"if">> => true, <<"propertyNames">> => true,
-               <<"dependentSchemas">> => #{<<"a">> => true}},
+               <<"dependentSchemas">> => #{<<"a">> => true},
+               <<"items">> => true, <<"prefixItems">> => [true],
+               <<"contains">> => true, <<"maxContains">> => 2},
     Expected = schema_node([{type, [number]}, {enum, [1]}, {const, 1},
                             {multiple_of, 1}, {maximum, 4},
                             {exclusive_minimum, 0}, {max_length, 5},
                             {pattern, regex(<<"a">>)}, {unique_items, true},
                             {required, [<<"a">>]},
+                            {prefix_items, [addr(<<"/prefixItems/0">>)], addr(<<"/items">>)},
+                            {contains, addr(<<"/contains">>), undefined, 2, true},
                             {property_names, addr(<<"/propertyNames">>)},
                             {all_of, [addr(<<"/allOf/0">>)]}, {'not', addr(<<"/not">>)},
                             {if_then_else, addr(<<"/if">>), undefined, undefined},
@@ -340,6 +443,9 @@ order_test() ->
                                  <<"/allOf/0">>            => true,
                                  <<"/not">>                => true,
                                  <<"/if">>                 => true,
+                                 <<"/items">>              => true,
+                                 <<"/prefixItems/0">>      => true,
+                                 <<"/contains">>           => true,
                                  <<"/propertyNames">>      => true,
                                  <<"/dependentSchemas/a">> => true})},
                  compile(Schema)).
@@ -364,8 +470,9 @@ bad_keyword_value_test_() ->
 %% Ещё не реализованный keyword обязан останавливать компиляцию, а не молча
 %% исчезать: иначе преждевременно подключённый файл сьюта пройдёт по недоразумению.
 not_implemented_test_() ->
-    [?_assertEqual(schema_error({not_implemented, <<"items">>}, <<"/items">>),
-                   compile(#{<<"items">> => #{}})),
+    [?_assertEqual(schema_error({not_implemented, <<"unevaluatedItems">>},
+                                <<"/unevaluatedItems">>),
+                   compile(#{<<"unevaluatedItems">> => #{}})),
      ?_assertEqual(schema_error({not_implemented, <<"$ref">>}, <<"/$ref">>),
                    compile(#{<<"$ref">> => <<"#">>, <<"type">> => <<"object">>}))].
 
@@ -383,6 +490,11 @@ not_a_schema_test_() ->
 
 compile(Schema) ->
     valid_json_compile:compile(Schema, ?DIALECT).
+
+%% Тот же вход с другим dialect: раскладку array applicators выбирает компилятор,
+%% и это единственное место, где она видна.
+legacy(Schema) ->
+    valid_json_compile:compile(Schema, ?LEGACY).
 
 schema_node(Constraints) ->
     #node{constraints = Constraints, unevaluated = []}.
@@ -402,14 +514,20 @@ regex(Source) ->
 
 %% Схема без подсхем даёт единственный node в корне resource, поэтому один node
 %% принимается вместо готовой map.
-artifact(Node) when not is_map(Node) ->
-    artifact(#{<<>> => Node});
-artifact(Nodes) ->
+artifact(Node) ->
+    artifact(Node, ?DIALECT).
+
+legacy_artifact(Node) ->
+    artifact(Node, ?LEGACY).
+
+artifact(Node, Dialect) when not is_map(Node) ->
+    artifact(#{<<>> => Node}, Dialect);
+artifact(Nodes, Dialect) ->
     #{root      => anonymous,
       sources   => [],
       resources => #{anonymous =>
           #resource{id               = undefined,
-                    dialect          = ?DIALECT,
+                    dialect          = Dialect,
                     anchors          = #{},
                     dynamic_anchors  = #{},
                     recursive_anchor = false,

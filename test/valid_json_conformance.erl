@@ -9,7 +9,7 @@
 
 %% Файл подключается целиком и только когда его схемы компилируются полностью.
 %% Из applicator-файлов ждут своего: `not.json` — `unevaluatedProperties`,
-%% `uniqueItems.json` — array applicators.
+%% `items.json` — `$defs` из P3.
 -define(FILES, ["boolean_schema.json", "type.json", "const.json", "enum.json",
                 "multipleOf.json",
                 "maximum.json", "exclusiveMaximum.json",
@@ -20,8 +20,14 @@
                 "required.json", "dependentRequired.json",
                 "properties.json", "patternProperties.json",
                 "additionalProperties.json", "propertyNames.json",
+                "contains.json", "maxContains.json", "minContains.json",
                 "allOf.json", "anyOf.json", "oneOf.json",
                 "if-then-else.json", "dependentSchemas.json"]).
+
+%% Files, подключённые только к одному dialect: раскладка второго ждёт своей
+%% фазы. `prefixItems.json` в Draft 2019-09 не существует вовсе, а тамошний
+%% `uniqueItems.json` опирается на array-form `items` и `additionalItems` из P6.
+-define(DIALECT_FILES, [{"draft2020-12", ["prefixItems.json", "uniqueItems.json"]}]).
 
 %% Объявленные расхождения основного набора: okf/testing/conformance-policy.md,
 %% раздел «Известные расхождения». Группа исключается поимённо, чтобы остальные
@@ -36,12 +42,16 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES и
 %% ?EXCLUDED, и менять его иначе нельзя.
--define(CENSUS, {306, 1106}).
+-define(CENSUS, {356, 1312}).
 
 validation_test_() ->
     Tests = [file_tests(Dir, Dialect, File)
-             || {Dir, Dialect} <- ?DIALECTS, File <- ?FILES],
+             || {Dir, Dialect} <- ?DIALECTS, File <- files(Dir)],
     [census_test(Tests), {inparallel, Tests}].
+
+%% Общий список плюс files, подключённые только к этому dialect.
+files(Dir) ->
+    ?FILES ++ proplists:get_value(Dir, ?DIALECT_FILES, []).
 
 %% Перепись идёт по уже построенным тестам, а не по второму обходу сьюта:
 %% считается ровно то, что будет запущено.

@@ -110,6 +110,12 @@ dispatch({if_then_else, _, _, _} = Constraint, Instance, Context) ->
     valid_json_apply:check(Constraint, Instance, Context);
 dispatch({dependent_schemas, _} = Constraint, Instance, Context) ->
     valid_json_apply:check(Constraint, Instance, Context);
+dispatch({items, _} = Constraint, Instance, Context) ->
+    valid_json_array:check(Constraint, Instance, Context);
+dispatch({prefix_items, _, _} = Constraint, Instance, Context) ->
+    valid_json_array:check(Constraint, Instance, Context);
+dispatch({contains, _, _, _, _} = Constraint, Instance, Context) ->
+    valid_json_array:check(Constraint, Instance, Context);
 dispatch({properties, _, _, _} = Constraint, Instance, Context) ->
     valid_json_object:check(Constraint, Instance, Context);
 dispatch({property_names, _} = Constraint, Instance, Context) ->
