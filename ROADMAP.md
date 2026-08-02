@@ -4,6 +4,12 @@
 вниз; новые задачи добавляются в подходящий раздел фазы. Общий checkbox фазы
 закрывается, когда выполнены её реализация, тесты и приёмка.
 
+Фаза отвечает только за свою работу. Пункт, который нельзя закрыть, пока не
+появятся keywords более поздней фазы, переносится в чеклист той фазы, которая
+его разблокирует, и там же принимается. Поэтому закрытая фаза не означает, что
+все относящиеся к ней files сьюта уже подключены: подключение стоит рядом с
+работой, от которой оно зависит.
+
 Проектные решения задаются не здесь. Нормативные тексты находятся в
 [OKF bundle](okf/): границы и порядок фаз — в
 [validator-design](okf/architecture/validator-design.md), контракт ядра — в
@@ -21,7 +27,7 @@
 
 ## P0 — контракт ядра и опорный срез
 
-- [ ] **Фаза P0 завершена**
+- [x] **Фаза P0 завершена**
 - [x] Зафиксировать общие типы, IR и records ядра в `valid_json_core.hrl`.
 - [x] Провести публичный вызов `validate/3` через core, evaluator и output.
 - [x] Реализовать формат `flag` и значение по умолчанию для output option.
@@ -40,10 +46,7 @@
   полную приёмку формата оставить в P7.
 - [x] Покрыть локации и `basic` structure-тестами, включая пустой сегмент,
   `~`, `/` и anonymous resource.
-- [ ] Покрыть cycle guard fixtures: self-reference возвращает
-  `{error, {no_progress, Addr}}`, повтор адреса в соседней ветви разрешён.
-- [~] Реализовать операции маски массива: merge и normalize сделаны; получение
-  списка непокрытых индексов ждёт своего потребителя в P4.
+- [x] Реализовать операции маски массива: merge и normalize.
 - [x] Покрыть маску тестами на `all`, префикс, разреженные индексы и
   независимость результата от порядка слияния.
 - [x] Реализовать модель JSON-значения: `is_type/2`, `type_of/1`,
@@ -53,12 +56,12 @@
   JSON equality в уникальности.
 - [x] Зафиксировать в runner ожидаемое число групп и test cases, чтобы пустой
   прогон не мог быть зелёным.
-- [ ] Приёмка P0: все core fixtures и `boolean_schema.json` обоих dialects
+- [x] Приёмка P0: все core fixtures и `boolean_schema.json` обоих dialects
   проходят без провалов.
 
 ## P1 — чистые assertions
 
-- [ ] **Фаза P1 завершена**
+- [x] **Фаза P1 завершена**
 - [x] Добавить компиляцию schema object в `#node{}` без подключения registry:
   сделана для всех assertion keywords фазы; адресация дочерних schemas — уже
   задача P2.
@@ -81,24 +84,24 @@
   нормализацию десятичной формы `nonNegativeInteger`.
 - [x] Добавить evaluator fixtures для применимого и неприменимого типа
   instance каждого assertion.
-- [~] Подключить к runner одноимённые validation files обоих dialects:
-  подключены `type.json`, `const.json`, `multipleOf.json`, `maximum.json`,
+- [x] Подключить к runner одноимённые validation files обоих dialects:
+  `type.json`, `const.json`, `multipleOf.json`, `maximum.json`,
   `exclusiveMaximum.json`, `minimum.json`, `exclusiveMinimum.json`,
   `maxLength.json`, `minLength.json`, `pattern.json`, `maxItems.json`,
   `minItems.json`, `maxProperties.json`, `minProperties.json`,
   `dependentRequired.json`, а после object applicators — `enum.json` и
-  `required.json`. `uniqueItems.json` подключён для Draft 2020-12; в Draft
-  2019-09 он опирается на array-form `items` и `additionalItems`, поэтому ждёт
-  P6.
+  `required.json`. Для Draft 2020-12 подключён и `uniqueItems.json`; его
+  раскладка Draft 2019-09 опирается на array-form `items` и `additionalItems`,
+  поэтому принимается в P6.
 - [x] Научить runner исключать группы, объявленные расхождениями в
   conformance-policy: сейчас это `^\p{Letter}+$` в `pattern.json` и
   `patternProperties.json`.
-- [ ] Приёмка P1: все обязательные assertion files проходят с учётом
+- [x] Приёмка P1: все подключённые в фазе assertion files проходят с учётом
   объявленных regex- и high-precision-расхождений.
 
 ## P2 — applicators и аннотации
 
-- [ ] **Фаза P2 завершена**
+- [x] **Фаза P2 завершена**
 - [x] Научить compiler адресовать дочерние schemas и строить все nodes до
   начала вычисления.
 - [x] Свернуть compile errors в `#schema_error{}` с адресом виноватой позиции и
@@ -126,17 +129,17 @@
   составных constraints.
 - [x] Добавить evaluator fixtures на short-circuit в `flag`, полный обход в
   структурных режимах и правила покрытия ветвей.
-- [~] Подключить соответствующие обязательные applicator, annotation и content
-  validation files обоих dialects: подключены `properties.json`,
-  `patternProperties.json`, `additionalProperties.json`, `propertyNames.json`,
-  `contains.json`, `minContains.json`, `maxContains.json`, `allOf.json`,
-  `anyOf.json`, `oneOf.json`, `if-then-else.json`, `dependentSchemas.json`, а
-  также дождавшиеся applicators `enum.json`, `required.json` и — для Draft
-  2020-12 — `prefixItems.json` с `uniqueItems.json`, а из annotation files —
-  `default.json`. `not.json` ждёт `unevaluatedProperties` из P4, `items.json` —
-  `$defs` из P3, а его группы с array-form `items` — ещё и P6. `content.json`
-  ждёт своих keywords в P8.
-- [ ] Приёмка P2: обязательные files этой фазы проходят, а `contains` оставляет
+- [x] Подключить соответствующие обязательные applicator и annotation
+  validation files обоих dialects: `properties.json`, `patternProperties.json`,
+  `additionalProperties.json`, `propertyNames.json`, `contains.json`,
+  `minContains.json`, `maxContains.json`, `allOf.json`, `anyOf.json`,
+  `oneOf.json`, `if-then-else.json`, `dependentSchemas.json`, а также
+  дождавшиеся applicators `enum.json`, `required.json` и — для Draft 2020-12 —
+  `prefixItems.json` с `uniqueItems.json`; из annotation files подключён
+  `default.json`. Файл подключается целиком, поэтому те, где хотя бы одна группа
+  написана через keywords поздних фаз, принимаются там: `not.json` — в P4,
+  `items.json` — в P3 и P6, `content.json` — в P8.
+- [x] Приёмка P2: подключённые в фазе files проходят, а `contains` оставляет
   каноническую маску для P4.
 
 ## P3 — resources и обычные ссылки
@@ -165,7 +168,10 @@
 - [ ] Добавить compiler fixtures на anonymous root, embedded resources,
   anchors, remotes, ошибки ссылок и циклический конечный IR.
 - [ ] Добавить evaluator fixtures на resource boundary, обе ветви `#node{}` и
-  cycle guard через реальные `$ref`.
+  cycle guard через реальные `$ref`: self-reference возвращает
+  `{error, {no_progress, Addr}}`, повтор адреса в соседней ветви разрешён.
+- [ ] Подключить к runner `items.json` Draft 2020-12: его группа «items and
+  subitems» написана через `$defs` и `$ref` и потому ждала адресации ссылок.
 - [ ] Приёмка P3: проходят `ref`, `defs`, `anchor`, `refRemote`,
   `infinite-loop-detection`, `optional/id` и `optional/unknownKeyword`.
 
@@ -179,10 +185,14 @@
 - [ ] Объединять покрытие properties от applicators и достигнутых `$ref`.
 - [ ] Объединять префиксное и разреженное покрытие items от `items`,
   `prefixItems`, `contains`, applicators и `$ref`.
+- [ ] Дополнить операции маски массива получением списка непокрытых индексов:
+  это первый потребитель такой операции.
 - [ ] Не переносить coverage из провалившегося schema object и из внутренней
   успешной схемы `not`.
 - [ ] Покрыть evaluator fixtures вложенными applicators, ссылками и
   разреженными совпадениями `contains`.
+- [ ] Подключить к runner `not.json` обоих dialects: его последняя группа
+  написана через `unevaluatedProperties`.
 - [ ] Приёмка P4: проходят `unevaluatedProperties.json` и
   `unevaluatedItems.json`, обязательно группы про вложенные `contains` и
   `minContains = 0`.
@@ -222,6 +232,8 @@
 - [ ] Включить проверку schema resources метасхемой Draft 2019-09.
 - [ ] Добавить compiler fixtures для vocabulary errors, recursive scope и
   cross-draft closure.
+- [ ] Подключить к runner `uniqueItems.json` и `items.json` Draft 2019-09: обе
+  раскладки опираются на array-form `items` и `additionalItems`.
 - [ ] Приёмка P6: проходят обязательные files Draft 2019-09 и выбранные
   `optional/cross-draft`, compatibility и recursive cases.
 
@@ -256,6 +268,8 @@
 - [ ] Реализовать выбранную обработку `contentEncoding`, `contentMediaType` и
   `contentSchema`, сохранив обязательные annotations.
 - [ ] Явно выбрать остальные optional profiles, поддерживаемые библиотекой.
+- [ ] Подключить к runner обязательный `content.json` обоих dialects: он
+  целиком написан через content keywords этой фазы.
 - [ ] Подключить выбранные `optional/format`, content и прочие optional files к
   runner.
 - [ ] Задокументировать результаты дополнительных capability profiles и все
