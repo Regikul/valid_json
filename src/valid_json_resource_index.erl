@@ -5,19 +5,16 @@
 %% границ `$id`.
 -module(valid_json_resource_index).
 
--include("valid_json_core.hrl").
+-include("valid_json_resources.hrl").
 
--export([discover/3, root/1, resources/1, anchors/1, resolve/3,
-         resolve_reference/3]).
+-export([discover/3, root/1, resources/1, anchors/1, dialects/1, declaration/2,
+         merge/2, known/2, resolve/3, resolve_reference/3]).
 -export_type([index/0, resource_schemas/0, resource_anchors/0]).
-
--define(DRAFT_2020_12,
-        <<"https://json-schema.org/draft/2020-12/schema">>).
--define(DRAFT_2019_09,
-        <<"https://json-schema.org/draft/2019-09/schema">>).
 
 -type resource_schemas() :: #{rid() => #{pointer() => json()}}.
 -type resource_anchors() :: #{rid() => #{binary() => pointer()}}.
+-type resource_dialects() :: #{rid() => dialect()}.
+-type declarations() :: #{rid() => addr()}.
 -type location_key() :: {rid(), pointer()}.
 -type locations() :: #{location_key() => addr()}.
 
@@ -25,6 +22,8 @@
 -opaque index() :: #{root := rid(),
                      resources := resource_schemas(),
                      anchors := resource_anchors(),
+                     dialects := resource_dialects(),
+                     declarations := declarations(),
                      locations := locations()}.
 
 -record(state, {
@@ -32,6 +31,7 @@
     resources = #{} :: resource_schemas(),
     anchors = #{} :: resource_anchors(),
     locations = #{} :: locations(),
+    declarations = #{} :: declarations(),
     %% Все URI, уже занятые resource либо retrieval alias. `anonymous` сюда не
     %% входит: это локальная метка, а не глобальное имя.
     names = #{} :: #{uri() => true}
@@ -79,6 +79,60 @@ resources(#{resources := Resources}) ->
 -spec anchors(index()) -> resource_anchors().
 anchors(#{anchors := Anchors}) ->
     Anchors.
+
+%% Dialect пока выбирается для корня document целиком. Отдельная map нужна уже
+%% сейчас: общий compile index может содержать documents разных dialect, а в
+%% compiled() dialect хранится на каждом resource.
+-spec dialects(index()) -> resource_dialects().
+dialects(#{dialects := Dialects}) ->
+    Dialects.
+
+%% Локация `$id`, объявившего resource, нужна только compile errors при
+%% объединении documents или сверке со store. У resource без написанного `$id`
+%% declaration совпадает с его корнем.
+-spec declaration(rid(), index()) -> addr().
+declaration(Rid, #{declarations := Declarations}) ->
+    maps:get(Rid, Declarations).
+
+%% Document indexes объединяются до emission `$ref`. Один URI не может
+%% обозначать два разных resources или два разных физических location alias:
+%% такой compound graph был бы неоднозначен независимо от порядка загрузки.
+-spec merge(index(), index()) -> {ok, index()} | {error, #schema_error{}}.
+merge(#{root := Root,
+        resources := LeftResources,
+        anchors := LeftAnchors,
+        dialects := LeftDialects,
+        declarations := LeftDeclarations,
+        locations := LeftLocations},
+      #{resources := RightResources,
+        anchors := RightAnchors,
+        dialects := RightDialects,
+        declarations := RightDeclarations,
+        locations := RightLocations}) ->
+    case duplicate_resource(LeftResources, RightResources, RightDeclarations) of
+        {error, _} = Error ->
+            Error;
+        ok ->
+            case location_conflict(LeftLocations, RightLocations) of
+                {error, _} = Error ->
+                    Error;
+                ok ->
+                    {ok, #{root => Root,
+                           resources => maps:merge(LeftResources, RightResources),
+                           anchors => maps:merge(LeftAnchors, RightAnchors),
+                           dialects => maps:merge(LeftDialects, RightDialects),
+                           declarations => maps:merge(LeftDeclarations,
+                                                      RightDeclarations),
+                           locations => maps:merge(LeftLocations, RightLocations)}}
+            end
+    end.
+
+%% Проверяет только наличие document/resource base. Fragment здесь намеренно
+%% не участвует: отсутствующий target известного resource — dangling/anchor
+%% error, а не повод загружать другой document из store.
+-spec known(rid(), index()) -> boolean().
+known(Base, #{locations := Locations}) ->
+    find_location(Base, <<>>, Locations) =/= error.
 
 %% URI-слой отделяет base от fragment. Здесь pointer ищется по физическому
 %% location index и сразу превращается в canonical addr(). Plain-name fragment
@@ -129,6 +183,12 @@ root_id(#{<<"$id">> := Id}, Retrieval) ->
 root_id(_Schema, Retrieval) ->
     {ok, Retrieval}.
 
+-spec root_declaration(json(), rid(), rid()) -> addr().
+root_declaration(#{<<"$id">> := _Id}, Retrieval, _Root) ->
+    keyword_addr(Retrieval, [], <<"$id">>);
+root_declaration(_Schema, _Retrieval, Root) ->
+    {Root, <<>>}.
+
 -spec discover_root(json(), rid(), rid(), dialect()) ->
           {ok, index()} | {error, #schema_error{}}.
 discover_root(Schema, Retrieval, Root, Dialect) ->
@@ -137,13 +197,18 @@ discover_root(Schema, Retrieval, Root, Dialect) ->
     State0 = #state{dialect = Dialect,
                     resources = #{Root => #{}},
                     anchors = #{Root => #{}},
+                    declarations = #{Root => root_declaration(Schema, Retrieval,
+                                                              Root)},
                     names = Names},
     case walk(Schema, Root, [], Contexts, root, State0) of
         {ok, #state{resources = Resources, anchors = Anchors,
-                    locations = Locations}} ->
+                    locations = Locations, declarations = Declarations}} ->
             {ok, #{root => Root,
                    resources => Resources,
                    anchors => Anchors,
+                   dialects => maps:map(fun(_Rid, _Nodes) -> Dialect end,
+                                        Resources),
+                   declarations => Declarations,
                    locations => Locations}};
         {error, _} = Error ->
             Error
@@ -208,13 +273,14 @@ resolve_id(Id, _Base) ->
           {ok, state()} | {error, #schema_error{}}.
 reserve_resource(Rid, Location,
                  #state{resources = Resources, anchors = Anchors,
-                        names = Names} = State) ->
+                        declarations = Declarations, names = Names} = State) ->
     case maps:is_key(Rid, Names) of
         true ->
             {error, schema_error({name_taken, Rid}, Location)};
         false ->
             {ok, State#state{resources = Resources#{Rid => #{}},
                              anchors = Anchors#{Rid => #{}},
+                             declarations = Declarations#{Rid => Location},
                              names = Names#{Rid => true}}}
     end.
 
@@ -262,6 +328,46 @@ valid_anchor(Name, Dialect) when is_binary(Name) ->
     re:run(Name, Pattern, [{capture, none}]) =:= match;
 valid_anchor(_Name, _Dialect) ->
     false.
+
+-spec duplicate_resource(resource_schemas(), resource_schemas(), declarations()) ->
+          ok | {error, #schema_error{}}.
+duplicate_resource(Left, Right, RightDeclarations) ->
+    duplicate_resource_names(lists:sort(maps:keys(Left)), Right,
+                             RightDeclarations).
+
+-spec duplicate_resource_names([rid()], resource_schemas(), declarations()) ->
+          ok | {error, #schema_error{}}.
+duplicate_resource_names([], _Right, _RightDeclarations) ->
+    ok;
+duplicate_resource_names([Rid | Rest], Right, RightDeclarations) ->
+    case maps:is_key(Rid, Right) of
+        true ->
+            Location = maps:get(Rid, RightDeclarations),
+            {error, #schema_error{reason = {name_taken, Rid}, location = Location}};
+        false ->
+            duplicate_resource_names(Rest, Right, RightDeclarations)
+    end.
+
+-spec location_conflict(locations(), locations()) ->
+          ok | {error, #schema_error{}}.
+location_conflict(Left, Right) ->
+    location_conflict(lists:sort(maps:keys(Right)), Left, Right).
+
+-spec location_conflict([location_key()], locations(), locations()) ->
+          ok | {error, #schema_error{}}.
+location_conflict([], _Left, _Right) ->
+    ok;
+location_conflict([{Base, _Pointer} = Key | Rest], Left, Right) ->
+    RightAddr = maps:get(Key, Right),
+    case maps:get(Key, Left, undefined) of
+        undefined ->
+            location_conflict(Rest, Left, Right);
+        RightAddr ->
+            location_conflict(Rest, Left, Right);
+        _OtherAddr ->
+            {error, #schema_error{reason = {name_taken, Base},
+                                  location = RightAddr}}
+    end.
 
 -spec reference_error(rid(), valid_json_uri:target(), index()) ->
           {error, reason()}.

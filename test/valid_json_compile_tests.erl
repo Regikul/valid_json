@@ -3,6 +3,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include("valid_json_core.hrl").
+-include("valid_json_resources.hrl").
 
 %% Тесты модуля независимы, поэтому eunit прогоняет их параллельно.
 eunit_wrapper_(Tests) -> {inparallel, Tests}.
@@ -298,9 +299,9 @@ array_error_test_() ->
                                 <<"/prefixItems/1/maximum">>),
                    compile(#{<<"prefixItems">> => [true, #{<<"maximum">> => null}]}))].
 
-%% Раскладку выбирает dialect: schema-form `items` одинаков в обоих, а
-%% `prefixItems` и array-form `items` принадлежат разным фазам и пока отвергаются
-%% наравне с остальными неизвестными keywords.
+%% Раскладку выбирает dialect: schema-form `items` одинаков в обоих, array-form
+%% ждёт P6, а неизвестный для 2019-09 `prefixItems` игнорируется и не мешает
+%% соседнему `items`.
 array_dialect_test_() ->
     [?_assertEqual({ok, legacy_artifact(#{<<>>        => schema_node([{items,
                                                                        addr(<<"/items">>)}]),
@@ -308,10 +309,12 @@ array_dialect_test_() ->
                    legacy(#{<<"items">> => true})),
      ?_assertEqual(schema_error({not_implemented, <<"items">>}, <<"/items">>),
                    legacy(#{<<"items">> => [true]})),
-     ?_assertEqual(schema_error({not_implemented, <<"prefixItems">>}, <<"/prefixItems">>),
+     ?_assertEqual({ok, legacy_artifact(schema_node([]))},
                    legacy(#{<<"prefixItems">> => [true]})),
-     ?_assertEqual(schema_error({not_implemented, <<"prefixItems">>}, <<"/prefixItems">>),
-                   legacy(#{<<"prefixItems">> => [true], <<"items">> => true}))].
+     ?_assertEqual({ok, legacy_artifact(#{<<>> => schema_node([{items,
+                                                                 addr(<<"/items">>)}]),
+                                          <<"/items">> => true})},
+                   legacy(#{<<"prefixItems">> => [false], <<"items">> => true}))].
 
 %% Границы попадают в тот же constraint отдельными слотами, а ненаписанная
 %% остаётся `undefined`. Последнее поле — покрывает ли `contains` индексы: это
@@ -563,6 +566,189 @@ local_ref_error_test_() ->
      ?_assertEqual(schema_error(invalid_percent_encoding, <<"/$ref">>),
                    compile(#{<<"$ref">> => <<"#%zz">>}))].
 
+%% Store lookup использует retrieval URI, но IR, resources и sources сразу
+%% переходят на canonical URI корневого `$id` remote document.
+remote_anchor_via_retrieval_test() ->
+    Retrieval = <<"https://example.com/download/string.json">>,
+    Canonical = <<"https://example.com/schemas/string">>,
+    Remote = #{<<"$id">> => Canonical,
+               <<"$anchor">> => <<"leaf">>,
+               <<"type">> => <<"string">>},
+    {ok, Canonical, Store} =
+        valid_json_store:add(valid_json_store:new([]), Retrieval, Remote),
+    Schema = #{<<"$ref">> => <<Retrieval/binary, "#leaf">>},
+    Expected =
+        #{root => anonymous,
+          sources => [Canonical],
+          resources =>
+              #{anonymous => resource(
+                              anonymous,
+                              #{<<>> => schema_node([{ref, {Canonical, <<>>}}])}),
+                Canonical => resource(
+                               Canonical, #{<<"leaf">> => <<>>},
+                               #{<<>> => schema_node([{type, [string]}])})}},
+    ?assertEqual({ok, Expected}, valid_json_compile:compile(Store, Schema, [])).
+
+%% Все documents загружаются до emission, поэтому цикл A <-> B даёт конечный
+%% IR и не зависит от порядка batch-регистрации.
+remote_cycle_finite_ir_test() ->
+    A = <<"https://example.com/a">>,
+    B = <<"https://example.com/b">>,
+    {ok, [A, B], Store} =
+        valid_json_store:add(valid_json_store:new([]),
+                             [{A, #{<<"$id">> => A, <<"$ref">> => B}},
+                              {B, #{<<"$id">> => B, <<"$ref">> => A}}]),
+    Expected =
+        #{root => A,
+          sources => [A, B],
+          resources =>
+              #{A => resource(A, #{<<>> => schema_node([{ref, {B, <<>>}}])}),
+                B => resource(B, #{<<>> => schema_node([{ref, {A, <<>>}}])})}},
+    ?assertEqual({ok, Expected}, valid_json_compile:compile_uri(Store, A, [])).
+
+%% Замыкание строится транзитивно, а sources содержит документы, не resources:
+%% embedded `$id` отдельным source не становится.
+remote_transitive_sources_test() ->
+    A = <<"https://example.com/a">>,
+    B = <<"https://example.com/b">>,
+    C = <<"https://example.com/c">>,
+    Embedded = <<"https://example.com/embedded">>,
+    {ok, [A, B, C], Store} =
+        valid_json_store:add(
+          valid_json_store:new([]),
+          [{A, #{<<"$ref">> => B}},
+           {B, #{<<"$ref">> => C,
+                 <<"$defs">> => #{<<"local">> => #{<<"$id">> => Embedded}}}},
+           {C, #{<<"type">> => <<"integer">>}}]),
+    {ok, Compiled} = valid_json_compile:compile_uri(Store, A, []),
+    ?assertEqual(A, maps:get(root, Compiled)),
+    ?assertEqual([A, B, C], maps:get(sources, Compiled)),
+    ?assertEqual([A, B, C, Embedded],
+                 lists:sort(maps:keys(maps:get(resources, Compiled)))).
+
+%% Remote pointer разрешается по retrieval alias, но evaluator получает уже
+%% замкнутый canonical artifact и store больше не читает.
+remote_pointer_evaluation_test() ->
+    Retrieval = <<"https://example.com/download/types.json">>,
+    Canonical = <<"https://example.com/types">>,
+    Remote = #{<<"$id">> => Canonical,
+               <<"$defs">> =>
+                   #{<<"integer">> => #{<<"type">> => <<"integer">>}}},
+    {ok, Canonical, Store} =
+        valid_json_store:add(valid_json_store:new([]), Retrieval, Remote),
+    Schema = #{<<"$ref">> => <<Retrieval/binary, "#/$defs/integer">>},
+    {ok, Compiled} = valid_json_compile:compile(Store, Schema, []),
+    ?assertMatch({ok, #eval_result{valid = true}},
+                 valid_json_eval:run(Compiled, 1, flag)),
+    ?assertMatch({ok, #eval_result{valid = false}},
+                 valid_json_eval:run(Compiled, <<"1">>, flag)).
+
+%% Physical pointer space удалённого document сохраняется при объединении
+%% индексов: pointer через parent URI канонизируется внутрь embedded resource.
+remote_parent_pointer_alias_test() ->
+    Retrieval = <<"https://example.com/download/compound.json">>,
+    Root = <<"https://example.com/compound">>,
+    Child = <<"https://example.com/child">>,
+    Remote = #{<<"$id">> => Root,
+               <<"$defs">> =>
+                   #{<<"child">> =>
+                         #{<<"$id">> => Child,
+                           <<"properties">> => #{<<"x">> => false}}}},
+    {ok, Root, Store} =
+        valid_json_store:add(valid_json_store:new([]), Retrieval, Remote),
+    Ref = <<Retrieval/binary, "#/$defs/child/properties/x">>,
+    {ok, Compiled} =
+        valid_json_compile:compile(Store, #{<<"$ref">> => Ref}, []),
+    #resource{nodes = #{<<>> := #node{constraints = [{ref, Target}]}}} =
+        maps:get(anonymous, maps:get(resources, Compiled)),
+    ?assertEqual({Child, <<"/properties/x">>}, Target).
+
+compile_uri_alias_and_base_test() ->
+    Retrieval = <<"https://example.com/download/root.json">>,
+    Canonical = <<"https://example.com/schema/root.json">>,
+    Target = <<"https://example.com/schema/target.json">>,
+    Store0 = valid_json_store:new([{base_uri, <<"https://example.com/download/">>}]),
+    {ok, [_Canonical, _Target], Store} =
+        valid_json_store:add(
+          Store0,
+          [{<<"root.json">>, #{<<"$id">> => Canonical,
+                                <<"$ref">> => <<"target.json">>}},
+           {Target, #{<<"type">> => <<"boolean">>}}]),
+    {ok, Compiled} = valid_json_compile:compile_uri(Store, <<"root.json">>, []),
+    ?assertEqual(Canonical, maps:get(root, Compiled)),
+    ?assertEqual([Canonical, Target], maps:get(sources, Compiled)),
+    #resource{nodes = #{<<>> := #node{constraints = [{ref, {Target, <<>>}}]}}} =
+        maps:get(Canonical, maps:get(resources, Compiled)),
+    %% Retrieval alias действительно был входом, хотя root artifact canonical.
+    ?assertEqual(Retrieval,
+                 (valid_json_store:fetch(Retrieval, Store))#document.retrieval).
+
+production_dialect_test() ->
+    Legacy = #{<<"$schema">> => ?LEGACY, <<"type">> => <<"integer">>},
+    {ok, Compiled} =
+        valid_json_compile:compile(valid_json_store:new([]), Legacy, []),
+    #resource{dialect = ?LEGACY} =
+        maps:get(anonymous, maps:get(resources, Compiled)),
+    {ok, Defaulted} =
+        valid_json_compile:compile(valid_json_store:new([]), #{},
+                                   [{default_dialect, ?LEGACY}]),
+    #resource{dialect = ?LEGACY} =
+        maps:get(anonymous, maps:get(resources, Defaulted)).
+
+production_reference_error_test_() ->
+    Missing = <<"https://example.com/missing">>,
+    Remote = <<"https://example.com/remote">>,
+    Store = valid_json_store:new([]),
+    TakenStore = begin
+                     {ok, Missing, AddedTaken} =
+                         valid_json_store:add(Store, Missing, true),
+                     AddedTaken
+                 end,
+    RemoteStore = begin
+                      {ok, Remote, AddedRemote} =
+                          valid_json_store:add(Store, Remote,
+                                               #{<<"$defs">> => #{}}),
+                      AddedRemote
+                  end,
+    [?_assertEqual(
+        {error, #schema_error{reason = {unknown_document, Missing},
+                              location = {anonymous, <<"/$ref">>}}},
+        valid_json_compile:compile(Store, #{<<"$ref">> => Missing}, [])),
+     ?_assertEqual(
+        {error, #schema_error{reason = {dangling_ref,
+                                        {Remote, <<"/$defs/missing">>}},
+                              location = {anonymous, <<"/$ref">>}}},
+        valid_json_compile:compile(
+          RemoteStore,
+          #{<<"$ref">> => <<Remote/binary, "#/$defs/missing">>}, [])),
+     ?_assertEqual(
+        {error, #schema_error{reason = {unknown_document, Missing},
+                              location = undefined}},
+        valid_json_compile:compile_uri(Store, Missing, [])),
+     ?_assertEqual(
+        {error, #schema_error{reason = {name_taken, Missing},
+                              location = {anonymous, <<"/$id">>}}},
+        valid_json_compile:compile(TakenStore, #{<<"$id">> => Missing}, [])),
+     ?_assertEqual(
+        {error, #schema_error{reason = {name_taken, Missing},
+                              location = {anonymous, <<"/$defs/x/$id">>}}},
+        valid_json_compile:compile(
+          TakenStore,
+          #{<<"$defs">> => #{<<"x">> => #{<<"$id">> => Missing}}}, [])),
+     ?_assertEqual(
+        {error, #schema_error{reason = {unknown_dialect,
+                                        <<"https://example.com/dialect">>},
+                              location = {anonymous, <<"/$schema">>}}},
+        valid_json_compile:compile(
+          Store, #{<<"$schema">> => <<"https://example.com/dialect">>}, [])),
+     ?_assertEqual(
+        {error, #schema_error{reason = {unknown_dialect,
+                                        <<"https://example.com/dialect">>},
+                              location = {Remote, <<"/$schema">>}}},
+        valid_json_compile:compile(
+          Store, #{<<"$id">> => Remote,
+                   <<"$schema">> => <<"https://example.com/dialect">>}, []))].
+
 %% Подсхема с `$id` начинает новый resource: адрес в parent constraint сразу
 %% канонический, а указатели внутри child считаются от его собственного корня.
 embedded_resource_test() ->
@@ -687,12 +873,56 @@ annotation_order_test() ->
                    {annotation, <<"deprecated">>, true}],
     ?assertEqual({ok, artifact(schema_node(Constraints))}, compile(Schema)).
 
+%% Настоящее расширение становится annotation только в 2020-12. Его значение
+%% остаётся непрозрачными данными: вложенные объекты не становятся nodes.
+unknown_keyword_test_() ->
+    Value = #{<<"sub">> => #{<<"type">> => <<"string">>}},
+    Schema = #{<<"zCustom">> => 2,
+               <<"aCustom">> => Value,
+               <<"type">> => <<"integer">>},
+    [?_assertEqual(
+        {ok, artifact(schema_node([{type, [integer]},
+                                   {annotation, <<"aCustom">>, Value},
+                                   {annotation, <<"zCustom">>, 2}]))},
+        compile(Schema)),
+     ?_assertEqual({ok, legacy_artifact(schema_node([{type, [integer]}]))},
+                   legacy(Schema))].
+
+%% `$id` под unknown keyword не резервирует resource. У настоящей schema с тем
+%% же URI нет конфликта, и в артефакт попадают только корень и `$defs/real`.
+unknown_keyword_is_not_schema_position_test() ->
+    Child = <<"https://example.com/real">>,
+    Schema = #{<<"custom">> => #{<<"$id">> => Child,
+                                   <<"$anchor">> => <<"hidden">>,
+                                   <<"type">> => <<"null">>},
+               <<"$defs">> => #{<<"real">> => #{<<"$id">> => Child,
+                                                    <<"type">> => <<"string">>}}},
+    {ok, Compiled} = compile(Schema),
+    #{resources := Resources} = Compiled,
+    ?assertEqual([anonymous, Child], lists:sort(maps:keys(Resources))),
+    #resource{nodes = AnonymousNodes} = maps:get(anonymous, Resources),
+    ?assertEqual([<<>>], maps:keys(AnonymousNodes)),
+    #resource{anchors = ChildAnchors, nodes = ChildNodes} =
+        maps:get(Child, Resources),
+    ?assertEqual(#{}, ChildAnchors),
+    ?assertEqual([<<>>], maps:keys(ChildNodes)).
+
 %% Ещё не реализованный keyword обязан останавливать компиляцию, а не молча
 %% исчезать: иначе преждевременно подключённый файл сьюта пройдёт по недоразумению.
 not_implemented_test_() ->
     [?_assertEqual(schema_error({not_implemented, <<"unevaluatedItems">>},
                                 <<"/unevaluatedItems">>),
-                   compile(#{<<"unevaluatedItems">> => #{}}))].
+                   compile(#{<<"unevaluatedItems">> => #{}})),
+     ?_assertEqual(schema_error({not_implemented, <<"$dynamicRef">>},
+                                <<"/$dynamicRef">>),
+                   compile(#{<<"$dynamicRef">> => <<"#node">>})),
+     ?_assertEqual(schema_error({not_implemented, <<"$recursiveRef">>},
+                                <<"/$recursiveRef">>),
+                   legacy(#{<<"$recursiveRef">> => <<"#">>})),
+     %% Keyword другого dialect — действительно unknown.
+     ?_assertEqual({ok, artifact(schema_node(
+                                   [{annotation, <<"additionalItems">>, false}]))},
+                   compile(#{<<"additionalItems">> => false}))].
 
 %% На позиции schema стоит значение, которое schema не является: отдельной
 %% причины у него нет, для slot IR оно просто невозможно.

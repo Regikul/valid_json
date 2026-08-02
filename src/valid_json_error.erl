@@ -34,6 +34,8 @@ reason({non_schema_target, Target}) ->
     ["reference target is not a schema: ", target(Target)];
 reason({unknown_document, Uri}) ->
     ["referenced document is not registered: ", Uri];
+reason({unknown_dialect, Uri}) ->
+    ["unsupported JSON Schema dialect: ", io_lib:format("~tp", [Uri])];
 reason({name_taken, Uri}) ->
     ["URI is already used by another document: ", Uri];
 reason({bad_keyword_value, Value}) ->

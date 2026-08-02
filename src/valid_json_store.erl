@@ -12,7 +12,7 @@
 %% Встроенная область состоит только из канонических meta-schemas. Output
 %% schemas рядом с ними намеренно не входят в этот список.
 -define(BUILTINS,
-        [{<<"https://json-schema.org/draft/2020-12/schema">>,
+        [{?DRAFT_2020_12,
           "draft-2020-12/schema.json"},
          {<<"https://json-schema.org/draft/2020-12/meta/core">>,
           "draft-2020-12/meta/core.json"},
@@ -30,7 +30,7 @@
           "draft-2020-12/meta/format-assertion.json"},
          {<<"https://json-schema.org/draft/2020-12/meta/content">>,
           "draft-2020-12/meta/content.json"},
-         {<<"https://json-schema.org/draft/2019-09/schema">>,
+         {?DRAFT_2019_09,
           "draft-2019-09/schema.json"},
          {<<"https://json-schema.org/draft/2019-09/meta/core">>,
           "draft-2019-09/meta/core.json"},

@@ -139,6 +139,7 @@
                 | {dangling_ref, addr()}
                 | {non_schema_target, addr()}
                 | {unknown_document, uri()}
+                | {unknown_dialect, uri()}
                 | {name_taken, uri()}
                 | {bad_keyword_value, json()}
                 | {bad_pattern, term()}

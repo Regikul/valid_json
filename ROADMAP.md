@@ -145,40 +145,43 @@
 ## P3 — resources и обычные ссылки
 
 - [ ] **Фаза P3 завершена**
-- [~] Закрыть решение об адресации встроенных resources через parent pointer:
+- [x] Закрыть решение об адресации встроенных resources через parent pointer:
   выбраны эфемерные compile-time location aliases с немедленной
   канонизацией в `addr()`; индекс подключён к emission дочерних applicators в
-  `compile/2` и локальных `$ref`, осталось провести тот же путь через production
-  `compile/3`.
+  `compile/2`, локальных `$ref` и production `compile/3`, включая remote
+  document с отличающимся retrieval URI.
 - [x] Реализовать URI-слой: resolution, normalization, fragment handling и
   JSON Pointer/anchor lookup.
 - [x] Реализовать чистый `store()` с регистрацией retrieval и canonical URI.
-- [ ] Реализовать `compile/3`: dialect по `$schema` или опции, обход schema
-  positions и построение полного `compiled()`.
-- [~] Выделять отдельный resource для корня документа и каждой подсхемы с
-  `$id`: `compile/2` переносит найденные nodes в итоговые `#resource{}` и
-  канонизирует переходы через границу; осталось использовать этот путь в
-  `compile/3`.
+- [x] Реализовать `compile/3`: dialect по `$schema` или опции, обход schema
+  positions и построение полного `compiled()`; `compile_uri/3` принимает
+  retrieval или canonical URI, а `sources` содержит канонические имена
+  достигнутых документов.
+- [x] Выделять отдельный resource для корня документа и каждой подсхемы с
+  `$id`: `compile/2` и `compile/3` переносят найденные nodes в итоговые
+  `#resource{}` и канонизируют переходы через границу.
 - [x] Индексировать `$anchor`, `$defs` и nodes каждого resource.
-- [~] Разрешать `$ref` в `addr()` на этапе компиляции; локальные pointer/anchor
-  refs и ссылки на embedded resources уже канонизируются, dangling и non-schema
-  targets дают compile errors; осталась загрузка remote targets через
-  `compile/3`.
+- [x] Разрешать `$ref` в `addr()` на этапе компиляции: локальные и remote
+  pointer/anchor refs, retrieval aliases и ссылки на embedded resources
+  канонизируются после построения транзитивного замыкания documents; dangling,
+  non-schema и отсутствующие targets дают compile errors.
 - [x] Реализовать переходы evaluator через `{ref, Addr}` с сохранением
   keyword location и сменой absolute location на границе resource.
 - [ ] Подключить remote fixtures к conformance runner без сетевых обращений во
   время `validate/3`.
-- [ ] Обрабатывать неизвестные keywords согласно dialect и не обходить schema,
-  случайно записанные внутри их значений.
+- [x] Обрабатывать неизвестные keywords согласно dialect и не обходить schema,
+  случайно записанные внутри их значений: Draft 2020-12 сохраняет их как
+  детерминированно упорядоченные annotations, Draft 2019-09 игнорирует; точные
+  compiler fixtures и `optional/unknownKeyword.json` обоих dialects проходят.
 - [ ] Заменить boolean-only заглушку компилятора в conformance runner на
   production compiler.
-- [~] Добавить compiler fixtures на anonymous root, embedded resources,
+- [x] Добавить compiler fixtures на anonymous root, embedded resources,
   parent pointers через непосредственный и более внешний resource, анонимный
   объемлющий корень и retrieval URI, anchors, remotes, ошибки ссылок и
-  циклический конечный IR: discovery fixtures закрывают physical aliases и
-  конфликты `$id`, emission fixtures — named root, `$defs`, embedded и relative
-  `$id`, anchors, local refs, canonical addresses, ref errors и конечный
-  циклический IR; остались remotes и production-путь с retrieval URI.
+  циклический конечный IR: fixtures закрывают physical aliases и конфликты
+  `$id`, named root, `$defs`, embedded и relative `$id`, local/remote refs,
+  retrieval URI, canonical addresses, `sources`, ref errors и циклы между
+  documents.
 - [~] Добавить evaluator fixtures на resource boundary, обе ветви `#node{}` и
   cycle guard через реальные `$ref`: переход между resources, перенос покрытия,
   self-reference и повтор адреса в соседней ветви закрыты; ветвь с будущими

@@ -30,6 +30,9 @@ store_reason_test_() ->
     [?_assert(contains(format(invalid_uri, undefined), <<"URI">>)),
      ?_assert(contains(format(invalid_percent_encoding, undefined), <<"percent">>)),
      ?_assert(contains(format(relative_uri_without_base, undefined), <<"base">>)),
+     ?_assert(contains(format({unknown_dialect,
+                               <<"https://example.com/dialect">>}, undefined),
+                       <<"https://example.com/dialect">>)),
      ?_assert(contains(format({name_taken, <<"https://example.com/schema">>}, undefined),
                        <<"https://example.com/schema">>))].
 
