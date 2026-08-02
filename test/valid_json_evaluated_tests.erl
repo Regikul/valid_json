@@ -4,6 +4,9 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% Тесты модуля независимы, поэтому eunit прогоняет их параллельно.
+eunit_wrapper_(Tests) -> {inparallel, Tests}.
+
 neutral_test_() ->
     #{properties := Properties, items := Items} = valid_json_evaluated:neutral(),
     [?_assertEqual([], sets:to_list(Properties)),

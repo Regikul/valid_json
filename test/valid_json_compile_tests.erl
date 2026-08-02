@@ -4,6 +4,9 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("valid_json_core.hrl").
 
+%% Тесты модуля независимы, поэтому eunit прогоняет их параллельно.
+eunit_wrapper_(Tests) -> {inparallel, Tests}.
+
 -define(DIALECT, <<"https://json-schema.org/draft/2020-12/schema">>).
 
 boolean_schema_test_() ->

@@ -6,6 +6,9 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("valid_json_core.hrl").
 
+%% Тесты модуля независимы, поэтому eunit прогоняет их параллельно.
+eunit_wrapper_(Tests) -> {inparallel, Tests}.
+
 format_test_() ->
     [?_assert(contains(format({bad_keyword_value, null}, {anonymous, <<"/maximum">>}),
                        <<"#/maximum">>)),

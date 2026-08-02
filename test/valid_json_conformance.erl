@@ -41,7 +41,7 @@
 validation_test_() ->
     Tests = [file_tests(Dir, Dialect, File)
              || {Dir, Dialect} <- ?DIALECTS, File <- ?FILES],
-    [census_test(Tests) | Tests].
+    [census_test(Tests), {inparallel, Tests}].
 
 %% Перепись идёт по уже построенным тестам, а не по второму обходу сьюта:
 %% считается ровно то, что будет запущено.

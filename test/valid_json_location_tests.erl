@@ -4,6 +4,9 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% Тесты модуля независимы, поэтому eunit прогоняет их параллельно.
+eunit_wrapper_(Tests) -> {inparallel, Tests}.
+
 pointer_test_() ->
     [?_assertEqual(<<>>, valid_json_location:pointer([])),
      ?_assertEqual(<<"/type">>, valid_json_location:pointer([<<"type">>])),

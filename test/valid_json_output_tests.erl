@@ -5,6 +5,9 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("valid_json_core.hrl").
 
+%% Тесты модуля независимы, поэтому eunit прогоняет их параллельно.
+eunit_wrapper_(Tests) -> {inparallel, Tests}.
+
 flag_test_() ->
     [?_assertEqual(#{<<"valid">> => true}, project(flag, true, [])),
      %% flag не смотрит на units даже когда они собраны.

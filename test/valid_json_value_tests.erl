@@ -4,6 +4,9 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% Тесты модуля независимы, поэтому eunit прогоняет их параллельно.
+eunit_wrapper_(Tests) -> {inparallel, Tests}.
+
 -define(TYPES, [null, boolean, object, array, string, number, integer]).
 
 %% Для каждого значения перечислены все типы, которым оно принадлежит.
