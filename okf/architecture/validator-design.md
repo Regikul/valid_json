@@ -123,8 +123,8 @@ Schema object есть конъюнкция независимых ограни�
 | P2 | applicators, составные constraints и аннотации, включая `default` и content annotations — соответствующие обязательные files |
 | P3 | resources, `store()`, `$id`, `$anchor`, `$ref`, remotes и cycle guard — `ref`, `defs`, `anchor`, `refRemote`, `infinite-loop-detection`, `optional/id`, `optional/unknownKeyword` |
 | P4 | `unevaluatedProperties`, `unevaluatedItems`; обязательны группы `unevaluatedItems.json` про вложенные `contains` и про `minContains = 0` |
-| P5 | `$dynamicRef`, `$dynamicAnchor`; после этого включается проверка ресурсов метасхемой 2020-12 |
-| P6 | vocabularies и Draft 2019-09: `additionalItems`, recursive keywords, cross-draft; включается проверка метасхемой 2019-09 |
+| P5 | `$dynamicRef`, `$dynamicAnchor` и dynamic scope Draft 2020-12 |
+| P6 | vocabularies и Draft 2019-09: `additionalItems`, recursive keywords, cross-draft; включается отдельная проверка каждого resource собственной метасхемой для обоих dialects |
 | P7 | `basic`, `detailed`, `verbose` и официальные output tests; недостающее покрытие — собственными golden tests |
 | P8 | `format` assertion, content processing и остальные выбранные optional profiles |
 

@@ -9,42 +9,6 @@
 -export([new/1, add/2, add/3, remove/2, fetch/2]).
 -export_type([store/0, store_option/0]).
 
-%% Встроенная область состоит только из канонических meta-schemas. Output
-%% schemas рядом с ними намеренно не входят в этот список.
--define(BUILTINS,
-        [{?DRAFT_2020_12,
-          "draft-2020-12/schema.json"},
-         {<<"https://json-schema.org/draft/2020-12/meta/core">>,
-          "draft-2020-12/meta/core.json"},
-         {<<"https://json-schema.org/draft/2020-12/meta/applicator">>,
-          "draft-2020-12/meta/applicator.json"},
-         {<<"https://json-schema.org/draft/2020-12/meta/unevaluated">>,
-          "draft-2020-12/meta/unevaluated.json"},
-         {<<"https://json-schema.org/draft/2020-12/meta/validation">>,
-          "draft-2020-12/meta/validation.json"},
-         {<<"https://json-schema.org/draft/2020-12/meta/meta-data">>,
-          "draft-2020-12/meta/meta-data.json"},
-         {<<"https://json-schema.org/draft/2020-12/meta/format-annotation">>,
-          "draft-2020-12/meta/format-annotation.json"},
-         {<<"https://json-schema.org/draft/2020-12/meta/format-assertion">>,
-          "draft-2020-12/meta/format-assertion.json"},
-         {<<"https://json-schema.org/draft/2020-12/meta/content">>,
-          "draft-2020-12/meta/content.json"},
-         {?DRAFT_2019_09,
-          "draft-2019-09/schema.json"},
-         {<<"https://json-schema.org/draft/2019-09/meta/core">>,
-          "draft-2019-09/meta/core.json"},
-         {<<"https://json-schema.org/draft/2019-09/meta/applicator">>,
-          "draft-2019-09/meta/applicator.json"},
-         {<<"https://json-schema.org/draft/2019-09/meta/validation">>,
-          "draft-2019-09/meta/validation.json"},
-         {<<"https://json-schema.org/draft/2019-09/meta/meta-data">>,
-          "draft-2019-09/meta/meta-data.json"},
-         {<<"https://json-schema.org/draft/2019-09/meta/format">>,
-          "draft-2019-09/meta/format.json"},
-         {<<"https://json-schema.org/draft/2019-09/meta/content">>,
-          "draft-2019-09/meta/content.json"}]).
-
 %% `new/1` не имеет error-ветви по публичному контракту. Ошибочная опция —
 %% ошибка вызова API, поэтому она завершается badarg, а не schema_error.
 -spec new([store_option()]) -> store().
@@ -225,7 +189,7 @@ strip_replacement(Retrieval, Documents) ->
 free_names([], _Documents) ->
     ok;
 free_names([Name | Rest], Documents) ->
-    case builtin_path(Name) =/= undefined orelse maps:is_key(Name, Documents) of
+    case valid_json_metaschema:is_builtin(Name) orelse maps:is_key(Name, Documents) of
         true  -> schema_error({name_taken, Name});
         false -> free_names(Rest, Documents)
     end.
@@ -254,27 +218,4 @@ schema_error(Reason) ->
 
 -spec fetch_builtin(uri()) -> #document{} | undefined.
 fetch_builtin(Uri) ->
-    case builtin_path(Uri) of
-        undefined ->
-            undefined;
-        Relative ->
-            Path = filename:join([priv_dir(), "json_schema", Relative]),
-            case file:read_file(Path) of
-                {ok, Encoded} ->
-                    #document{retrieval = Uri, canonical = Uri,
-                              json = json:decode(Encoded)};
-                {error, Reason} ->
-                    erlang:error({builtin_schema, Uri, Reason})
-            end
-    end.
-
--spec priv_dir() -> file:filename_all().
-priv_dir() ->
-    case code:priv_dir(valid_json) of
-        {error, bad_name} -> filename:join(filename:dirname(code:which(?MODULE)), "../priv");
-        Directory         -> Directory
-    end.
-
--spec builtin_path(uri()) -> string() | undefined.
-builtin_path(Uri) ->
-    proplists:get_value(Uri, ?BUILTINS).
+    valid_json_metaschema:fetch(Uri).

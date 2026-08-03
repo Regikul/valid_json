@@ -9,6 +9,10 @@
 -export([compile/2, compile/3, compile_uri/3]).
 -export_type([compile_option/0]).
 
+-ifdef(TEST).
+-export([compile_unchecked/2]).
+-endif.
+
 -type compile_option() :: {default_dialect, dialect()}
                         | {assert_format, boolean()}.
 
@@ -22,10 +26,26 @@ compile(Schema, Dialect) ->
                 valid_json_store:new([]), Profile),
     case valid_json_resource_index:discover(Schema, anonymous, Profile, Resolve) of
         {ok, Index} ->
-            valid_json_compile_emit:emit(Index, []);
+            finish(valid_json_store:new([]), {ok, Index, []});
         {error, _} = Error ->
             Error
     end.
+
+-ifdef(TEST).
+%% Точные emitter fixtures проверяют страховочную тотальность и форму IR
+%% отдельно от production meta-schema gate. Функция существует только в test
+%% build; пользовательские compile-входы всегда проходят finish/2.
+-spec compile_unchecked(json(), dialect()) ->
+          {ok, compiled()} | {error, #schema_error{}}.
+compile_unchecked(Schema, Dialect) ->
+    Profile = valid_json_vocabulary:canonical(Dialect),
+    Resolve = valid_json_compile_closure:dialect_resolver(
+                valid_json_store:new([]), Profile),
+    case valid_json_resource_index:discover(Schema, anonymous, Profile, Resolve) of
+        {ok, Index} -> valid_json_compile_emit:emit(Index, []);
+        {error, _} = Error -> Error
+    end.
+-endif.
 
 %% Production entry для inline schema. Store остаётся read-only: closure
 %% втягивает только документы, достижимые по `$ref`, а evaluator получает
@@ -35,8 +55,8 @@ compile(Schema, Dialect) ->
 compile(#store{} = Store, Schema, Options) when is_list(Options) ->
     case compile_options(Options) of
         {ok, DefaultDialect} ->
-            finish(valid_json_compile_closure:inline(Store, Schema,
-                                                     DefaultDialect));
+            finish(Store, valid_json_compile_closure:inline(Store, Schema,
+                                                            DefaultDialect));
         {error, _} = Error ->
             Error
     end;
@@ -58,8 +78,8 @@ compile_uri(#store{} = Store, Uri, Options)
                             {error, #schema_error{reason = {unknown_document, Name},
                                                   location = undefined}};
                         #document{} = Document ->
-                            finish(valid_json_compile_closure:document(
-                                     Store, Document, DefaultDialect))
+                            finish(Store, valid_json_compile_closure:document(
+                                            Store, Document, DefaultDialect))
                     end;
                 {error, _} = Error ->
                     Error
@@ -70,12 +90,24 @@ compile_uri(#store{} = Store, Uri, Options)
 compile_uri(Store, Uri, Options) ->
     erlang:error(badarg, [Store, Uri, Options]).
 
--spec finish({ok, valid_json_resource_index:index(), [uri()]}
+-spec finish(store(),
+             {ok, valid_json_resource_index:index(), [uri()]}
            | {error, #schema_error{}}) ->
           {ok, compiled()} | {error, #schema_error{}}.
-finish({ok, Index, Sources}) ->
-    valid_json_compile_emit:emit(Index, Sources);
-finish({error, _} = Error) ->
+finish(Store, {ok, Index, Sources0}) ->
+    case valid_json_resource_index:check_references(Index) of
+        ok ->
+            case valid_json_schema_check:check(Index, Store) of
+                {ok, MetaSources} ->
+                    Sources = ordsets:union(Sources0, MetaSources),
+                    valid_json_compile_emit:emit(Index, Sources);
+                {error, _} = Error ->
+                    Error
+            end;
+        {error, _} = Error ->
+            Error
+    end;
+finish(_Store, {error, _} = Error) ->
     Error.
 
 -spec compile_options([term()]) ->

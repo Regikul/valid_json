@@ -10,7 +10,8 @@
 -export([discover/4, root/1, resources/1, anchors/1, dynamic_anchors/1,
          recursive_anchors/1,
          dialects/1, profiles/1, metaschemas/1, declaration/2,
-         merge/2, known/2, resolve/3, resolve_reference/3]).
+         merge/2, known/2, resolve/3, resolve_reference/3,
+         check_references/1]).
 -export_type([index/0, resource_schemas/0, resource_anchors/0, resolver/0]).
 
 -type resource_schemas() :: #{rid() => #{pointer() => json()}}.
@@ -225,6 +226,98 @@ resolve_reference(Base, Target, Index) ->
         error              -> reference_error(Base, Target, Index)
     end.
 
+%% Отдельный resolution pass сохраняет порядок фаз compiler: URI и targets
+%% проверяются до meta-schema validation, а emitter затем только повторяет
+%% тотальный lookup при построении IR. Форму нестроковых значений оставляем
+%% метасхеме — compiler отвечает здесь именно за URI/reference semantics.
+-spec check_references(index()) -> ok | {error, #schema_error{}}.
+check_references(#{root := Root, resources := Resources,
+                   profiles := Profiles} = Index) ->
+    Rids = [Root | lists:sort(maps:keys(Resources) -- [Root])],
+    check_resource_references(Rids, Resources, Profiles, Index).
+
+-spec check_resource_references([rid()], resource_schemas(), resource_profiles(),
+                                index()) ->
+          ok | {error, #schema_error{}}.
+check_resource_references([], _Resources, _Profiles, _Index) ->
+    ok;
+check_resource_references([Rid | Rest], Resources, Profiles, Index) ->
+    Schemas = maps:get(Rid, Resources),
+    Profile = maps:get(Rid, Profiles),
+    case check_schema_references(Rid, lists:sort(maps:keys(Schemas)), Schemas,
+                                 Profile, Index) of
+        ok -> check_resource_references(Rest, Resources, Profiles, Index);
+        {error, _} = Error -> Error
+    end.
+
+-spec check_schema_references(rid(), [pointer()], #{pointer() => json()},
+                              profile(), index()) ->
+          ok | {error, #schema_error{}}.
+check_schema_references(_Rid, [], _Schemas, _Profile, _Index) ->
+    ok;
+check_schema_references(Rid, [Pointer | Rest], Schemas, Profile, Index) ->
+    Schema = maps:get(Pointer, Schemas),
+    case check_schema_reference_keywords(Rid, Pointer, Schema, Profile, Index) of
+        ok -> check_schema_references(Rid, Rest, Schemas, Profile, Index);
+        {error, _} = Error -> Error
+    end.
+
+-spec check_schema_reference_keywords(rid(), pointer(), json(), profile(), index()) ->
+          ok | {error, #schema_error{}}.
+check_schema_reference_keywords(_Rid, _Pointer, Schema, _Profile, _Index)
+  when not is_map(Schema) ->
+    ok;
+check_schema_reference_keywords(Rid, Pointer, Schema, Profile, Index) ->
+    Keywords = [Keyword || Keyword <- [<<"$ref">>, <<"$dynamicRef">>,
+                                        <<"$recursiveRef">>],
+                           valid_json_vocabulary:active(Keyword, Profile)],
+    check_reference_keywords(Keywords, Rid, Pointer, Schema, Index).
+
+-spec check_reference_keywords([binary()], rid(), pointer(),
+                               #{binary() => json()}, index()) ->
+          ok | {error, #schema_error{}}.
+check_reference_keywords([], _Rid, _Pointer, _Schema, _Index) ->
+    ok;
+check_reference_keywords([Keyword | Rest], Rid, Pointer, Schema, Index) ->
+    case maps:find(Keyword, Schema) of
+        error ->
+            check_reference_keywords(Rest, Rid, Pointer, Schema, Index);
+        {ok, Value} when is_binary(Value) ->
+            case check_reference_value(Keyword, Value, Rid, Pointer, Index) of
+                ok -> check_reference_keywords(Rest, Rid, Pointer, Schema, Index);
+                {error, _} = Error -> Error
+            end;
+        {ok, _Other} ->
+            %% `type: string` соответствующего meta-schema выпустит
+            %% schema_invalid с полным basic output.
+            check_reference_keywords(Rest, Rid, Pointer, Schema, Index)
+    end.
+
+-spec check_reference_value(binary(), binary(), rid(), pointer(), index()) ->
+          ok | {error, #schema_error{}}.
+check_reference_value(<<"$recursiveRef">> = Keyword, Value, Rid, Pointer, _Index)
+  when Value =/= <<"#">> ->
+    {error, reference_schema_error({bad_keyword_value, Value}, Rid, Pointer,
+                                   Keyword)};
+check_reference_value(Keyword, Value, Rid, Pointer, Index) ->
+    case valid_json_uri:resolve(Value, Rid) of
+        {ok, Base, Target} ->
+            case resolve_reference(Base, Target, Index) of
+                {ok, _Addr} -> ok;
+                {error, Reason} ->
+                    {error, reference_schema_error(Reason, Rid, Pointer, Keyword)}
+            end;
+        {error, Reason} ->
+            {error, reference_schema_error(Reason, Rid, Pointer, Keyword)}
+    end.
+
+-spec reference_schema_error(reason(), rid(), pointer(), binary()) ->
+          #schema_error{}.
+reference_schema_error(Reason, Rid, Pointer, Keyword) ->
+    Segments = valid_json_location:segments(Pointer),
+    Location = valid_json_location:pointer([Keyword | Segments]),
+    #schema_error{reason = Reason, location = {Rid, Location}}.
+
 -spec normalize_retrieval(rid()) -> {ok, rid()} | {error, reason()}.
 normalize_retrieval(anonymous) ->
     {ok, anonymous};
@@ -309,8 +402,11 @@ walk(Schema, Rid, Location, Contexts, RootOrChild, Profile, State)
         {error, _} = Error ->
             Error
     end;
-walk(Other, Rid, Location, _Contexts, _RootOrChild, _Profile, _State) ->
-    {error, schema_error({bad_keyword_value, Other}, addr(Rid, Location))}.
+walk(Other, Rid, Location, Contexts, _RootOrChild, Profile, State) ->
+    %% Некорректная schema position остаётся в сыром index, чтобы единственным
+    %% источником синтаксической ошибки стала метасхема. Emitter всё равно имеет
+    %% страховочную totality-ветвь на случай прямого внутреннего вызова.
+    place(Other, addr(Rid, Location), Contexts, Profile, State).
 
 -spec enter_resource(json(), rid(), location(), [context()], root | child,
                      profile(), state()) ->

@@ -167,9 +167,10 @@ dialect_profile(Dialect, Store, Default, Seen) ->
             {error, {unknown_dialect, Dialect}}
     end.
 
-%% Сама метасхема не компилируется: из неё читается один `$vocabulary`. Поэтому
-%% в замыкание она не попадает и её собственные `$ref` здесь не разрешаются —
-%% они понадобятся только проверке схем метасхемой.
+%% На этой фазе сама метасхема не компилируется: из неё читается один
+%% `$vocabulary`. Поэтому в основное замыкание она не попадает и её собственные
+%% `$ref` здесь не разрешаются — отдельный schema-check pass скомпилирует её с
+%% локальным cache и добавит транзитивные документы в `sources`.
 -spec metaschema_profile(uri(), store(), dialect(), [uri()]) ->
           {ok, profile(), uri() | undefined} | {error, reason()}.
 metaschema_profile(Uri, Store, Default, Seen) ->

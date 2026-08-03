@@ -50,6 +50,13 @@ reference_reason_test_() ->
                               {anonymous, <<"/$ref">>}),
                        <<"https://example.com/missing">>))].
 
+metaschema_reason_test() ->
+    Unit = #output_unit{valid = false, keyword_location = [],
+                        absolute_location = undefined,
+                        instance_location = [], detail = none, nested = []},
+    ?assert(contains(format({schema_invalid, Unit}, {anonymous, <<>>}),
+                     <<"meta-schema">>)).
+
 format(Reason, Location) ->
     iolist_to_binary(
       valid_json_error:format_error(#schema_error{reason = Reason, location = Location})).

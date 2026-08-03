@@ -24,6 +24,8 @@ type_test_() ->
                    compile(#{<<"type">> => <<"integer">>})),
      ?_assertEqual({ok, artifact(schema_node([{type, [string, null]}]))},
                    compile(#{<<"type">> => [<<"string">>, <<"null">>]})),
+     %% Страховочный IR slot допускает пустой список; production-отказ
+     %% метасхемы проверяется в valid_json_metaschema_tests.
      ?_assertEqual({ok, artifact(schema_node([{type, []}]))},
                    compile(#{<<"type">> => []}))].
 
@@ -149,6 +151,8 @@ logical_test_() ->
                                    <<"/not">>  => schema_node([{const, 1}])})},
                    compile(#{<<"not">> => #{<<"const">> => 1}})),
      %% Пустой список ветвей метасхема запрещает, но в IR он ложится.
+     %% То же разделение: emitter тотален, а production meta-schema gate
+     %% отвергает пустой schemaArray отдельным тестом.
      ?_assertEqual({ok, artifact(schema_node([{all_of, []}]))},
                    compile(#{<<"allOf">> => []}))].
 
@@ -1385,7 +1389,7 @@ not_a_schema_test_() ->
                    compile(#{<<"not">> => <<"x">>}))].
 
 compile(Schema) ->
-    valid_json_compile:compile(Schema, ?DIALECT).
+    valid_json_compile:compile_unchecked(Schema, ?DIALECT).
 
 %% Пользовательская метасхема — обычный документ реестра: компилятор читает из
 %% неё только `$vocabulary`, а её собственный dialect выбирает набор URI.
@@ -1409,7 +1413,7 @@ constraints(Pointer, Nodes) ->
 %% Тот же вход с другим dialect: раскладку array applicators выбирает компилятор,
 %% и это единственное место, где она видна.
 legacy(Schema) ->
-    valid_json_compile:compile(Schema, ?LEGACY).
+    valid_json_compile:compile_unchecked(Schema, ?LEGACY).
 
 schema_node(Constraints) ->
     #node{constraints = Constraints, unevaluated = []}.

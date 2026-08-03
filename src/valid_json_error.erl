@@ -42,6 +42,11 @@ reason(core_vocabulary_missing) ->
     "meta-schema does not require the Core vocabulary";
 reason({name_taken, Uri}) ->
     ["URI is already used by another document: ", Uri];
+reason({schema_invalid, _RootOutputUnit}) ->
+    "schema does not conform to its meta-schema";
+reason({metaschema_evaluation_failed, Uri, EvalError}) ->
+    ["meta-schema evaluation failed for ", Uri, ": ",
+     io_lib:format("~tp", [EvalError])];
 reason({bad_keyword_value, Value}) ->
     ["value is not allowed here: ", json:encode(Value)];
 %% Причина от re принадлежит библиотеке и структуры не имеет, поэтому печатается

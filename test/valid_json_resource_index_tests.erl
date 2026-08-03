@@ -436,10 +436,11 @@ id_error_test_() ->
                                     <<"https://example.com/retrieval">>}}},
                   <<"https://example.com/retrieval">>))].
 
-schema_value_error_test() ->
-    ?assertEqual(schema_error({bad_keyword_value, 42},
-                              {anonymous, <<"/not">>}),
-                 discover(#{<<"not">> => 42}, anonymous)).
+schema_value_is_kept_for_metaschema_test() ->
+    {ok, Index} = discover(#{<<"not">> => 42}, anonymous),
+    ?assertEqual(#{<<>> => #{<<"not">> => 42}, <<"/not">> => 42},
+                 maps:get(anonymous,
+                          valid_json_resource_index:resources(Index))).
 
 retrieval_error_test() ->
     ?assertEqual({error, #schema_error{reason = invalid_uri,

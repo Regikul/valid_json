@@ -261,7 +261,7 @@
 
 ## P6 — vocabularies и Draft 2019-09
 
-- [ ] **Фаза P6 завершена**
+- [x] **Фаза P6 завершена**
 - [x] Закрыть compatibility profile для legacy `definitions`, `dependencies`
   и recursive keywords из корневых метасхем: `definitions` — alias `$defs`,
   `dependencies` остаётся вне основного профиля, recursive keywords активны
@@ -303,10 +303,13 @@
   Втянутый по `$ref` документ уже подчинялся собственному `$schema`. Вне корня
   schema resource `$schema` запрещён обоими dialects и даёт
   `{misplaced_keyword, <<"$schema">>}`.
-- [ ] Включить проверку schema resources метасхемами Draft 2020-12 и
-  Draft 2019-09. Проверка 2020-12 стоит здесь, а не в P5: кроме `$dynamicRef`
-  метасхеме нужны `$vocabulary` и `format` этой фазы, а метасхеме 2019-09 — ещё
-  и recursive keywords.
+- [x] Включить проверку schema resources метасхемами Draft 2020-12 и
+  Draft 2019-09: каждый resource проверяется отдельно, embedded resource
+  вырезается из instance объемлющего и затем проверяется собственным dialect.
+  Пользовательская метасхема компилируется из `store()` один раз на проход, а
+  её транзитивные документы входят в `sources`. Проверка 2020-12 стоит здесь, а
+  не в P5: кроме `$dynamicRef` метасхеме нужны `$vocabulary` и `format` этой
+  фазы, а метасхеме 2019-09 — ещё и recursive keywords.
 - [x] Добавить compiler fixtures для vocabulary errors, recursive scope и
   cross-draft closure: recursive scope покрыт точными resource-index, compiler
   и evaluator fixtures, vocabulary errors — fixtures на неизвестный vocabulary,
@@ -328,8 +331,9 @@
   dialects выходит за заявленный набор, и remote-документа для неё в снапшоте
   нет. Исключение называет dialect, потому что одноимённая группа Draft 2020-12
   внутри профиля и проходит.
-- [ ] Приёмка P6: проходят обязательные files Draft 2019-09 и выбранные
-  `optional/cross-draft`, compatibility и recursive cases.
+- [x] Приёмка P6: проходят обязательные files Draft 2019-09 и выбранные
+  `optional/cross-draft`, compatibility и recursive cases; полный EUnit-прогон
+  вместе с 742 conformance groups и 2515 cases проходит без провалов.
 
 ## P7 — стандартные output formats
 
@@ -387,13 +391,13 @@ Runtime не входит в conformance-фазы и развивается от
 - [ ] Реализовать transactional reload: пересборка по пересечению `sources`,
   commit только при полном успехе.
 - [ ] Реализовать удаление с ошибкой `{referenced_by, Uri, Refs}`.
-- [~] Хранить встроенные метасхемы отдельно и публиковать их compiled form через
-  `persistent_term`: `store()` уже отдаёт документы метасхем из `priv` мимо
-  пользовательского реестра, и переписать или удалить их нельзя. Осталась
-  публикация — сейчас каждый промах заново читает и разбирает файл. Раньше P6 её
-  не сделать: корневая метасхема Draft 2020-12 написана через `$dynamicRef`,
-  `$vocabulary` и `format` в позиции keyword, а метасхема Draft 2019-09 — ещё и
-  через recursive keywords.
+- [x] Хранить встроенные метасхемы отдельно и публиковать их compiled form через
+  `persistent_term`: при старте приложения шестнадцать документов читаются и
+  разбираются один раз, доверенно компилируются два корневых замыкания из восьми
+  и семи resources, после чего по одной immutable bundle-записи на dialect
+  публикуют compiled artifact вместе с декодированными документами. `store()`
+  читает промах из bundle мимо пользовательского реестра; встроенное имя нельзя
+  переписать или удалить.
 - [ ] Покрыть storage, ownership transfer, restart, reload, rollback и
   invalidation отдельными тестами без evaluator.
 
