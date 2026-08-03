@@ -176,7 +176,6 @@ Runtime-слой не входит в conformance-фазы. `pattern` компи
 
 | Владелец | Срок | Вопрос |
 | --- | --- | --- |
-| `core` | до P7 | Зафиксировать Draft 2019-09 `instanceLocation`: локальная спецификация требует URI-fragment form ([rfc6901.txt:261](../references/rfc/rfc6901.txt)), fixtures — обычный JSON Pointer. |
 | `core` | до P7 | Добавить собственные structure/golden tests для `flag`, `detailed`, `verbose`, `$ref`, no-op keywords и отброшенных annotations. |
 | `core` | до P8 | Для Format-Assertion выбрать алгоритмы и полную таблицу поддержанных стандартных format attributes. |
 

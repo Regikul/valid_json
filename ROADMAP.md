@@ -338,20 +338,33 @@
 ## P7 — стандартные output formats
 
 - [ ] **Фаза P7 завершена**
-- [ ] Зафиксировать представление `instanceLocation` Draft 2019-09:
-  URI-fragment form из спецификации или JSON Pointer из fixtures.
-- [ ] Завершить сериализацию `keywordLocation`, `absoluteKeywordLocation` и
-  `instanceLocation` для обоих dialects.
-- [ ] Реализовать полную плоскую проекцию `basic` из общего дерева units.
+- [x] Зафиксировать представление `instanceLocation` Draft 2019-09: выбран
+  обычный JSON Pointer из закреплённых fixtures и output schema; URI-fragment
+  form из prose не образует отдельный compatibility profile.
+- [x] Завершить сериализацию `keywordLocation`, `absoluteKeywordLocation` и
+  `instanceLocation` для обоих dialects: pointer escaping подтверждён
+  официальными escape cases, URI fragment form абсолютной локации — golden
+  tests обычного keyword и `$ref`.
+- [x] Реализовать полную плоскую проекцию `basic` из общего дерева units:
+  проекция подтверждена всеми восемью официальными output cases и собственными
+  end-to-end golden tests.
 - [ ] Реализовать минимальную значимую иерархию `detailed`.
 - [ ] Реализовать полную иерархию `verbose`, включая успехи и отброшенные
   annotations.
-- [ ] Обеспечить детерминированный порядок units независимо от оптимизации
-  evaluator.
-- [ ] Валидировать фактический output соответствующей output schema.
-- [ ] Добавить golden/structure tests для `flag`, `basic`, `detailed`,
-  `verbose`, `$ref`, no-op keywords и отброшенных annotations.
-- [ ] Подключить официальные output tests обоих dialects.
+- [x] Обеспечить детерминированный порядок units независимо от оптимизации
+  evaluator: emitter задаёт статический keyword order, map-driven обходы
+  сортируют ключи, а точный порядок ошибок и аннотаций закреплён golden tests
+  обоих dialects.
+- [~] Валидировать фактический output соответствующей output schema: общий
+  механизм runner реализован и проверяет `basic`; остаётся применить его к
+  собственным cases `detailed` и `verbose` после реализации этих форматов.
+- [~] Добавить golden/structure tests для `flag`, `basic`, `detailed`,
+  `verbose`, `$ref`, no-op keywords и отброшенных annotations: закрыты `flag`,
+  `basic`, `$ref`, no-op и эффективное отбрасывание annotations; остаются
+  структура `detailed` и полное дерево `verbose` с отброшенными annotations.
+- [x] Подключить официальные output tests обоих dialects: отдельный runner
+  выполняет восемь закреплённых `basic` cases, валидирует каждый фактический
+  output схемой case и защищён census `{8, 8, 8}`.
 - [ ] Приёмка P7: проходят все официальные output cases и собственные golden
   tests четырёх заявленных форматов.
 

@@ -397,7 +397,10 @@ Units образуют дерево, и уровни в нём чередуют�
 - `absoluteKeywordLocation` — resource URI, `#`, pointer escaping и затем percent-encoding недопустимых во fragment символов; это URI fragment identifier form указателя ([rfc6901.txt:261](../references/rfc/rfc6901.txt)) поверх грамматики fragment ([rfc3986.txt:1308](../references/rfc/rfc3986.txt));
 - empty segment stack печатается пустым pointer; anonymous resource не синтезирует URI.
 
-Draft 2019-09 prose требует fragment-encoded `instanceLocation`, но закреплённые output fixtures и output schema требуют обычный JSON Pointer. Внутренняя форма от выбора не зависит; compatibility policy остаётся открытой.
+Для обоих поддержанных dialects `instanceLocation` печатается обычным JSON
+Pointer. Draft 2019-09 prose требует fragment-encoded форму, но закреплённые
+output fixtures и output schema требуют JSON Pointer; compatibility policy
+выбирает проверяемый контракт сьюта и не вводит второй output profile.
 
 Каждый constraint порождает unit. Поэтому присутствие `properties: {}`, no-op assertions и полная иерархия `verbose` восстанавливаются без исходной схемы или presence mask.
 
