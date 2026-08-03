@@ -5,7 +5,7 @@
 
 -include("valid_json_resources.hrl").
 
--export([emit/2]).
+-export([emit/3]).
 
 %% Keywords, которые ничего не проверяют и только отдают своё значение
 %% аннотацией. Список назван отдельно: он нужен и порядку обхода, и разбору.
@@ -82,18 +82,21 @@
 %% Накопитель emission. Index immutable и нужен только для канонизации дочерних
 %% переходов; в compiled() он не попадает. `profile` — профиль испускаемого
 %% сейчас resource, а полная map нужна при переходе между documents.
+%% `assert_format` приходит опцией компиляции и на всём проходе один: артефакт
+%% принадлежит одной паре schema/options целиком.
 -record(state, {
-    profile   :: profile(),
-    profiles  :: #{rid() => profile()},
-    index     :: valid_json_resource_index:index(),
-    resources :: node_sets()
+    profile       :: profile(),
+    profiles      :: #{rid() => profile()},
+    index         :: valid_json_resource_index:index(),
+    resources     :: node_sets(),
+    assert_format :: boolean()
 }).
 
 -type state() :: #state{}.
 
--spec emit(valid_json_resource_index:index(), [uri()]) ->
+-spec emit(valid_json_resource_index:index(), [uri()], boolean()) ->
           {ok, compiled()} | {error, #schema_error{}}.
-emit(Index, Sources) ->
+emit(Index, Sources, AssertFormat) ->
     Root = valid_json_resource_index:root(Index),
     Schemas = valid_json_resource_index:resources(Index),
     Dialects = valid_json_resource_index:dialects(Index),
@@ -102,7 +105,8 @@ emit(Index, Sources) ->
     State = #state{profile = maps:get(Root, Profiles),
                    profiles = Profiles,
                    index = Index,
-                   resources = Empty},
+                   resources = Empty,
+                   assert_format = AssertFormat},
     case emit_resources(Root, Schemas, State) of
         {ok, #state{resources = Resources}} ->
             Anchors = {valid_json_resource_index:anchors(Index),
@@ -438,13 +442,15 @@ constraint(<<"not">> = Keyword, Schema, Position, State) ->
 %% `format` аннотирует в обоих dialects. В Draft 2019-09 корневая метасхема
 %% объявляет format vocabulary значением `false`, но этот boolean управляет
 %% только assertion: аннотацию спецификация требует собирать независимо от него
-%% (validation.txt:601 и 695). Выбор между annotation и assertion остаётся в P8,
-%% поэтому `Assert` пока всегда false. Имя формата обязано быть строкой
+%% (validation.txt:601 и 695). Assertion включает опция `assert_format`; вторая
+%% его половина, Format-Assertion vocabulary, требует полной таблицы algorithms
+%% и потому остаётся неподдержанной. Имя формата обязано быть строкой
 %% (validation.txt:565): слот IR открыт для любого имени, но не для любого типа.
-constraint(<<"format">> = Keyword, Schema, Position, State) ->
+constraint(<<"format">> = Keyword, Schema, Position,
+           #state{assert_format = Assert} = State) ->
     case maps:get(Keyword, Schema) of
         Name when is_binary(Name) ->
-            {ok, {format, Name, false}, State};
+            {ok, {format, Name, Assert}, State};
         Other ->
             {error, schema_error({bad_keyword_value, Other},
                                  below(Keyword, Position))}

@@ -210,7 +210,7 @@ dispatch({property_names, _} = Constraint, Instance, Context) ->
 dispatch({annotation, _, _} = Constraint, Instance, Context) ->
     valid_json_annotate:check(Constraint, Instance, Context);
 dispatch({format, _, _} = Constraint, Instance, Context) ->
-    valid_json_annotate:check(Constraint, Instance, Context);
+    valid_json_format:check(Constraint, Instance, Context);
 dispatch({content, _, _} = Constraint, Instance, Context) ->
     valid_json_annotate:check(Constraint, Instance, Context);
 dispatch(Constraint, Instance, Context) ->

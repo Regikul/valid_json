@@ -243,6 +243,29 @@ format_test_() ->
      ?_assertEqual(neutral(), coverage([Email], <<"a">>)),
      ?_assertEqual([], units([Email], <<"a">>, flag))].
 
+%% Assertion добавляется к annotation, а не заменяет её: успешная проверка
+%% оставляет тот же unit с именем формата. Проверяются только строки, а имя вне
+%% таблицы algorithms проверять нечем, поэтому и другой тип, и незнакомое имя
+%% остаются успешной аннотацией. Покрытия assertion не вносит, как и annotation.
+format_assertion_test_() ->
+    Ipv4 = {format, <<"ipv4">>, true},
+    [?_assertEqual([{<<"/format">>, true, {annotation, <<"ipv4">>}}],
+                   located([Ipv4], <<"127.0.0.1">>)),
+     ?_assertMatch([{<<"/format">>, false, {error, _}}],
+                   located([Ipv4], <<"not-an-ipv4">>)),
+     ?_assertEqual([{<<"/format">>, true, {annotation, <<"ipv4">>}}],
+                   located([Ipv4], 1)),
+     ?_assertEqual([{<<"/format">>, true, {annotation, <<"custom-name">>}}],
+                   located([{format, <<"custom-name">>, true}], <<"anything">>)),
+     ?_assertEqual({ok, #{<<"valid">> => true}},
+                   validate(schema_node([Ipv4]), <<"127.0.0.1">>)),
+     ?_assertEqual({ok, #{<<"valid">> => false}},
+                   validate(schema_node([Ipv4]), <<"not-an-ipv4">>)),
+     ?_assertEqual(neutral(), coverage([Ipv4], <<"127.0.0.1">>)),
+     %% В flag вердикт есть, а units нет: assertion меняет ответ, а не
+     %% диагностику.
+     ?_assertEqual([], units([Ipv4], <<"not-an-ipv4">>, flag))].
+
 %% Content keywords аннотируют только строку и никогда не отказывают: испорченное
 %% содержимое остаётся валидным, потому что декодировать и разбирать его по
 %% умолчанию нельзя. Значение `contentSchema` отдаётся аннотацией целиком, а к

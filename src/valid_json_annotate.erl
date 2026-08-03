@@ -1,8 +1,9 @@
-%% Обработчик annotation-only keywords и аннотирующего `format`. Спрашивать о
-%% значении им нечего и
+%% Обработчик annotation-only keywords. Спрашивать о значении им нечего и
 %% спускаться некуда: вердикт всегда успешен, покрытия они не вносят, а значение
-%% keyword целиком становится аннотацией собственного unit. Контракт handler'а —
-%% okf/architecture/validator-core.md, раздел «Контракт handler'а».
+%% keyword целиком становится аннотацией собственного unit. `format` тоже
+%% аннотирует, но умеет ещё и проверять, поэтому живёт в valid_json_format.
+%% Контракт handler'а — okf/architecture/validator-core.md, раздел «Контракт
+%% handler'а».
 -module(valid_json_annotate).
 
 -include("valid_json_core.hrl").
@@ -17,14 +18,6 @@ check({annotation, _Keyword, _Value}, _Instance, #eval_context{mode = flag}) ->
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
 check({annotation, Keyword, Value}, _Instance, Context) ->
     Unit = valid_json_unit:keyword(Keyword, true, {annotation, Value}, Context),
-    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = [Unit]};
-%% Аннотацией `format` становится само имя формата, и собирать его нужно даже
-%% для незнакомых имён (draft-2020-12/validation.txt:713). Ветвь assertion
-%% компилятор пока не строит: её алгоритмы и таблица имён остаются в P8.
-check({format, _Name, false}, _Instance, #eval_context{mode = flag}) ->
-    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
-check({format, Name, false}, _Instance, Context) ->
-    Unit = valid_json_unit:keyword(<<"format">>, true, {annotation, Name}, Context),
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = [Unit]};
 %% Content keywords описывают строку, закодировавшую не-JSON документ, и к
 %% значениям других типов не применяются вовсе (validation.txt:945). Поэтому

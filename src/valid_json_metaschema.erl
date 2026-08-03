@@ -84,7 +84,9 @@ bundle(Draft, Manifest) ->
         {ok, Index, _BootstrapSources} ->
             %% Builtins никогда не входят в sources. Store выше существует
             %% только внутри bootstrap и потому не меняет это правило.
-            case valid_json_compile_emit:emit(Index, []) of
+            %% Метасхема проверяет форму схемы, а не значения форматов, поэтому
+            %% assertion ей не нужен ни при какой опции пользователя.
+            case valid_json_compile_emit:emit(Index, [], false) of
                 {ok, Compiled} ->
                     #{compiled => Compiled, documents => Documents};
                 {error, Error} ->

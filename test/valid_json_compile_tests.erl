@@ -1207,9 +1207,41 @@ format_test_() ->
      ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/format">>),
                    compile(#{<<"format">> => 1}))].
 
+%% Роль `format` выбирает компиляция, а не вычисление: assertion меняет IR и
+%% потому включается опцией `assert_format`. По умолчанию keyword только
+%% аннотирует — включать проверку без явной настройки спецификация запрещает.
+%% Незнакомое имя при опции compile error не даёт: проверять его нечем, и оно
+%% остаётся annotation-only.
+assert_format_option_test_() ->
+    Ipv4 = #{<<"format">> => <<"ipv4">>},
+    [?_assertEqual([{format, <<"ipv4">>, true}],
+                   option_constraints(Ipv4, [{assert_format, true}])),
+     ?_assertEqual([{format, <<"ipv4">>, false}],
+                   option_constraints(Ipv4, [{assert_format, false}])),
+     ?_assertEqual([{format, <<"ipv4">>, false}], option_constraints(Ipv4, [])),
+     ?_assertEqual([{format, <<"custom-name">>, true}],
+                   option_constraints(#{<<"format">> => <<"custom-name">>},
+                                      [{assert_format, true}])),
+     ?_assertError(badarg,
+                   trusted_compile(valid_json_store:new([]), Ipv4,
+                                   [{assert_format, yes}]))].
+
+%% Опция принадлежит проходу компиляции целиком, а не отдельному документу:
+%% встроенный resource со своим `$id` получает ту же роль keyword, что и корень.
+assert_format_reaches_every_resource_test() ->
+    Inner = <<"https://example.com/inner">>,
+    Schema = #{<<"format">> => <<"ipv4">>,
+               <<"$defs">> => #{<<"inner">> => #{<<"$id">> => Inner,
+                                                 <<"format">> => <<"ipv4">>}}},
+    {ok, #{resources := Resources}} =
+        trusted_compile(valid_json_store:new([]), Schema,
+                        [{assert_format, true}]),
+    #resource{nodes = Nodes} = maps:get(Inner, Resources),
+    ?assertEqual([{format, <<"ipv4">>, true}], constraints(<<>>, Nodes)).
+
 %% Аннотации стоят в конце порядка обхода: сначала идёт то, что определяет
 %% вердикт, потом то, что только описывает значение. `format` стоит перед ними:
-%% в P8 он станет assertion, и порядок units из-за этого не поедет.
+%% под опцией он определяет вердикт, и порядок units из-за неё не поедет.
 format_order_test() ->
     Schema = #{<<"title">>  => <<"t">>,
                <<"format">> => <<"email">>,
@@ -1486,6 +1518,14 @@ vocab(Name) ->
 constraints(Pointer, Nodes) ->
     #node{constraints = Constraints} = maps:get(Pointer, Nodes),
     Constraints.
+
+%% Compile options видны только через публичный вход: compile_unchecked/2 их не
+%% принимает вовсе.
+option_constraints(Schema, Options) ->
+    {ok, #{resources := Resources}} =
+        trusted_compile(valid_json_store:new([]), Schema, Options),
+    #resource{nodes = Nodes} = maps:get(anonymous, Resources),
+    constraints(<<>>, Nodes).
 
 %% Тот же вход с другим dialect: раскладку array applicators выбирает компилятор,
 %% и это единственное место, где она видна.

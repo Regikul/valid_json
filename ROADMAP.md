@@ -381,10 +381,18 @@
 - [ ] Выбрать алгоритмы и состав поддерживаемых Format-Assertion attributes.
 - [ ] Зафиксировать таблицу: format name, dialect, annotation/assertion,
   алгоритм и ограничения.
-- [ ] Реализовать выбор между annotation и assertion для `format` по активным
-  vocabularies и compile options: сама annotation сделана в P6. До этой фазы
-  Format-Assertion vocabulary не поддержан, и метасхема, объявившая его
-  значением `true`, отвергается; здесь имя вносится в таблицу vocabularies.
+- [~] Реализовать выбор между annotation и assertion для `format` по активным
+  vocabularies и compile options: сама annotation сделана в P6. Половина по
+  compile options выполнена: `assert_format` доходит до IR и включает проверку
+  строки по таблице format algorithms, причём успешная проверка аннотацию не
+  отменяет, а значение другого типа и имя вне таблицы остаются чистой
+  annotation. Сама таблица пока держит одну строку, `ipv4`: без единого
+  algorithm механизм нечем проверить, а её полный состав выбирают два пункта
+  выше. Не выполнена половина по vocabularies: Format-Assertion обязывает
+  проверять все форматы спецификации, поэтому до готовой таблицы имя в таблицу
+  vocabularies не вносится, метасхема, объявившая его значением `true`,
+  по-прежнему отвергается, а `optional/format-assertion.json` не подключён —
+  все его cases идут именно через такую метасхему.
 - [x] Реализовать выбранную обработку `contentEncoding`, `contentMediaType` и
   `contentSchema`, сохранив обязательные annotations. Выбрано поведение по
   умолчанию: содержимое строки не декодируется, не разбирается и не проверяется,
