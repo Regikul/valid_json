@@ -36,6 +36,10 @@ reason({unknown_document, Uri}) ->
     ["referenced document is not registered: ", Uri];
 reason({unknown_dialect, Uri}) ->
     ["unsupported JSON Schema dialect: ", io_lib:format("~tp", [Uri])];
+reason({unrecognized_vocabulary, Uri}) ->
+    ["meta-schema requires an unknown vocabulary: ", Uri];
+reason(core_vocabulary_missing) ->
+    "meta-schema does not require the Core vocabulary";
 reason({name_taken, Uri}) ->
     ["URI is already used by another document: ", Uri];
 reason({bad_keyword_value, Value}) ->

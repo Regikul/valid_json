@@ -9,7 +9,7 @@
 
 -export([discover/3, root/1, resources/1, anchors/1, dynamic_anchors/1,
          recursive_anchors/1,
-         dialects/1, declaration/2,
+         dialects/1, profiles/1, declaration/2,
          merge/2, known/2, resolve/3, resolve_reference/3]).
 -export_type([index/0, resource_schemas/0, resource_anchors/0]).
 
@@ -17,6 +17,7 @@
 -type resource_anchors() :: #{rid() => #{binary() => pointer()}}.
 -type resource_recursive_anchors() :: #{rid() => boolean()}.
 -type resource_dialects() :: #{rid() => dialect()}.
+-type resource_profiles() :: #{rid() => profile()}.
 -type declarations() :: #{rid() => addr()}.
 -type location_key() :: {rid(), pointer()}.
 -type locations() :: #{location_key() => addr()}.
@@ -27,12 +28,12 @@
                      anchors := resource_anchors(),
                      dynamic_anchors := resource_anchors(),
                      recursive_anchors := resource_recursive_anchors(),
-                     dialects := resource_dialects(),
+                     profiles := resource_profiles(),
                      declarations := declarations(),
                      locations := locations()}.
 
 -record(state, {
-    dialect   :: dialect(),
+    profile   :: profile(),
     resources = #{} :: resource_schemas(),
     anchors = #{} :: resource_anchors(),
     dynamic_anchors = #{} :: resource_anchors(),
@@ -51,15 +52,14 @@
 
 %% Retrieval задаёт физическое имя документа. Для inline schema это
 %% `anonymous`; корневой `$id` при наличии становится canonical root.
--spec discover(json(), rid(), dialect()) ->
+-spec discover(json(), rid(), profile()) ->
           {ok, index()} | {error, #schema_error{}}.
-discover(Schema, Retrieval0, Dialect)
-  when (Retrieval0 =:= anonymous orelse is_binary(Retrieval0)),
-       is_binary(Dialect) ->
+discover(Schema, Retrieval0, #profile{} = Profile)
+  when Retrieval0 =:= anonymous orelse is_binary(Retrieval0) ->
     case normalize_retrieval(Retrieval0) of
         {ok, Retrieval} ->
             case root_id(Schema, Retrieval) of
-                {ok, Root} -> discover_root(Schema, Retrieval, Root, Dialect);
+                {ok, Root} -> discover_root(Schema, Retrieval, Root, Profile);
                 {error, Reason} ->
                     {error, schema_error(Reason,
                                          keyword_addr(Retrieval, [], <<"$id">>))}
@@ -67,8 +67,8 @@ discover(Schema, Retrieval0, Dialect)
         {error, Reason} ->
             {error, #schema_error{reason = Reason, location = undefined}}
     end;
-discover(Schema, Retrieval, Dialect) ->
-    erlang:error(badarg, [Schema, Retrieval, Dialect]).
+discover(Schema, Retrieval, Profile) ->
+    erlang:error(badarg, [Schema, Retrieval, Profile]).
 
 -spec root(index()) -> rid().
 root(#{root := Root}) ->
@@ -105,8 +105,14 @@ recursive_anchors(#{recursive_anchors := Anchors}) ->
 %% сейчас: общий compile index может содержать documents разных dialect, а в
 %% compiled() dialect хранится на каждом resource.
 -spec dialects(index()) -> resource_dialects().
-dialects(#{dialects := Dialects}) ->
-    Dialects.
+dialects(#{profiles := Profiles}) ->
+    maps:map(fun(_Rid, #profile{uri = Uri}) -> Uri end, Profiles).
+
+%% Профиль нужен emitter'у: он решает, какие keywords активны. В compiled() из
+%% него доходит только dialect URI.
+-spec profiles(index()) -> resource_profiles().
+profiles(#{profiles := Profiles}) ->
+    Profiles.
 
 %% Локация `$id`, объявившего resource, нужна только compile errors при
 %% объединении documents или сверке со store. У resource без написанного `$id`
@@ -124,14 +130,14 @@ merge(#{root := Root,
         anchors := LeftAnchors,
         dynamic_anchors := LeftDynamic,
         recursive_anchors := LeftRecursive,
-        dialects := LeftDialects,
+        profiles := LeftProfiles,
         declarations := LeftDeclarations,
         locations := LeftLocations},
       #{resources := RightResources,
         anchors := RightAnchors,
         dynamic_anchors := RightDynamic,
         recursive_anchors := RightRecursive,
-        dialects := RightDialects,
+        profiles := RightProfiles,
         declarations := RightDeclarations,
         locations := RightLocations}) ->
     case duplicate_resource(LeftResources, RightResources, RightDeclarations) of
@@ -148,7 +154,7 @@ merge(#{root := Root,
                            dynamic_anchors => maps:merge(LeftDynamic, RightDynamic),
                            recursive_anchors => maps:merge(LeftRecursive,
                                                            RightRecursive),
-                           dialects => maps:merge(LeftDialects, RightDialects),
+                           profiles => maps:merge(LeftProfiles, RightProfiles),
                            declarations => maps:merge(LeftDeclarations,
                                                       RightDeclarations),
                            locations => maps:merge(LeftLocations, RightLocations)}}
@@ -217,12 +223,12 @@ root_declaration(#{<<"$id">> := _Id}, Retrieval, _Root) ->
 root_declaration(_Schema, _Retrieval, Root) ->
     {Root, <<>>}.
 
--spec discover_root(json(), rid(), rid(), dialect()) ->
+-spec discover_root(json(), rid(), rid(), profile()) ->
           {ok, index()} | {error, #schema_error{}}.
-discover_root(Schema, Retrieval, Root, Dialect) ->
+discover_root(Schema, Retrieval, Root, Profile) ->
     Contexts = root_contexts(Root, Retrieval),
     Names = reserve_names([Base || {Base, []} <- Contexts]),
-    State0 = #state{dialect = Dialect,
+    State0 = #state{profile = Profile,
                     resources = #{Root => #{}},
                     anchors = #{Root => #{}},
                     dynamic_anchors = #{Root => #{}},
@@ -240,7 +246,7 @@ discover_root(Schema, Retrieval, Root, Dialect) ->
                    anchors => Anchors,
                    dynamic_anchors => DynamicAnchors,
                    recursive_anchors => RecursiveAnchors,
-                   dialects => maps:map(fun(_Rid, _Nodes) -> Dialect end,
+                   profiles => maps:map(fun(_Rid, _Nodes) -> Profile end,
                                         Resources),
                    declarations => Declarations,
                    locations => Locations}};
@@ -259,7 +265,7 @@ walk(Schema, Rid, Location, Contexts, RootOrChild, State)
             Addr = addr(NodeRid, NodeLocation),
             case place(Schema, Addr, NodeContexts, Entered) of
                 {ok, Placed} when is_map(Schema) ->
-                    walk_children(children(Schema, Placed#state.dialect),
+                    walk_children(children(Schema, Placed#state.profile),
                                   NodeRid, NodeLocation, NodeContexts, Placed);
                 {ok, Placed} ->
                     {ok, Placed};
@@ -363,7 +369,8 @@ index_special_anchors(Schema, Addr, State) ->
 %% поэтому имя попадает в обе карты.
 -spec index_dynamic_anchor(#{binary() => json()}, addr(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
-index_dynamic_anchor(Schema, Addr, #state{dialect = ?DRAFT_2020_12} = State) ->
+index_dynamic_anchor(Schema, Addr,
+                     #state{profile = #profile{draft = ?DRAFT_2020_12}} = State) ->
     case anchor_name(<<"$dynamicAnchor">>, Schema, Addr, State) of
         {ok, none} ->
             {ok, State};
@@ -382,7 +389,7 @@ index_dynamic_anchor(_Schema, _Addr, State) ->
 -spec index_recursive_anchor(#{binary() => json()}, addr(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
 index_recursive_anchor(Schema, {Rid, Pointer},
-                       #state{dialect = ?DRAFT_2019_09,
+                       #state{profile = #profile{draft = ?DRAFT_2019_09},
                               recursive_anchors = Anchors} = State) ->
     case maps:find(<<"$recursiveAnchor">>, Schema) of
         error ->
@@ -401,12 +408,13 @@ index_recursive_anchor(_Schema, _Addr, State) ->
 
 -spec anchor_name(binary(), #{binary() => json()}, addr(), state()) ->
           {ok, binary() | none} | {error, #schema_error{}}.
-anchor_name(Keyword, Schema, {Rid, Pointer}, #state{dialect = Dialect}) ->
+anchor_name(Keyword, Schema, {Rid, Pointer},
+            #state{profile = #profile{draft = Draft}}) ->
     case maps:find(Keyword, Schema) of
         error ->
             {ok, none};
         {ok, Name} ->
-            case valid_anchor(Name, anchor_dialect(Keyword, Dialect)) of
+            case valid_anchor(Name, anchor_dialect(Keyword, Draft)) of
                 true ->
                     {ok, Name};
                 false ->
@@ -582,24 +590,31 @@ walk_children([{Segments, Schema} | Rest], Rid, Location, Contexts, State) ->
 %% unknown keywords, annotations, const и enum не обходятся. Контейнер неверной
 %% формы оставляется emitter'у, зато элемент корректного контейнера обязан быть
 %% schema и потому проходит через walk/6 даже при ошибочном типе.
--spec children(#{binary() => json()}, dialect()) -> [child()].
-children(Schema, Dialect) ->
+%%
+%% Активность решают vocabularies профиля: keyword выключенной vocabulary
+%% является неизвестным, а внутрь неизвестного спускаться нельзя — иначе `$id` и
+%% `$anchor` случайно написанной там схемы попали бы в индекс.
+-spec children(#{binary() => json()}, profile()) -> [child()].
+children(Schema, #profile{draft = Draft} = Profile) ->
+    Active = maps:filter(fun(Keyword, _Value) ->
+                                 valid_json_vocabulary:active(Keyword, Profile)
+                         end, Schema),
     lists:append([
-        named_children(<<"$defs">>, Schema),
-        named_children(<<"definitions">>, Schema),
-        named_children(<<"properties">>, Schema),
-        named_children(<<"patternProperties">>, Schema),
-        named_children(<<"dependentSchemas">>, Schema),
-        ordered_children(<<"allOf">>, Schema),
-        ordered_children(<<"anyOf">>, Schema),
-        ordered_children(<<"oneOf">>, Schema),
-        prefix_children(Schema, Dialect),
-        items_children(Schema, Dialect),
+        named_children(<<"$defs">>, Active),
+        named_children(<<"definitions">>, Active),
+        named_children(<<"properties">>, Active),
+        named_children(<<"patternProperties">>, Active),
+        named_children(<<"dependentSchemas">>, Active),
+        ordered_children(<<"allOf">>, Active),
+        ordered_children(<<"anyOf">>, Active),
+        ordered_children(<<"oneOf">>, Active),
+        prefix_children(Active, Draft),
+        items_children(Active, Draft),
         single_children([<<"additionalProperties">>, <<"propertyNames">>,
                          <<"contains">>, <<"not">>, <<"if">>, <<"then">>,
                          <<"else">>, <<"unevaluatedProperties">>,
-                         <<"unevaluatedItems">>], Schema),
-        additional_items_children(Schema, Dialect)
+                         <<"unevaluatedItems">>], Active),
+        additional_items_children(Active, Draft)
     ]).
 
 -spec named_children(binary(), #{binary() => json()}) -> [child()].

@@ -14,7 +14,8 @@
 
 -spec compile(json(), dialect()) -> {ok, compiled()} | {error, #schema_error{}}.
 compile(Schema, Dialect) ->
-    case valid_json_resource_index:discover(Schema, anonymous, Dialect) of
+    Profile = valid_json_vocabulary:canonical(Dialect),
+    case valid_json_resource_index:discover(Schema, anonymous, Profile) of
         {ok, Index} ->
             valid_json_compile_emit:emit(Index, []);
         {error, _} = Error ->

@@ -13,14 +13,19 @@
 
 -spec inline(store(), json(), dialect()) -> result().
 inline(#store{} = Store, Schema, DefaultDialect) ->
-    close_documents(Store, [{inline, Schema}], DefaultDialect,
+    close_documents(Store, [{inline, Schema}],
+                    valid_json_vocabulary:canonical(DefaultDialect),
                     undefined, #{}, []).
 
 -spec document(store(), #document{}, dialect()) -> result().
 document(#store{} = Store, #document{} = Document, DefaultDialect) ->
-    close_documents(Store, [{document, Document}], DefaultDialect,
+    close_documents(Store, [{document, Document}],
+                    valid_json_vocabulary:canonical(DefaultDialect),
                     undefined, #{}, []).
 
+%% Опция `default_dialect` называет именно dialect, а не пользовательскую
+%% метасхему: она действует там, где `$schema` не написан вовсе, и потому
+%% ограничена каноническими URI.
 -spec supported_dialect(uri()) ->
           {ok, dialect()} | {error, #schema_error{}}.
 supported_dialect(Dialect) ->
@@ -38,22 +43,22 @@ supported_dialect(Dialect) ->
 %% проходит discovery, затем его index присоединяется к общему. Ссылки сканируем
 %% по признанным schema positions; неизвестные keyword values сюда не попадают.
 -spec close_documents(store(), [{inline, json()} | {document, #document{}}],
-                      dialect(), valid_json_resource_index:index() | undefined,
+                      profile(), valid_json_resource_index:index() | undefined,
                       #{term() => true}, [uri()]) ->
           {ok, valid_json_resource_index:index(), [uri()]}
         | {error, #schema_error{}}.
-close_documents(_Store, [], _DefaultDialect, Index, _Loaded, Sources) ->
+close_documents(_Store, [], _Default, Index, _Loaded, Sources) ->
     {ok, Index, lists:sort(Sources)};
-close_documents(Store, [Entry | Rest], DefaultDialect, Index0, Loaded, Sources0) ->
+close_documents(Store, [Entry | Rest], Default, Index0, Loaded, Sources0) ->
     {Key, Retrieval, Schema, Owner, Source} = document_parts(Entry, Store),
     case maps:is_key(Key, Loaded) of
         true ->
-            close_documents(Store, Rest, DefaultDialect, Index0, Loaded, Sources0);
+            close_documents(Store, Rest, Default, Index0, Loaded, Sources0);
         false ->
             DialectBase = document_root(Schema, Retrieval),
-            case document_dialect(Schema, DefaultDialect, DialectBase) of
-                {ok, Dialect} ->
-                    case valid_json_resource_index:discover(Schema, Retrieval, Dialect) of
+            case document_profile(Schema, Default, DialectBase, Store) of
+                {ok, Profile, Metaschema} ->
+                    case valid_json_resource_index:discover(Schema, Retrieval, Profile) of
                         {ok, DocumentIndex} ->
                             case owned_resources(DocumentIndex, Owner, Store) of
                                 ok ->
@@ -61,9 +66,11 @@ close_documents(Store, [Entry | Rest], DefaultDialect, Index0, Loaded, Sources0)
                                         {ok, Index} ->
                                             Pending = referenced_documents(DocumentIndex,
                                                                            Index, Store),
-                                            Sources = add_source(Source, Sources0),
+                                            Sources = add_source(
+                                                        Metaschema,
+                                                        add_source(Source, Sources0)),
                                             close_documents(
-                                              Store, Rest ++ Pending, DefaultDialect,
+                                              Store, Rest ++ Pending, Default,
                                               Index, Loaded#{Key => true}, Sources);
                                         {error, _} = Error ->
                                             Error
@@ -86,11 +93,8 @@ document_parts({inline, Schema}, _Store) ->
 document_parts({document, #document{retrieval = Retrieval,
                                     canonical = Canonical,
                                     json = Schema} = Document}, Store) ->
-    Source = case registered_document(Document, Store) of
-                 true  -> Canonical;
-                 false -> undefined
-             end,
-    {{document, Canonical}, Retrieval, Schema, Canonical, Source}.
+    {{document, Canonical}, Retrieval, Schema, Canonical,
+     source_name(Document, Store)}.
 
 -spec registered_document(#document{}, store()) -> boolean().
 registered_document(#document{retrieval = Retrieval, canonical = Canonical} = Document,
@@ -104,22 +108,104 @@ add_source(undefined, Sources) ->
 add_source(Source, Sources) ->
     ordsets:add_element(Source, Sources).
 
--spec document_dialect(json(), dialect(), rid()) ->
-          {ok, dialect()} | {error, #schema_error{}}.
-document_dialect(#{<<"$schema">> := Dialect}, _DefaultDialect, Resource)
+%% Профиль документа выбирается его собственным `$schema`, а без него — профилем
+%% компиляции. Наружу уходит и канонический URI прочитанной пользовательской
+%% метасхемы: её `$vocabulary` влияет на артефакт, поэтому она обязана попасть в
+%% `sources` (validator-resources-runtime.md, «Транзитивное замыкание»).
+-spec document_profile(json(), profile(), rid(), store()) ->
+          {ok, profile(), uri() | undefined} | {error, #schema_error{}}.
+document_profile(#{<<"$schema">> := Dialect}, #profile{draft = Default},
+                 Resource, Store)
   when is_binary(Dialect) ->
-    case supported_dialect(Dialect) of
-        {ok, _} = Supported -> Supported;
-        {error, #schema_error{reason = Reason}} ->
+    case dialect_profile(Dialect, Store, Default, []) of
+        {ok, _Profile, _Metaschema} = Ok ->
+            Ok;
+        {error, Reason} ->
             {error, #schema_error{reason = Reason,
                                   location = keyword_location(Resource,
                                                               <<"$schema">>)}}
     end;
-document_dialect(#{<<"$schema">> := Other}, _DefaultDialect, Resource) ->
+document_profile(#{<<"$schema">> := Other}, _Default, Resource, _Store) ->
     {error, #schema_error{reason = {bad_keyword_value, Other},
                           location = keyword_location(Resource, <<"$schema">>)}};
-document_dialect(_Schema, DefaultDialect, _Resource) ->
-    {ok, DefaultDialect}.
+document_profile(_Schema, Default, _Resource, _Store) ->
+    {ok, Default, undefined}.
+
+%% Канонический dialect несёт встроенный набор keywords. Всякий другой URI
+%% обязан называть зарегистрированный document: это пользовательская метасхема,
+%% и активные vocabularies объявляет её `$vocabulary`. Draft самой метасхемы
+%% берётся из её `$schema` тем же правилом, поэтому цепочка идёт под guard:
+%% метасхема, зацикленная на себе, dialect не определяет.
+-spec dialect_profile(uri(), store(), dialect(), [uri()]) ->
+          {ok, profile(), uri() | undefined} | {error, reason()}.
+dialect_profile(Dialect, Store, Default, Seen) ->
+    case valid_json_uri:resolve(Dialect, anonymous) of
+        {ok, ?DRAFT_2020_12 = Canonical, root} ->
+            {ok, valid_json_vocabulary:canonical(Canonical), undefined};
+        {ok, ?DRAFT_2019_09 = Canonical, root} ->
+            {ok, valid_json_vocabulary:canonical(Canonical), undefined};
+        {ok, Uri, root} when Uri =/= anonymous ->
+            metaschema_profile(Uri, Store, Default, Seen);
+        _ ->
+            {error, {unknown_dialect, Dialect}}
+    end.
+
+%% Сама метасхема не компилируется: из неё читается один `$vocabulary`. Поэтому
+%% в замыкание она не попадает и её собственные `$ref` здесь не разрешаются —
+%% они понадобятся только проверке схем метасхемой.
+-spec metaschema_profile(uri(), store(), dialect(), [uri()]) ->
+          {ok, profile(), uri() | undefined} | {error, reason()}.
+metaschema_profile(Uri, Store, Default, Seen) ->
+    case lists:member(Uri, Seen) of
+        true ->
+            {error, {unknown_dialect, Uri}};
+        false ->
+            case valid_json_store:fetch(Uri, Store) of
+                undefined ->
+                    {error, {unknown_dialect, Uri}};
+                #document{} = Metaschema ->
+                    metaschema_vocabularies(Uri, Metaschema, Store, Default,
+                                            [Uri | Seen])
+            end
+    end.
+
+-spec metaschema_vocabularies(uri(), #document{}, store(), dialect(), [uri()]) ->
+          {ok, profile(), uri() | undefined} | {error, reason()}.
+metaschema_vocabularies(Uri, #document{json = Json} = Metaschema, Store, Default,
+                        Seen) ->
+    case metaschema_draft(Json, Store, Default, Seen) of
+        {ok, Draft} ->
+            case valid_json_vocabulary:declared(Uri, Json, Draft) of
+                {ok, Profile} -> {ok, Profile, source_name(Metaschema, Store)};
+                {error, _} = Error -> Error
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+%% Draft метасхемы решает, какие URI vocabularies существуют. Метасхема без
+%% `$schema` подчиняется тому же правилу, что и обычный document: её draft
+%% берётся из dialect компиляции по умолчанию.
+-spec metaschema_draft(json(), store(), dialect(), [uri()]) ->
+          {ok, dialect()} | {error, reason()}.
+metaschema_draft(#{<<"$schema">> := Dialect}, Store, Default, Seen)
+  when is_binary(Dialect) ->
+    case dialect_profile(Dialect, Store, Default, Seen) of
+        {ok, #profile{draft = Draft}, _Metaschema} -> {ok, Draft};
+        {error, _} = Error                         -> Error
+    end;
+metaschema_draft(#{<<"$schema">> := Other}, _Store, _Default, _Seen) ->
+    {error, {bad_keyword_value, Other}};
+metaschema_draft(_Json, _Store, Default, _Seen) ->
+    {ok, Default}.
+
+%% Встроенные метасхемы в `sources` не входят: они не меняются никогда.
+-spec source_name(#document{}, store()) -> uri() | undefined.
+source_name(#document{canonical = Canonical} = Document, Store) ->
+    case registered_document(Document, Store) of
+        true  -> Canonical;
+        false -> undefined
+    end.
 
 -spec document_root(json(), rid()) -> rid().
 document_root(#{<<"$id">> := Id}, Retrieval) when is_binary(Id) ->

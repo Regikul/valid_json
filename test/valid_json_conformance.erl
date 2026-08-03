@@ -9,9 +9,6 @@
 
 %% Файл подключается, когда компилируются схемы почти всех его групп; единичные
 %% группы, написанные через keywords следующих фаз, перечислены в ?PENDING.
-%% `ref.json` и `defs.json` подключаются в P6: у обоих есть группа с `$ref` на
-%% корневую метасхему, а она сама компилируется не раньше той фазы, и в
-%% `defs.json` эта группа единственная.
 -define(FILES, ["boolean_schema.json", "type.json", "const.json", "enum.json",
                 "multipleOf.json",
                 "maximum.json", "exclusiveMaximum.json",
@@ -26,6 +23,8 @@
                 "allOf.json", "anyOf.json", "oneOf.json",
                 "if-then-else.json", "dependentSchemas.json",
                 "default.json", "not.json", "format.json",
+                "vocabulary.json",
+                "ref.json", "defs.json",
                 "anchor.json", "refRemote.json", "infinite-loop-detection.json",
                 "unevaluatedProperties.json",
                 "optional/id.json", "optional/unknownKeyword.json"]).
@@ -48,7 +47,9 @@
 %% Группы подключённых files, которые ждут keywords следующих фаз: их схемы пока
 %% не компилируются вовсе. Фаза, снимающая группу, вычёркивает свою строку
 %% вместе с работой — так же, как отмечает выполненный пункт роадмапа.
--define(PENDING, []).
+-define(PENDING,
+        [{"draft2019-09", "ref.json", <<"relative pointer ref to array">>},
+         {"draft2019-09", "ref.json", <<"$ref with $recursiveAnchor">>}]).
 
 %% Объявленные расхождения основного набора: okf/testing/conformance-policy.md,
 %% раздел «Известные расхождения». Группа исключается поимённо, чтобы остальные
@@ -63,7 +64,7 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES и
 %% ?EXCLUDED, и менять его иначе нельзя.
--define(CENSUS, {620, 2185}).
+-define(CENSUS, {697, 2355}).
 
 %% Сьют адресует свои remote documents относительно этого base, повторяя в URI
 %% раскладку директории `remotes`. Число документов закреплено по той же

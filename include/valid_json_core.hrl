@@ -144,6 +144,8 @@
                 | {non_schema_target, addr()}
                 | {unknown_document, uri()}
                 | {unknown_dialect, uri()}
+                | {unrecognized_vocabulary, uri()}
+                | core_vocabulary_missing
                 | {name_taken, uri()}
                 | {bad_keyword_value, json()}
                 | {bad_pattern, term()}

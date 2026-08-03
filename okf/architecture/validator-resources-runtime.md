@@ -241,7 +241,7 @@ Dialect resource выбирается так:
 2. dialect объемлющего resource;
 3. `default_dialect` компиляции, по умолчанию Draft 2020-12.
 
-Для двух канонических dialect URI набор keywords встроен, а сами метасхемы берутся из [встроенной области](#встроенные-метасхемы). Пользовательская метасхема загружается из `store()`, а её `$vocabulary` задаёт активные keywords. Неизвестный vocabulary со значением `true` — ошибка, с `false` — игнорируется; Core обязателен и должен быть `true`. Метасхема без `$vocabulary` требует Core. Сам `$vocabulary` действует только при обработке документа как метасхемы.
+Для двух канонических dialect URI набор keywords встроен, а сами метасхемы берутся из [встроенной области](#встроенные-метасхемы). Пользовательская метасхема загружается из `store()`, а её `$vocabulary` задаёт активные keywords. Неизвестный vocabulary со значением `true` — ошибка, с `false` — игнорируется; Core обязателен и должен быть `true`. Метасхема без `$vocabulary` считается объявившей все vocabularies своего draft: Core этого требует прямо ([core.txt:1306](../references/json-schema/draft-2020-12/core.txt)), а остальные разделы велят считать свой vocabulary объявленным со значением `true`. Draft самой метасхемы выбирается тем же правилом, что и dialect обычного документа, поэтому цепочка метасхем разрешается рекурсивно и под guard: метасхема, зацикленная на себе, dialect не определяет. Сам `$vocabulary` действует только при обработке документа как метасхемы.
 
 Поддерживаемые URI vocabularies:
 
@@ -260,7 +260,9 @@ Dispatcher компилятора — функция `(active vocabularies, keyw
 2019-09; одноимённые deprecated properties корневой метасхемы 2020-12 лишь
 резервируют форму и не дают им recursive-семантики.
 
-`assert_format` меняет IR и потому является compile option. По умолчанию `format` аннотирует. Format-Assertion vocabulary требует проверки независимо от опции; неизвестное имя при ней — compile error, а при опции остаётся annotation-only. Полная таблица format algorithms открыта до P8.
+`assert_format` меняет IR и потому является compile option. По умолчанию `format` аннотирует. Format-Assertion vocabulary требует проверки независимо от опции; неизвестное имя при ней — compile error ([validation.txt:714](../references/json-schema/draft-2020-12/validation.txt)), а при опции остаётся annotation-only. Полная таблица format algorithms открыта до P8, и до неё Format-Assertion не поддержан: метасхема, объявившая его значением `true`, отвергается — спецификация требует именно отказа от реализации без полной проверки. Значение `false` игнорируется, как у любого неподдержанного vocabulary.
+
+Аннотация `format` от объявления vocabulary не зависит. В Draft 2019-09 это требование спецификации: собирать аннотацию нужно независимо от boolean, а в корневой метасхеме он как раз `false` ([validation.txt:601](../references/json-schema/draft-2019-09/validation.txt)). В Draft 2020-12 keyword определяется своей vocabulary, но выключенный `format` попадает в unknown keywords и становится annotation с тем же именем и значением, поэтому наблюдаемый unit тот же.
 
 # Проверка схем и ошибки
 

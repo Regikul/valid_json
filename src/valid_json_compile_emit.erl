@@ -49,8 +49,11 @@
 %% `$dynamicAnchor` перечислен без оговорки о dialect: в Draft 2019-09 такого
 %% keyword нет, но неизвестные keywords он и так игнорирует, поэтому результат
 %% совпадает.
+%% `$vocabulary` действует только при обработке документа как метасхемы
+%% (core.txt:1390): активные vocabularies уже выбраны, а здесь keyword лишь
+%% потребляется.
 -define(CONSUMED, [<<"$schema">>, <<"$id">>, <<"$anchor">>, <<"$defs">>,
-                   <<"definitions">>,
+                   <<"definitions">>, <<"$vocabulary">>,
                    <<"$comment">>, <<"$dynamicAnchor">>]).
 
 %% Стандартные keywords следующих фаз нельзя смешивать с неизвестными
@@ -58,26 +61,26 @@
 %% семантики. Общие отложены для обоих dialects, остальные принадлежат только
 %% указанному dialect и в другом считаются обычными unknown keywords.
 -define(DEFERRED_COMMON,
-        [<<"$vocabulary">>,
-         <<"contentEncoding">>, <<"contentMediaType">>,
+        [<<"contentEncoding">>, <<"contentMediaType">>,
          <<"contentSchema">>]).
 %% Отложенных keywords, принадлежащих только Draft 2020-12, сейчас не осталось.
 -define(DEFERRED_2020_12, []).
 -define(DEFERRED_2019_09,
         [<<"additionalItems">>]).
 
-%% Единственное место, где emitter смотрит на dialect: раскладку array
-%% applicators и покрытие `contains` спецификации задают по-разному.
+%% Активность keyword решают vocabularies профиля; на сам draft emitter смотрит
+%% только там, где спецификации расходятся при одинаковом наборе vocabularies:
+%% раскладка array applicators и покрытие `contains`.
 -type nodes() :: #{pointer() => schema_node()}.
 -type node_sets() :: #{rid() => nodes()}.
 -type position() :: {rid(), [binary()]}.
 
 %% Накопитель emission. Index immutable и нужен только для канонизации дочерних
-%% переходов; в compiled() он не попадает. `dialect` — dialect испускаемого
+%% переходов; в compiled() он не попадает. `profile` — профиль испускаемого
 %% сейчас resource, а полная map нужна при переходе между documents.
 -record(state, {
-    dialect   :: dialect(),
-    dialects  :: #{rid() => dialect()},
+    profile   :: profile(),
+    profiles  :: #{rid() => profile()},
     index     :: valid_json_resource_index:index(),
     resources :: node_sets()
 }).
@@ -90,9 +93,10 @@ emit(Index, Sources) ->
     Root = valid_json_resource_index:root(Index),
     Schemas = valid_json_resource_index:resources(Index),
     Dialects = valid_json_resource_index:dialects(Index),
+    Profiles = valid_json_resource_index:profiles(Index),
     Empty = maps:map(fun(_Rid, _Nodes) -> #{} end, Schemas),
-    State = #state{dialect = maps:get(Root, Dialects),
-                   dialects = Dialects,
+    State = #state{profile = maps:get(Root, Profiles),
+                   profiles = Profiles,
                    index = Index,
                    resources = Empty},
     case emit_resources(Root, Schemas, State) of
@@ -121,8 +125,8 @@ emit_resources(Root, Resources, State) ->
 
 -spec emit_resource(rid(), #{pointer() => json()}, state()) ->
           {ok, state()} | {error, #schema_error{}}.
-emit_resource(Rid, Schemas, #state{dialects = Dialects} = State0) ->
-    State = State0#state{dialect = maps:get(Rid, Dialects)},
+emit_resource(Rid, Schemas, #state{profiles = Profiles} = State0) ->
+    State = State0#state{profile = maps:get(Rid, Profiles)},
     Step = fun(_Pointer, {error, _} = Error) ->
                    Error;
               (Pointer, {ok, Built}) ->
@@ -138,9 +142,9 @@ emit_resource(Rid, Schemas, #state{dialects = Dialects} = State0) ->
           {ok, state()} | {error, #schema_error{}}.
 compile_node(Schema, Position, State) when is_boolean(Schema) ->
     {ok, place(Position, Schema, State)};
-compile_node(Schema, Position, #state{dialect = Dialect} = State)
+compile_node(Schema, Position, #state{profile = Profile} = State)
   when is_map(Schema) ->
-    case extra_constraints(Schema, Dialect, Position) of
+    case extra_constraints(Schema, Profile, Position) of
         {ok, ExtraConstraints} ->
             case definition_containers(Schema, Position, State) of
                 {ok, WithDefinitions} ->
@@ -167,18 +171,19 @@ compile_node(Other, Position, _State) ->
 %% посещал, а emitter лишь сохраняет исходное JSON value как annotation в
 %% 2020-12. В 2019-09 неизвестные keywords не дают IR. Сортировка делает и
 %% annotation order, и выбор первой ошибки независимыми от устройства map.
--spec extra_constraints(#{binary() => json()}, dialect(), position()) ->
+-spec extra_constraints(#{binary() => json()}, profile(), position()) ->
           {ok, [constraint()]} | {error, #schema_error{}}.
-extra_constraints(Schema, Dialect, Position) ->
-    Active = lists:append([active_keywords(Group, Dialect) || Group <- ?ORDER]),
-    Extras = lists:sort(maps:keys(Schema) --
-                        (Active ++ ?UNEVALUATED ++ ?CONSUMED)),
-    case [Keyword || Keyword <- Extras, deferred(Keyword, Dialect)] of
+extra_constraints(Schema, #profile{draft = Draft} = Profile, Position) ->
+    Active = lists:append([active_keywords(Group, Profile) || Group <- ?ORDER]) ++
+        [Keyword || Keyword <- ?UNEVALUATED,
+                    valid_json_vocabulary:active(Keyword, Profile)],
+    Extras = lists:sort(maps:keys(Schema) -- (Active ++ ?CONSUMED)),
+    case [Keyword || Keyword <- Extras, deferred(Keyword, Draft)] of
         [Keyword | _] ->
             {error, schema_error({not_implemented, Keyword},
                                  below(Keyword, Position))};
         [] ->
-            {ok, unknown_constraints(Extras, Schema, Dialect)}
+            {ok, unknown_constraints(Extras, Schema, Draft)}
     end.
 
 -spec deferred(binary(), dialect()) -> boolean().
@@ -270,7 +275,9 @@ node_constraints(Schema, Position, State) ->
 %% `additionalProperties`. Ненаписанный keyword constraint не даёт.
 -spec unevaluated(#{binary() => json()}, position(), state()) ->
           {ok, [constraint()], state()} | {error, #schema_error{}}.
-unevaluated(Schema, Position, State) ->
+unevaluated(Schema, Position, #state{profile = Profile} = State) ->
+    Keywords = [Keyword || Keyword <- ?UNEVALUATED,
+                           valid_json_vocabulary:active(Keyword, Profile)],
     Step = fun(_Keyword, {error, _} = Error) ->
                    Error;
               (Keyword, {ok, Acc, Built}) ->
@@ -286,7 +293,7 @@ unevaluated(Schema, Position, State) ->
                            end
                    end
            end,
-    case lists:foldl(Step, {ok, [], State}, ?UNEVALUATED) of
+    case lists:foldl(Step, {ok, [], State}, Keywords) of
         {ok, Acc, Built}   -> {ok, lists:reverse(Acc), Built};
         {error, _} = Error -> Error
     end.
@@ -306,7 +313,7 @@ constraints(Schema, Position, State) ->
                    Error;
               (Group, {ok, Acc, Built}) ->
                    case lists:any(fun(Keyword) -> is_map_key(Keyword, Schema) end,
-                                  active_keywords(Group, Built#state.dialect)) of
+                                  active_keywords(Group, Built#state.profile)) of
                        false ->
                            {ok, Acc, Built};
                        true ->
@@ -327,21 +334,16 @@ constraints(Schema, Position, State) ->
 keywords(Keyword) when is_binary(Keyword) -> [Keyword];
 keywords(Group)                           -> Group.
 
-%% `prefixItems` появился только в 2020-12. В 2019-09 он неизвестен и потому
-%% не должен ни активировать array constraint, ни влиять на соседний `items`.
--spec active_keywords(binary() | [binary()], dialect()) -> [binary()].
-active_keywords([<<"prefixItems">>, <<"items">>], ?DRAFT_2019_09) ->
-    [<<"items">>];
-%% `$dynamicRef` тоже принадлежит только 2020-12. В 2019-09 он остаётся
-%% неизвестным keyword, а неизвестные этот dialect игнорирует.
-active_keywords(<<"$dynamicRef">>, ?DRAFT_2019_09) ->
-    [];
-%% Recursive keywords заменены dynamic keywords в Draft 2020-12. Корневая
-%% метасхема лишь резервирует deprecated properties; evaluator их не исполняет.
-active_keywords(<<"$recursiveRef">>, ?DRAFT_2020_12) ->
-    [];
-active_keywords(Group, _Dialect) ->
-    keywords(Group).
+%% Keyword выключенной vocabulary не собирает constraint и не влияет на соседей
+%% по составному: он неизвестен и уходит в extra_constraints/3. Так `prefixItems`
+%% не влияет на `items` в Draft 2019-09, `$dynamicRef` не работает там вовсе, а
+%% recursive keywords не работают в Draft 2020-12 — их нет в vocabularies этих
+%% draft. По той же причине `format` остаётся активным в обоих: аннотация
+%% обязательна независимо от объявления vocabulary.
+-spec active_keywords(binary() | [binary()], profile()) -> [binary()].
+active_keywords(Group, Profile) ->
+    [Keyword || Keyword <- keywords(Group),
+                valid_json_vocabulary:active(Keyword, Profile)].
 
 %% Разбор идёт по элементу ?ORDER целиком, а не по написанному подмножеству:
 %% элемент — статический литерал, и по нему видно, какой constraint собирается.
@@ -523,8 +525,8 @@ conditional(Schema, Position, State) ->
 %% Одиночный `items` со schema-значением одинаков в обоих dialects.
 -spec array(#{binary() => json()}, position(), state()) ->
           {ok, constraint(), state()} | {error, #schema_error{}}.
-array(Schema, Position, #state{dialect = Dialect} = State) ->
-    case layout(Dialect, Schema) of
+array(Schema, Position, #state{profile = #profile{draft = Draft}} = State) ->
+    case layout(Draft, Schema) of
         prefix                 -> prefixed(Schema, Position, State);
         single                 -> single(Schema, Position, State);
         {unsupported, Keyword} ->
@@ -571,7 +573,7 @@ single(Schema, Position, State) ->
 %% 2019-09 его аннотация на `unevaluatedItems` не влияет.
 -spec contains(#{binary() => json()}, position(), state()) ->
           {ok, constraint() | none, state()} | {error, #schema_error{}}.
-contains(Schema, Position, #state{dialect = Dialect} = State) ->
+contains(Schema, Position, #state{profile = #profile{draft = Draft}} = State) ->
     Keyword = <<"contains">>,
     case bounds(Schema, Position) of
         {ok, Min, Max} ->
@@ -581,7 +583,7 @@ contains(Schema, Position, #state{dialect = Dialect} = State) ->
                 {ok, Value} ->
                     case subschema(Value, below(Keyword, Position), State) of
                         {ok, Addr, Built} ->
-                            Marks = Dialect =:= ?DRAFT_2020_12,
+                            Marks = Draft =:= ?DRAFT_2020_12,
                             {ok, {contains, Addr, Min, Max, Marks}, Built};
                         {error, _} = Error ->
                             Error

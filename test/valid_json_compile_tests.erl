@@ -1077,6 +1077,121 @@ annotation_order_test() ->
                    {annotation, <<"deprecated">>, true}],
     ?assertEqual({ok, artifact(schema_node(Constraints))}, compile(Schema)).
 
+%% Пользовательская метасхема задаёт активные vocabularies. Keyword выключенной
+%% vocabulary становится неизвестным и в Draft 2020-12 остаётся annotation:
+%% `minimum` больше ничего не проверяет, а applicator продолжает работать.
+vocabulary_disabled_test() ->
+    Meta = <<"https://example.com/meta/no-validation">>,
+    Store = metaschema_store(Meta, [<<"core">>, <<"applicator">>]),
+    Schema = #{<<"$schema">> => Meta,
+               <<"properties">> => #{<<"a">> => #{<<"minimum">> => 10}},
+               <<"minimum">> => 5},
+    {ok, Compiled} = valid_json_compile:compile(Store, Schema, []),
+    #{resources := #{anonymous := #resource{dialect = Dialect, nodes = Nodes}},
+      sources := Sources} = Compiled,
+    %% Dialect артефакта называет то, что написано в `$schema`, а метасхема
+    %% входит в sources: её `$vocabulary` влияет на результат компиляции.
+    ?assertEqual(Meta, Dialect),
+    ?assertEqual([Meta], Sources),
+    ?assertEqual([{properties, #{<<"a">> => addr(<<"/properties/a">>)},
+                   undefined, undefined},
+                  {annotation, <<"minimum">>, 5}],
+                 constraints(<<>>, Nodes)),
+    ?assertEqual([{annotation, <<"minimum">>, 10}],
+                 constraints(<<"/properties/a">>, Nodes)).
+
+%% Выключенный applicator перестаёт быть schema position: внутрь его значения
+%% компилятор не спускается, поэтому написанный там `$id` resource не объявляет.
+vocabulary_disabled_applicator_test() ->
+    Meta = <<"https://example.com/meta/core-only">>,
+    Store = metaschema_store(Meta, [<<"core">>]),
+    Inner = <<"https://example.com/inner">>,
+    Properties = #{<<"a">> => #{<<"$id">> => Inner, <<"type">> => <<"string">>}},
+    Schema = #{<<"$schema">> => Meta, <<"properties">> => Properties},
+    {ok, #{resources := Resources}} =
+        valid_json_compile:compile(Store, Schema, []),
+    ?assertEqual([anonymous], maps:keys(Resources)),
+    #resource{nodes = Nodes} = maps:get(anonymous, Resources),
+    ?assertEqual([<<>>], maps:keys(Nodes)),
+    ?assertEqual([{annotation, <<"properties">>, Properties}],
+                 constraints(<<>>, Nodes)).
+
+%% Неизвестный vocabulary со значением `true` останавливает компиляцию: схема
+%% написана на языке, которого реализация не знает. Со значением `false` он
+%% необязателен и просто игнорируется.
+vocabulary_unrecognized_test_() ->
+    Custom = <<"https://example.com/vocab/custom">>,
+    Required = <<"https://example.com/meta/required-custom">>,
+    Optional = <<"https://example.com/meta/optional-custom">>,
+    Declared = fun(Value) ->
+                       #{vocab(<<"core">>) => true,
+                         vocab(<<"validation">>) => true,
+                         Custom => Value}
+               end,
+    {ok, _, Store} =
+        valid_json_store:add(
+          valid_json_store:new([]),
+          [{Required, metaschema(Required, Declared(true))},
+           {Optional, metaschema(Optional, Declared(false))}]),
+    Compile = fun(Meta) ->
+                      valid_json_compile:compile(
+                        Store, #{<<"$schema">> => Meta,
+                                 <<"type">> => <<"number">>}, [])
+              end,
+    Assertion = <<"https://example.com/meta/format-assertion">>,
+    {ok, Assertion, WithAssertion} =
+        valid_json_store:add(
+          valid_json_store:new([]), Assertion,
+          metaschema(Assertion, #{vocab(<<"core">>) => true,
+                                  vocab(<<"format-assertion">>) => true})),
+    [?_assertEqual({error, #schema_error{reason = {unrecognized_vocabulary, Custom},
+                                         location = {anonymous, <<"/$schema">>}}},
+                   Compile(Required)),
+     ?_assertMatch({ok, #{resources := #{anonymous := #resource{}}}},
+                   Compile(Optional)),
+     %% Format-Assertion до P8 не поддержан, и объявившая его метасхема обязана
+     %% быть отвергнута: реализация без полной проверки форматов не имеет права
+     %% молча аннотировать вместо assertion.
+     ?_assertEqual({error, #schema_error{
+                              reason = {unrecognized_vocabulary,
+                                        vocab(<<"format-assertion">>)},
+                              location = {anonymous, <<"/$schema">>}}},
+                   valid_json_compile:compile(
+                     WithAssertion, #{<<"$schema">> => Assertion,
+                                      <<"format">> => <<"email">>}, []))].
+
+%% Core обязателен и должен быть объявлен значением `true`: без него нечем
+%% обрабатывать даже сам `$schema`.
+vocabulary_core_test_() ->
+    Missing = <<"https://example.com/meta/no-core">>,
+    Disabled = <<"https://example.com/meta/core-false">>,
+    Unknown = <<"https://example.com/meta/unregistered">>,
+    {ok, _, Store} =
+        valid_json_store:add(
+          valid_json_store:new([]),
+          [{Missing, metaschema(Missing, #{vocab(<<"validation">>) => true})},
+           {Disabled, metaschema(Disabled, #{vocab(<<"core">>) => false})}]),
+    Compile = fun(Meta) ->
+                      valid_json_compile:compile(Store, #{<<"$schema">> => Meta}, [])
+              end,
+    Error = fun(Reason) ->
+                    {error, #schema_error{reason = Reason,
+                                          location = {anonymous, <<"/$schema">>}}}
+            end,
+    [?_assertEqual(Error(core_vocabulary_missing), Compile(Missing)),
+     ?_assertEqual(Error(core_vocabulary_missing), Compile(Disabled)),
+     %% Незарегистрированная метасхема неотличима от неизвестного dialect:
+     %% прочитать её объявление неоткуда.
+     ?_assertEqual(Error({unknown_dialect, Unknown}), Compile(Unknown))].
+
+%% Вне обработки документа как метасхемы `$vocabulary` не значит ничего: он
+%% потребляется компилятором и собственного constraint не даёт.
+vocabulary_consumed_test() ->
+    Schema = #{<<"$vocabulary">> => #{vocab(<<"core">>) => true},
+               <<"type">> => <<"integer">>},
+    ?assertEqual({ok, artifact(schema_node([{type, [integer]}]))},
+                 compile(Schema)).
+
 %% Настоящее расширение становится annotation только в 2020-12. Его значение
 %% остаётся непрозрачными данными: вложенные объекты не становятся nodes.
 unknown_keyword_test_() ->
@@ -1114,9 +1229,9 @@ unknown_keyword_is_not_schema_position_test() ->
 %% Ещё не реализованный keyword обязан останавливать компиляцию, а не молча
 %% исчезать: иначе преждевременно подключённый файл сьюта пройдёт по недоразумению.
 not_implemented_test_() ->
-    [?_assertEqual(schema_error({not_implemented, <<"$vocabulary">>},
-                                <<"/$vocabulary">>),
-                   compile(#{<<"$vocabulary">> => #{}})),
+    [?_assertEqual(schema_error({not_implemented, <<"contentEncoding">>},
+                                <<"/contentEncoding">>),
+                   compile(#{<<"contentEncoding">> => <<"base64">>})),
      %% Keyword другого dialect — действительно unknown.
      ?_assertEqual({ok, artifact(schema_node(
                                    [{annotation, <<"additionalItems">>, false}]))},
@@ -1136,6 +1251,25 @@ not_a_schema_test_() ->
 
 compile(Schema) ->
     valid_json_compile:compile(Schema, ?DIALECT).
+
+%% Пользовательская метасхема — обычный документ реестра: компилятор читает из
+%% неё только `$vocabulary`, а её собственный dialect выбирает набор URI.
+metaschema(Uri, Declared) ->
+    #{<<"$id">> => Uri, <<"$schema">> => ?DIALECT, <<"$vocabulary">> => Declared}.
+
+metaschema_store(Uri, Names) ->
+    Declared = maps:from_list([{vocab(Name), true} || Name <- Names]),
+    {ok, Uri, Store} =
+        valid_json_store:add(valid_json_store:new([]), Uri,
+                             metaschema(Uri, Declared)),
+    Store.
+
+vocab(Name) ->
+    <<"https://json-schema.org/draft/2020-12/vocab/", Name/binary>>.
+
+constraints(Pointer, Nodes) ->
+    #node{constraints = Constraints} = maps:get(Pointer, Nodes),
+    Constraints.
 
 %% Тот же вход с другим dialect: раскладку array applicators выбирает компилятор,
 %% и это единственное место, где она видна.

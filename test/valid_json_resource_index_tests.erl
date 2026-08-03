@@ -347,8 +347,11 @@ retrieval_error_test() ->
 discover(Schema, Retrieval) ->
     discover(Schema, Retrieval, ?DIALECT).
 
+%% Тесты этой границы называют dialect, а профиль строится по встроенной
+%% таблице: собственные vocabulary-tests лежат рядом с их разбором.
 discover(Schema, Retrieval, Dialect) ->
-    valid_json_resource_index:discover(Schema, Retrieval, Dialect).
+    valid_json_resource_index:discover(Schema, Retrieval,
+                                       valid_json_vocabulary:canonical(Dialect)).
 
 resolve_ref(Index, Base, Reference) ->
     {ok, ResolvedBase, Target} = valid_json_uri:resolve(Reference, Base),

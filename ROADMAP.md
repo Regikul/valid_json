@@ -268,15 +268,21 @@
   только в Draft 2019-09.
 - [x] Решить судьбу некорневого `$recursiveAnchor`: принимать boolean-значение
   без эффекта; подсхема с `$id` уже считается корнем отдельного resource.
-- [ ] Реализовать разбор `$vocabulary` и включение keywords по активным
-  vocabularies; подключить к runner `vocabulary.json` обоих dialects.
+- [x] Реализовать разбор `$vocabulary` и включение keywords по активным
+  vocabularies; подключить к runner `vocabulary.json` обоих dialects. Профиль
+  компиляции несёт dialect и активные vocabularies: канонические dialect берут
+  встроенный набор, пользовательская метасхема читается из `store()` и входит в
+  `sources`. Keyword выключенной vocabulary становится неизвестным, и обход
+  внутрь его значения прекращается.
 - [x] Реализовать `format` как чистую annotation: в обоих dialects это поведение
   по умолчанию, и без него не компилируется ни одна корневая метасхема.
   Объявленный в корневой метасхеме Draft 2019-09 `false` относится только к
   assertion, поэтому аннотация собирается и там. Подключён обязательный
   `format.json` обоих dialects. Выбор между annotation и assertion по vocabulary
   и compile options остаётся в P8.
-- [ ] Реализовать array-form `items` и `additionalItems` Draft 2019-09.
+- [ ] Реализовать array-form `items` и `additionalItems` Draft 2019-09; здесь
+  же принять отложенные группы `relative pointer ref to array` и
+  `$ref with $recursiveAnchor` из `ref.json` Draft 2019-09.
 - [x] Реализовать `$recursiveAnchor` и `$recursiveRef` отдельным IR и правилом
   разрешения: корневой флаг resource и лексическая цель строятся compiler'ом,
   evaluator выбирает самый внешний помеченный resource, а обязательный
@@ -293,16 +299,19 @@
   и recursive keywords.
 - [~] Добавить compiler fixtures для vocabulary errors, recursive scope и
   cross-draft closure: recursive scope покрыт точными resource-index, compiler
-  и evaluator fixtures; остались vocabulary errors и cross-draft closure.
+  и evaluator fixtures, vocabulary errors — fixtures на неизвестный vocabulary,
+  отсутствующий Core и незарегистрированную метасхему; остался cross-draft
+  closure.
 - [ ] Подключить к runner `uniqueItems.json` и `items.json` Draft 2019-09: обе
   раскладки опираются на array-form `items` и `additionalItems`.
 - [~] Подключить к runner `unevaluatedItems.json` Draft 2019-09 целиком и
   группу `unevaluatedProperties with $recursiveRef`: recursive-группа
   `unevaluatedProperties` подключена и проходит; `unevaluatedItems.json`
   остаётся до array-form `items` с `additionalItems`.
-- [ ] Подключить к runner `ref.json` и `defs.json` обоих dialects: у каждого
+- [x] Подключить к runner `ref.json` и `defs.json` обоих dialects: у каждого
   есть группа с `$ref` на корневую метасхему, и она ждала, пока та станет
-  компилируемой.
+  компилируемой. Обе корневые метасхемы теперь компилируются целиком; две
+  группы `ref.json` Draft 2019-09 остались до array-form `items`.
 - [ ] Приёмка P6: проходят обязательные files Draft 2019-09 и выбранные
   `optional/cross-draft`, compatibility и recursive cases.
 
@@ -333,7 +342,9 @@
 - [ ] Зафиксировать таблицу: format name, dialect, annotation/assertion,
   алгоритм и ограничения.
 - [ ] Реализовать выбор между annotation и assertion для `format` по активным
-  vocabularies и compile options: сама annotation сделана в P6.
+  vocabularies и compile options: сама annotation сделана в P6. До этой фазы
+  Format-Assertion vocabulary не поддержан, и метасхема, объявившая его
+  значением `true`, отвергается; здесь имя вносится в таблицу vocabularies.
 - [ ] Реализовать выбранную обработку `contentEncoding`, `contentMediaType` и
   `contentSchema`, сохранив обязательные annotations.
 - [ ] Явно выбрать остальные optional profiles, поддерживаемые библиотекой.
