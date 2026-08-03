@@ -11,6 +11,8 @@ project(flag, #eval_result{valid = Valid}) ->
     #{<<"valid">> => Valid};
 project(basic, #eval_result{units = [Root]}) ->
     basic(Root);
+project(detailed, #eval_result{units = [Root]}) ->
+    detailed(Root);
 project(verbose, #eval_result{units = [Root]}) ->
     verbose(Root).
 
@@ -47,6 +49,63 @@ descend(Valid, Unit)                       -> flatten(Valid, Unit).
 carries(false, #output_unit{detail = {error, _}})     -> true;
 carries(true, #output_unit{detail = {annotation, _}}) -> true;
 carries(_Valid, #output_unit{})                       -> false.
+
+%% detailed выбирает из diagnostic tree только ошибки провалившегося корня
+%% либо effective annotations успешного. Затем применяются нормативные правила:
+%% пустой silent unit удаляется, unit с одним значимым потомком заменяется этим
+%% потомком, а развилка остаётся branch node без обязательного local detail.
+-spec detailed(#output_unit{}) -> output().
+detailed(#output_unit{valid = Valid} = Root) ->
+    Mode = mode(Valid),
+    Nested = prune_children(Mode, Root),
+    Detail = selected_detail(Mode, Root#output_unit.detail, Nested),
+    tree(Root#output_unit{detail = Detail, nested = Nested}).
+
+-spec mode(boolean()) -> error | annotation.
+mode(false) -> error;
+mode(true)  -> annotation.
+
+-spec prune_children(error | annotation, #output_unit{}) -> [#output_unit{}].
+prune_children(Mode, #output_unit{nested = Nested}) ->
+    lists:append([prune(Mode, Unit) || Unit <- Nested]).
+
+%% Detailed сохраняет только ветви, чей verdict совпадает с корнем. Поэтому
+%% failed branch успешного applicator'а не выглядит ошибкой общего результата,
+%% а successful branch провалившегося applicator'а не раздувает errors.
+-spec prune(error | annotation, #output_unit{}) -> [#output_unit{}].
+prune(error, #output_unit{valid = true}) ->
+    [];
+prune(annotation, #output_unit{valid = false}) ->
+    [];
+prune(Mode, Unit) ->
+    Nested = prune_children(Mode, Unit),
+    Detail = selected_detail(Mode, Unit#output_unit.detail, Nested),
+    compact(Unit#output_unit{detail = Detail, nested = Nested}).
+
+%% Error applicator'а — общий итог ветвления. Когда дочерние причины уже есть,
+%% branch не повторяет generic message; если после фильтрации детей нет (`not`),
+%% собственная ошибка остаётся leaf. Annotation является самостоятельным
+%% результатом keyword и сохраняется рядом с nested annotations.
+-spec selected_detail(error | annotation, detail(), [#output_unit{}]) -> detail().
+selected_detail(error, {error, _} = Detail, []) -> Detail;
+selected_detail(annotation, {annotation, _} = Detail, _Nested) -> Detail;
+selected_detail(_Mode, _Detail, _Nested) -> none.
+
+-spec compact(#output_unit{}) -> [#output_unit{}].
+compact(#output_unit{detail = none, nested = []}) ->
+    [];
+compact(#output_unit{detail = none, nested = [Only]}) ->
+    [Only];
+compact(Unit) ->
+    [Unit].
+
+%% В отличие от verbose, detailed tree уже полностью отфильтровано и сжато:
+%% renderer не применяет к нему дополнительных правил видимости.
+-spec tree(#output_unit{}) -> output().
+tree(#output_unit{nested = []} = Unit) ->
+    unit(Unit);
+tree(#output_unit{valid = Valid, nested = Nested} = Unit) ->
+    (unit(Unit))#{key(Valid) => [tree(Child) || Child <- Nested]}.
 
 %% verbose сохраняет все keyword results и значимые границы подсхем. Schema
 %% unit, стоящий на той же позиции, что применивший его keyword, является

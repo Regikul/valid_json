@@ -88,6 +88,110 @@ annotation_order_test_() ->
      || {Tag, Dialect} <- ?DRAFTS,
         Id <- [id(Tag, <<"annotation-order">>)]].
 
+%% Нормативная polygon-форма: silent successes и успешный первый item удалены,
+%% цепочка items/source-ref свёрнута, а canonical target сохраняет развилку
+%% required/additionalProperties. Порядок соответствует статическому emitter.
+detailed_normative_test_() ->
+    Point = #{<<"type">> => <<"object">>,
+              <<"properties">> =>
+                  #{<<"x">> => #{<<"type">> => <<"number">>},
+                    <<"y">> => #{<<"type">> => <<"number">>}},
+              <<"additionalProperties">> => false,
+              <<"required">> => [<<"x">>, <<"y">>]},
+    Instance = [#{<<"x">> => 2.5, <<"y">> => 1.3},
+                #{<<"x">> => 1, <<"z">> => 6.7}],
+    [?_test(
+        begin
+            Target = nested_vunit(
+                       false, <<"/items/$ref">>,
+                       <<Id/binary, "#/$defs/point">>, <<"/1">>,
+                       none, none,
+                       [detail_vunit(
+                          false, <<"/items/$ref/required">>,
+                          <<Id/binary, "#/$defs/point/required">>, <<"/1">>,
+                          <<"error">>,
+                          <<"object is missing required property \"y\"">>),
+                        detail_vunit(
+                          false, <<"/items/$ref/additionalProperties">>,
+                          <<Id/binary, "#/$defs/point/additionalProperties">>,
+                          <<"/1/z">>, <<"error">>, <<"schema is false">>)]),
+            Expected = root(
+                         false, Id, <<"errors">>,
+                         [detail_vunit(false, <<"/minItems">>,
+                                       <<Id/binary, "#/minItems">>, <<>>,
+                                       <<"error">>,
+                                       <<"array has fewer than 3 items">>),
+                          Target]),
+            Schema = schema(
+                       Dialect, Id,
+                       #{<<"$defs">> => #{<<"point">> => Point},
+                         <<"type">> => <<"array">>,
+                         <<"items">> => #{<<"$ref">> => <<"#/$defs/point">>},
+                         <<"minItems">> => 3}),
+            assert_detailed(Dialect, Expected, Schema, Instance)
+        end)
+     || {Tag, Dialect} <- ?DRAFTS,
+        Id <- [id(Tag, <<"detailed-normative">>)]].
+
+%% Local effective annotation не теряется при наличии nested annotation;
+%% промежуточная schema с единственным child схлопывается.
+detailed_annotation_test_() ->
+    [?_test(
+        begin
+            Properties = nested_vunit(
+                           true, <<"/properties">>,
+                           <<Id/binary, "#/properties">>, <<>>,
+                           <<"annotation">>, [<<"a">>],
+                           [detail_vunit(
+                              true, <<"/properties/a/description">>,
+                              <<Id/binary, "#/properties/a/description">>,
+                              <<"/a">>, <<"annotation">>, <<"child">>)]),
+            Expected = root(
+                         true, Id, <<"annotations">>,
+                         [Properties,
+                          detail_vunit(true, <<"/title">>,
+                                       <<Id/binary, "#/title">>, <<>>,
+                                       <<"annotation">>, <<"root">>)]),
+            Schema = schema(
+                       Dialect, Id,
+                       #{<<"properties">> =>
+                             #{<<"a">> => #{<<"description">> => <<"child">>}},
+                         <<"title">> => <<"root">>}),
+            assert_detailed(Dialect, Expected, Schema, #{<<"a">> => 1})
+        end)
+     || {Tag, Dialect} <- ?DRAFTS,
+        Id <- [id(Tag, <<"detailed-annotations">>)]].
+
+%% No-op и diagnostic annotation failed anyOf branch не являются effective
+%% detailed results; успешный root остаётся без пустого annotations array.
+detailed_empty_test_() ->
+    Failed = #{<<"title">> => <<"dropped">>, <<"type">> => <<"string">>},
+    [?_test(
+        assert_detailed(
+          Dialect, plain_root(true, Id),
+          schema(Dialect, Id,
+                 #{<<"minLength">> => 2,
+                   <<"anyOf">> => [Failed, true]}),
+          #{<<"a">> => 1}))
+     || {Tag, Dialect} <- ?DRAFTS,
+        Id <- [id(Tag, <<"detailed-empty">>)]].
+
+%% Failed `not` отбрасывает successful inner results и остаётся leaf со своей
+%% локальной ошибкой.
+detailed_not_test_() ->
+    [?_test(
+        assert_detailed(
+          Dialect,
+          root(false, Id, <<"errors">>,
+               [detail_vunit(false, <<"/not">>, <<Id/binary, "#/not">>, <<>>,
+                             <<"error">>, <<"value matches the subschema">>)]),
+          schema(Dialect, Id,
+                 #{<<"not">> => #{<<"type">> => <<"integer">>,
+                                    <<"title">> => <<"inside">>}}),
+          1))
+     || {Tag, Dialect} <- ?DRAFTS,
+        Id <- [id(Tag, <<"detailed-not">>)]].
+
 %% Короткий normative verbose example: silent successful assertion виден,
 %% successful boolean под properties не создаёт служебный уровень, а локальная
 %% ошибка applicator сосуществует с ошибкой применённой boolean-схемы.
@@ -223,11 +327,17 @@ basic(Schema, Instance) ->
                                    [{default_dialect, Dialect}]),
     valid_json:validate(Artifact, Instance, [{output, basic}]).
 
-assert_verbose(Dialect, {ok, Expected}, Schema, Instance) ->
+assert_detailed(Dialect, Expected, Schema, Instance) ->
+    assert_structured(detailed, Dialect, Expected, Schema, Instance).
+
+assert_verbose(Dialect, Expected, Schema, Instance) ->
+    assert_structured(verbose, Dialect, Expected, Schema, Instance).
+
+assert_structured(Format, Dialect, {ok, Expected}, Schema, Instance) ->
     {ok, Artifact} =
         valid_json_compile:compile(valid_json_store:new([]), Schema,
                                    [{default_dialect, Dialect}]),
-    {ok, Actual} = valid_json:validate(Artifact, Instance, [{output, verbose}]),
+    {ok, Actual} = valid_json:validate(Artifact, Instance, [{output, Format}]),
     ?assertEqual(Expected, Actual),
     assert_output_schema(Dialect, Actual).
 
@@ -250,6 +360,9 @@ root(Valid, Id, Key, Nested) ->
            <<"absoluteKeywordLocation">>  => <<Id/binary, "#">>,
            <<"instanceLocation">>         => <<>>,
            Key                             => Nested}}.
+
+plain_root(Valid, Id) ->
+    {ok, vunit(Valid, <<>>, <<Id/binary, "#">>, <<>>)}.
 
 unit(Valid, Keyword, Absolute, DetailKey, Detail) ->
     #{<<"valid">>                    => Valid,

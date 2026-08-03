@@ -337,7 +337,7 @@
 
 ## P7 — стандартные output formats
 
-- [ ] **Фаза P7 завершена**
+- [x] **Фаза P7 завершена**
 - [x] Зафиксировать представление `instanceLocation` Draft 2019-09: выбран
   обычный JSON Pointer из закреплённых fixtures и output schema; URI-fragment
   form из prose не образует отдельный compatibility profile.
@@ -349,7 +349,10 @@
 - [x] Реализовать полную плоскую проекцию `basic` из общего дерева units:
   проекция подтверждена всеми восемью официальными output cases и собственными
   end-to-end golden tests.
-- [ ] Реализовать минимальную значимую иерархию `detailed`.
+- [x] Реализовать минимальную значимую иерархию `detailed`: проекция оставляет
+  только результаты с валидностью корня, удаляет пустые silent units,
+  схлопывает silent цепочки с единственным потомком и сохраняет значимые
+  разветвления; структура подтверждена golden/structure tests обоих dialects.
 - [x] Реализовать полную иерархию `verbose`, включая успехи и отброшенные
   annotations: проекция сохраняет silent/no-op keywords, значимые границы
   branches, source/target уровни references и compile-time marker `$defs`;
@@ -358,18 +361,19 @@
   evaluator: emitter задаёт статический keyword order, map-driven обходы
   сортируют ключи, а точный порядок ошибок и аннотаций закреплён golden tests
   обоих dialects.
-- [~] Валидировать фактический output соответствующей output schema: общий
-  механизм runner проверяет `basic`, а каждый собственный `verbose` golden
-  валидируется canonical output schema своего dialect; остаётся `detailed`.
-- [~] Добавить golden/structure tests для `flag`, `basic`, `detailed`,
-  `verbose`, `$ref`, no-op keywords и отброшенных annotations: закрыты `flag`,
-  `basic`, `verbose`, `$ref`, no-op, effective отбрасывание и diagnostic
-  сохранение annotations; остаётся структура `detailed`.
+- [x] Валидировать фактический output соответствующей output schema: общий
+  механизм runner проверяет `basic`, а каждый собственный `detailed` и
+  `verbose` golden валидируется canonical output schema своего dialect.
+- [x] Добавить golden/structure tests для `flag`, `basic`, `detailed`,
+  `verbose`, `$ref`, no-op keywords и отброшенных annotations: покрыты все
+  четыре формата, reference chains, silent/no-op units, effective отбрасывание
+  и diagnostic сохранение annotations.
 - [x] Подключить официальные output tests обоих dialects: отдельный runner
   выполняет восемь закреплённых `basic` cases, валидирует каждый фактический
   output схемой case и защищён census `{8, 8, 8}`.
-- [ ] Приёмка P7: проходят все официальные output cases и собственные golden
-  tests четырёх заявленных форматов.
+- [x] Приёмка P7: проходят все восемь официальных output cases и собственные
+  golden tests четырёх заявленных форматов; полный EUnit-прогон содержит 3627
+  тестов и проходит без провалов.
 
 ## P8 — format, content и optional profiles
 

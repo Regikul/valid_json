@@ -115,6 +115,83 @@ basic_depth_test_() ->
                   [{maps:get(<<"keywordLocation">>, Unit),
                     maps:get(<<"instanceLocation">>, Unit)} || Unit <- Printed]).
 
+%% detailed удаляет silent successes, подавляет generic branch errors при
+%% наличии дочерних причин и сворачивает цепочки с одним результатом. Target
+%% schema `$ref` остаётся, потому что объединяет две независимые ошибки.
+detailed_error_test_() ->
+    Required = unit(false, [<<"required">>, <<"$ref">>, <<"items">>],
+                    {error, <<"required property is missing">>}, [<<"1">>], []),
+    Boolean = branch(false,
+                     [<<"additionalProperties">>, <<"$ref">>, <<"items">>],
+                     [<<"z">>, <<"1">>], {error, <<"schema is false">>}, []),
+    Additional = unit(false,
+                      [<<"additionalProperties">>, <<"$ref">>, <<"items">>],
+                      {error, <<"additional properties failed">>},
+                      [<<"1">>], [Boolean]),
+    Target = branch(false, [<<"$ref">>, <<"items">>], [<<"1">>], none,
+                    [Required, Additional]),
+    Ref = unit(false, [<<"$ref">>, <<"items">>], none, [<<"1">>], [Target]),
+    Applied = branch(false, [<<"items">>], [<<"1">>], none, [Ref]),
+    Items = unit(false, [<<"items">>], {error, <<"items failed">>}, [], [Applied]),
+    MinItems = unit(false, [<<"minItems">>],
+                    {error, <<"too few items">>}, [], []),
+    Silent = unit(true, [<<"type">>], none),
+    #{<<"errors">> := [PrintedTarget, PrintedMin]} =
+        project(detailed, root(false, [Silent, Items, MinItems])),
+    [?_assertMatch(
+        #{<<"keywordLocation">> := <<"/items/$ref">>,
+          <<"instanceLocation">> := <<"/1">>,
+          <<"errors">> :=
+              [#{<<"keywordLocation">> := <<"/items/$ref/required">>},
+               #{<<"keywordLocation">> :=
+                     <<"/items/$ref/additionalProperties">>,
+                 <<"instanceLocation">> := <<"/1/z">>}]},
+        PrintedTarget),
+     ?_assertMatch(#{<<"keywordLocation">> := <<"/minItems">>,
+                     <<"error">> := <<"too few items">>}, PrintedMin)].
+
+%% Effective annotation остаётся локальным результатом keyword и может стоять
+%% рядом с nested annotations. Провалившаяся соседняя ветвь удаляется целиком.
+detailed_annotation_test_() ->
+    ChildTitle = unit(true, [<<"title">>, <<"a">>, <<"properties">>],
+                      {annotation, <<"child">>}, [<<"a">>], []),
+    Child = branch(true, [<<"a">>, <<"properties">>], [<<"a">>], none,
+                   [ChildTitle]),
+    Properties = unit(true, [<<"properties">>], {annotation, [<<"a">>]},
+                      [], [Child]),
+    Dropped = branch(false, [<<"0">>, <<"anyOf">>], [], none,
+                     [unit(true, [<<"title">>, <<"0">>, <<"anyOf">>],
+                           {annotation, <<"dropped">>}, [], [])]),
+    AnyOf = unit(true, [<<"anyOf">>], none, [], [Dropped]),
+    RootTitle = unit(true, [<<"title">>], {annotation, <<"root">>}),
+    #{<<"annotations">> := [PrintedProperties, PrintedTitle]} =
+        project(detailed, root(true, [Properties, AnyOf, RootTitle])),
+    [?_assertMatch(
+        #{<<"keywordLocation">> := <<"/properties">>,
+          <<"annotation">> := [<<"a">>],
+          <<"annotations">> :=
+              [#{<<"keywordLocation">> := <<"/properties/a/title">>,
+                 <<"annotation">> := <<"child">>}]},
+        PrintedProperties),
+     ?_assertMatch(#{<<"keywordLocation">> := <<"/title">>,
+                     <<"annotation">> := <<"root">>}, PrintedTitle)].
+
+%% No-op не является значимым detailed result. У failed `not` успешная
+%% внутренняя schema удаляется, поэтому собственная ошибка keyword остаётся leaf.
+detailed_leaf_test_() ->
+    NoOp = unit(true, [<<"minLength">>], none),
+    Inner = branch(true, [<<"not">>], [], none,
+                   [unit(true, [<<"title">>, <<"not">>],
+                         {annotation, <<"inside">>}, [], [])]),
+    Not = unit(false, [<<"not">>], {error, <<"value matches">>}, [], [Inner]),
+    [?_assertEqual(printed(true, <<>>, <<>>),
+                   project(detailed, root(true, [NoOp]))),
+     ?_assertEqual(
+        projected(false, <<"errors">>,
+                  [(printed(false, <<"/not">>, <<>>))#{
+                     <<"error">> => <<"value matches">>}]),
+        project(detailed, root(false, [Not])))].
+
 %% verbose оставляет все keyword results, включая silent success, а имя
 %% вложенной коллекции выбирает по валидности родителя. Локальная ошибка
 %% applicator стоит рядом с его дочерними errors.
