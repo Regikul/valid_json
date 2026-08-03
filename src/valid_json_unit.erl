@@ -19,32 +19,32 @@ keyword(Keyword, Valid, Detail, Context) ->
 -spec keyword(binary(), boolean(), detail(), [#output_unit{}], #eval_context{}) ->
           #output_unit{}.
 keyword(Keyword, Valid, Detail, Nested, #eval_context{keyword_location = Location} = Context) ->
-    build(Valid, [Keyword | Location], [Keyword], Detail, Nested, Context).
+    build(keyword, Valid, [Keyword | Location], [Keyword], Detail, Nested, Context).
 
-%% Reference — applicator с особой absolute location: keywordLocation называет
-%% написанный keyword, будь то `/$ref` или `/$dynamicRef`, а
-%% absoluteKeywordLocation называет уже применённую target schema, без
-%% синтетического сегмента самого keyword.
+%% Reference хранит два уровня. Собственный unit называет написанный keyword и
+%% его physical absolute location; вложенный schema unit уже называет
+%% каноническую target schema. Так эти уровни показаны в normative verbose
+%% example, и проекция может не смешивать source с dereferenced target.
 -spec reference(binary(), addr(), boolean(), [#output_unit{}], #eval_context{}) ->
           #output_unit{}.
-reference(Keyword, Addr, Valid, Nested,
+reference(Keyword, _Addr, Valid, Nested,
           #eval_context{keyword_location = Location} = Context) ->
-    Target = Context#eval_context{node = Addr},
-    build(Valid, [Keyword | Location], [], none, Nested, Target).
+    build(keyword, Valid, [Keyword | Location], [Keyword], none, Nested, Context).
 
 %% Unit самого node: своего сегмента у него нет, он стоит там же, где схема, и
 %% держит внутри units своих keywords.
 -spec schema(boolean(), detail(), [#output_unit{}], #eval_context{}) -> #output_unit{}.
 schema(Valid, Detail, Nested, #eval_context{keyword_location = Location} = Context) ->
-    build(Valid, Location, [], Detail, Nested, Context).
+    build(schema, Valid, Location, [], Detail, Nested, Context).
 
 %% keyword location накапливается обходом, абсолютная выводится из адреса node:
 %% путь внутри resource уже лежит в pointer, и к нему дописывается имя keyword.
--spec build(boolean(), [binary()], [binary()], detail(), [#output_unit{}],
+-spec build(unit_kind(), boolean(), [binary()], [binary()], detail(), [#output_unit{}],
             #eval_context{}) -> #output_unit{}.
-build(Valid, Location, Tail, Detail, Nested,
+build(Kind, Valid, Location, Tail, Detail, Nested,
       #eval_context{instance_location = Instance} = Context) ->
-    #output_unit{valid             = Valid,
+    #output_unit{kind              = Kind,
+                 valid             = Valid,
                  keyword_location  = Location,
                  absolute_location = absolute(Tail, Context),
                  instance_location = Instance,

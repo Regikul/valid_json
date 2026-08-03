@@ -152,6 +152,8 @@ dispatch({dynamic_ref, Name, Lexical}, Instance, Context) ->
 dispatch({recursive_ref, Lexical}, Instance, Context) ->
     reference(<<"$recursiveRef">>, recursive_target(Lexical, Context),
               Instance, Context);
+dispatch({marker, Keyword}, _Instance, Context) ->
+    marker(Keyword, Context);
 dispatch({items, _} = Constraint, Instance, Context) ->
     valid_json_array:check(Constraint, Instance, Context);
 dispatch({prefix_items, _, _} = Constraint, Instance, Context) ->
@@ -170,6 +172,17 @@ dispatch({format, _, _} = Constraint, Instance, Context) ->
     valid_json_annotate:check(Constraint, Instance, Context);
 dispatch(Constraint, Instance, Context) ->
     valid_json_assert:check(Constraint, Instance, Context).
+
+%% Compile-time container вроде `$defs` участвует только в verbose hierarchy.
+%% В остальных структурных режимах его silent unit сохранён в diagnostic tree,
+%% но basic отфильтрует его как unit без detail.
+-spec marker(binary(), #eval_context{}) -> #eval_result{}.
+marker(_Keyword, #eval_context{mode = flag}) ->
+    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
+marker(Keyword, Context) ->
+    #eval_result{valid = true,
+                 evaluated = valid_json_evaluated:neutral(),
+                 units = [valid_json_unit:keyword(Keyword, true, none, Context)]}.
 
 %% Reference применяет target к тому же instance через общий вход evaluator'а:
 %% только так сохраняются resource scope и cycle guard. Keyword location

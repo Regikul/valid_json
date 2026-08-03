@@ -124,6 +124,8 @@ Boolean schema хранится значением `true` или `false` и не
     | {dynamic_ref, binary(), addr()}
     | {recursive_ref, addr()}
 
+    | {marker, binary()}
+
     | {multiple_of, number()}
     | {maximum, number()} | {exclusive_maximum, number()}
     | {minimum, number()} | {exclusive_minimum, number()}
@@ -162,7 +164,7 @@ Boolean schema хранится значением `true` или `false` и не
     | {unevaluated_items, addr()}.
 ```
 
-Тег есть данные; имён модулей и closures в IR нет. Единственная непрозрачная часть — сравнимый `re:mp()`. Различия dialect разрешаются компилятором: разные раскладки получают разные tags, отличающееся поведение — явное поле (`MarksEvaluated`, `Assert`). Evaluator не читает `#resource.dialect`.
+Тег есть данные; имён модулей и closures в IR нет. Единственная непрозрачная часть — сравнимый `re:mp()`. Различия dialect разрешаются компилятором: разные раскладки получают разные tags, отличающееся поведение — явное поле (`MarksEvaluated`, `Assert`). Evaluator не читает `#resource.dialect`. `{marker, Keyword}` сохраняет compile-time container `$defs` либо совместимый `definitions` только ради silent результата в `verbose`; validity и coverage он не меняет.
 
 ## Составные constraints
 
@@ -201,7 +203,7 @@ IR различает отсутствующий keyword и написанное
 | `minLength: 0` | `{min_length, 0}` и собственный unit |
 | `minContains: 1` | явный `1`; отсутствие остаётся `undefined` |
 
-Defaults применяет handler, а не compiler. Это сохраняет hierarchy для `verbose` и видимые в `basic` пустые annotations. Исключения ограничены keywords, которые спецификация велит игнорировать или которые полностью потребляются compiler (`$id`, `$schema`, anchors, `$defs`, совместимый `definitions`, `$vocabulary`, `$comment`).
+Defaults применяет handler, а не compiler. Это сохраняет hierarchy для `verbose` и видимые в `basic` пустые annotations. Идентификаторы, anchors, `$schema`, `$vocabulary` и `$comment` полностью потребляются compiler либо игнорируются по спецификации. `$defs` и совместимый `definitions` тоже обрабатываются compile-time, но сохраняют `{marker, Keyword}`: официальный полный `verbose` example показывает контейнер определений как успешный silent unit.
 
 ## Инварианты компиляции IR
 
@@ -214,6 +216,7 @@ Defaults применяет handler, а не compiler. Это сохраняет
 - Подсхема с `$id` получает новый `rid`; поэтому дочерние переходы всегда хранят полный `addr()`, не голый pointer.
 - `#node.unevaluated` отделяет constraints, которые обязаны выполняться последними.
 - Написанный keyword сохраняется даже при no-op значении. `undefined` в составном constraint означает только отсутствие keyword; спецификационное default применяет обработчик.
+- Definition container сохраняет `{marker, <<"$defs">>}` либо `{marker, <<"definitions">>}` перед вычисляемыми constraints; marker выпускает только silent success unit и не влияет на verdict или coverage.
 - `additionalProperties`, `prefix/items`, array-form `items/additionalItems`, `contains/min/maxContains` и `if/then/else` сворачиваются статически, но каждый фактический keyword получает собственный output unit.
 - `{recursive_ref, ...}` и `{dynamic_ref, ...}` разведены. Флаг `recursive_anchor` принадлежит корню resource. Некорневой `$recursiveAnchor` проверяется как boolean, но флаг не меняет; подсхема с `$id` уже образует новый resource и может объявить собственный флаг.
 
@@ -374,6 +377,7 @@ unevaluated_indexes({P, S}, L) ->
 
 ```erlang
 -record(output_unit, {
+    kind              :: schema | keyword,
     valid             :: boolean(),
     keyword_location  :: [binary()],
     absolute_location :: {uri(), [binary()]} | undefined,
@@ -383,13 +387,13 @@ unevaluated_indexes({P, S}, L) ->
 }).
 ```
 
-Units образуют дерево, и уровни в нём чередуются. Каждый node выпускает собственный unit на своей локации, внутри него лежат units его keywords, а внутри unit'а applicator-keyword'а — units nodes, к которым этот keyword применился. Составной constraint чередования не нарушает: units ветви он кладёт внутрь того keyword'а, который её применил.
+Units образуют дерево, и уровни в нём чередуются. `kind` различает unit schema node и unit фактического keyword без эвристик по одинаковым локациям. Каждый node выпускает собственный unit на своей локации, внутри него лежат units его keywords, а внутри unit'а applicator-keyword'а — units nodes, к которым этот keyword применился. Составной constraint чередования не нарушает: units ветви он кладёт внутрь того keyword'а, который её применил.
 
 Собственный unit schema object не несёт ни сообщения, ни аннотации. Он говорит только о том, что подсхема применялась и чем это кончилось, а причину провала называют его дети; спецификация прямо освобождает узлы ветвления от сообщения ([core.txt:3150](../references/json-schema/draft-2020-12/core.txt)). Сообщение появляется у node лишь там, где детей нет вовсе, — у boolean `false`.
 
 Локации — обратные стеки сегментов: push/pop выполняется за O(1), JSON Pointer escaping и URI percent-encoding делаются при печати. `keywordLocation` проходит сквозь ссылки; `absoluteKeywordLocation` строится из канонического resource URI и печатается всегда, кроме anonymous resource.
 
-Эти две локации живут по-разному. `keywordLocation` — накопленный стек: обход добавляет к нему сегмент за сегментом и продолжает его через `$ref`. `absoluteKeywordLocation` ничего не накапливает и выводится из адреса node в момент построения unit: канонический URI даёт `rid`, путь внутри resource — pointer, а последним сегментом идёт имя keyword. Поэтому переход по ссылке не требует ни сброса, ни отдельного стека, а у анонимного resource локация отсутствует сама собой, потому что `id` у него не определён.
+Эти две локации живут по-разному. `keywordLocation` — накопленный стек: обход добавляет к нему сегмент за сегментом и продолжает его через `$ref`. `absoluteKeywordLocation` ничего не накапливает и выводится из адреса node в момент построения unit: канонический URI даёт `rid`, путь внутри resource — pointer, а последним сегментом идёт имя keyword. У reference это даёт два наблюдаемых уровня: keyword unit называет physical `$ref`/`$dynamicRef`/`$recursiveRef`, а вложенный schema unit — canonical target после dereference. У анонимного resource абсолютная локация отсутствует сама собой, потому что `id` у него не определён.
 
 Сериализация разделена явно:
 
@@ -413,11 +417,15 @@ output fixtures и output schema требуют JSON Pointer; compatibility poli
 | `flag` | только корневое `valid`; units не собираются, short-circuit разрешён |
 | `basic` | плоские error/annotation units всех применённых keywords |
 | `detailed` | минимальная вложенная структура, сохраняющая значимые branches |
-| `verbose` | полностью реализованная hierarchy, включая успехи и отброшенные results |
+| `verbose` | полная несвёрнутая hierarchy schema results, включая успехи и отброшенные results |
 
-Все три структурных формата строятся из одного дерева units; отдельного evaluator API на формат нет. Официальный snapshot закрепляет только `basic`, поэтому точные правила схлопывания `detailed` и полнота `verbose` должны быть зафиксированы собственными golden/structure tests до P7.
+Все три структурных формата строятся из одного дерева units; отдельного evaluator API на формат нет. Официальный snapshot закрепляет только `basic`. Контракт `verbose` зафиксирован собственными golden/structure tests обоих dialects и проверкой canonical output schemas; правила схлопывания `detailed` остаются отдельной частью P7.
 
 Корнем `basic` служит unit корневого node: его локации и его собственный detail печатаются прямо в объекте результата, а плоский список идёт в `errors` либо `annotations` — по валидности этого же корня. В список попадает то, что несёт detail: сообщение при провале, аннотацию при успехе. Собирая аннотации, обход не спускается в провалившийся unit: провалившийся schema object не производит аннотаций ни своими keywords, ни keywords своих подсхем ([core.txt:1206](../references/json-schema/draft-2020-12/core.txt)). Из дерева эти аннотации не исчезают — их показывает `verbose`. Поэтому units ветвлений в нём не видны — своего сообщения у них нет, — а провалившаяся boolean-схема видна, потому что сообщение есть только у неё самой. Пустой список остаётся ключом: `errors` обязателен при `valid = false`, `annotations` — при `valid = true`, и второго ключа рядом быть не должно ([output-schema.json](../../test/fixtures/json-schema-test-suite/output-tests/draft2020-12/output-schema.json)).
+
+`verbose` рекурсивно печатает корневой schema unit и все keyword results в детерминированном порядке. В него входят silent successes, неприменимые к типу и явно написанные no-op keywords, annotation внутри провалившейся ветви и успешное вычисление внутри `not`. Вложенный массив называется `errors` либо `annotations` исключительно по `valid` родителя; поэтому successful child допустим внутри `errors`, invalid child — внутри `annotations`, а локальный `error`/`annotation` может находиться рядом с массивом.
+
+Внутренние schema units не публикуются механически. Unit без detail на той же `keywordLocation`, что applicator, прозрачен, и его keyword children поднимаются к applicator. Пустая successful schema под обычным applicator опускается, как boolean `true` под `properties` в нормативном коротком примере. Самостоятельными остаются schema units значимых структурных branches (`anyOf/0`, `properties/name` и аналогичные), boolean `false` с собственной ошибкой и canonical target после любого reference; последний сохраняется даже без keywords, чтобы physical reference и dereferenced schema не слились. Таким образом JSON отражает иерархию результатов схемы, но не служебное чередование evaluator. Compile-time `$defs` и совместимый `definitions` представлены keyword marker'ом; прочие полностью потреблённые core keywords output unit не получают.
 
 ## Контекст и cycle guard
 

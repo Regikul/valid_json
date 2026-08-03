@@ -540,22 +540,22 @@ named_root_resource_test() ->
                                     #{<<>> => schema_node([{type, [integer]}])})}),
     ?assertEqual({ok, Expected}, compile(Schema)).
 
-%% `$defs` собственного constraint не даёт, но каждая entry становится node.
-%% Имя definition экранируется как обычный JSON Pointer segment.
+%% `$defs` даёт silent output marker для verbose, а каждая entry становится
+%% node. Имя definition экранируется как обычный JSON Pointer segment.
 definitions_resource_test() ->
     Name = <<"a/b~c">>,
     Schema = #{<<"$defs">> => #{Name => #{<<"type">> => <<"string">>}}},
     Expected =
-        artifact(#{<<>> => schema_node([]),
+        artifact(#{<<>> => schema_node([{marker, <<"$defs">>}]),
                    <<"/$defs/a~1b~0c">> => schema_node([{type, [string]}])}),
     ?assertEqual({ok, Expected}, compile(Schema)).
 
 %% `definitions` сохраняет собственную pointer location, но во всём остальном
-%% ведёт как `$defs`: контейнер unit не выпускает, entries становятся nodes.
+%% ведёт как `$defs`: контейнер выпускает marker, entries становятся nodes.
 compat_definitions_resource_test_() ->
     Schema = #{<<"definitions">> =>
                    #{<<"value">> => #{<<"type">> => <<"integer">>}}},
-    Nodes = #{<<>> => schema_node([]),
+    Nodes = #{<<>> => schema_node([{marker, <<"definitions">>}]),
               <<"/definitions/value">> => schema_node([{type, [integer]}])},
     [?_assertEqual({ok, artifact(Nodes)}, compile(Schema)),
      ?_assertEqual({ok, legacy_artifact(Nodes)}, legacy(Schema))].
@@ -567,7 +567,8 @@ anchor_ref_resource_test() ->
                <<"$defs">> =>
                    #{<<"value">> => #{<<"$anchor">> => <<"number">>,
                                       <<"type">> => <<"integer">>}}},
-    Nodes = #{<<>> => schema_node([{ref, {anonymous, <<"/$defs/value">>}}]),
+    Nodes = #{<<>> => schema_node([{marker, <<"$defs">>},
+                                   {ref, {anonymous, <<"/$defs/value">>}}]),
               <<"/$defs/value">> => schema_node([{type, [integer]}])},
     Expected = compiled(
                  anonymous,
@@ -585,7 +586,8 @@ dynamic_anchor_resource_test() ->
                <<"$defs">> =>
                    #{<<"value">> => #{<<"$dynamicAnchor">> => <<"node">>,
                                       <<"type">> => <<"integer">>}}},
-    Nodes = #{<<>> => schema_node([{ref, {anonymous, <<"/$defs/value">>}}]),
+    Nodes = #{<<>> => schema_node([{marker, <<"$defs">>},
+                                   {ref, {anonymous, <<"/$defs/value">>}}]),
               <<"/$defs/value">> => schema_node([{type, [integer]}])},
     Expected = compiled(
                  anonymous,
@@ -604,7 +606,8 @@ dynamic_ref_resource_test() ->
                <<"$defs">> =>
                    #{<<"value">> => #{<<"$dynamicAnchor">> => <<"node">>,
                                       <<"type">> => <<"integer">>}}},
-    Nodes = #{<<>> => schema_node([{dynamic_ref, <<"node">>,
+    Nodes = #{<<>> => schema_node([{marker, <<"$defs">>},
+                                   {dynamic_ref, <<"node">>,
                                     {anonymous, <<"/$defs/value">>}}]),
               <<"/$defs/value">> => schema_node([{type, [integer]}])},
     Expected = compiled(
@@ -629,7 +632,8 @@ dynamic_ref_other_resource_test() ->
     {ok, #{resources := Resources}} = compile(Schema),
     #resource{nodes = #{<<>> := #node{constraints = Constraints}}} =
         maps:get(Root, Resources),
-    ?assertEqual([{dynamic_ref, <<"node">>, {Child, <<>>}}], Constraints).
+    ?assertEqual([{marker, <<"$defs">>},
+                  {dynamic_ref, <<"node">>, {Child, <<>>}}], Constraints).
 
 %% Не выполнено хотя бы одно условие динамичности — и keyword компилируется в
 %% обычный `{ref, _}`. Дальше evaluator о его происхождении ничего не знает.
@@ -642,8 +646,10 @@ dynamic_ref_static_forms_test_() ->
     %% Имя есть, но цель объявила его обычным `$anchor`.
     Static = #{<<"$dynamicRef">> => <<"#node">>,
                <<"$defs">> => #{<<"value">> => #{<<"$anchor">> => <<"node">>}}},
-    [?_assertEqual([{ref, Target}], root_constraints(Pointer)),
-     ?_assertEqual([{ref, Target}], root_constraints(Static))].
+    [?_assertEqual([{marker, <<"$defs">>}, {ref, Target}],
+                   root_constraints(Pointer)),
+     ?_assertEqual([{marker, <<"$defs">>}, {ref, Target}],
+                   root_constraints(Static))].
 
 %% Разрешается ссылка так же, как `$ref`, и промахи называются теми же ошибками.
 %% В Draft 2019-09 keyword неизвестен, а неизвестные этот dialect игнорирует.
@@ -678,7 +684,7 @@ recursive_anchor_resources_test() ->
                  Root,
                  #{Root => legacy_resource(
                              Root, false,
-                             #{<<>> => schema_node([]),
+                             #{<<>> => schema_node([{marker, <<"definitions">>}]),
                                <<"/definitions/nested">> => schema_node([])}),
                    Child => legacy_resource(Child, true,
                                             #{<<>> => schema_node([])})}),
@@ -717,7 +723,8 @@ pointer_ref_resource_test() ->
     Schema = #{<<"$ref">> => <<"#/$defs/value">>,
                <<"$defs">> => #{<<"value">> => false}},
     Expected = artifact(
-                 #{<<>> => schema_node([{ref, {anonymous,
+                 #{<<>> => schema_node([{marker, <<"$defs">>},
+                                        {ref, {anonymous,
                                                 <<"/$defs/value">>}}]),
                    <<"/$defs/value">> => false}),
     ?assertEqual({ok, Expected}, compile(Schema)).
@@ -736,7 +743,8 @@ parent_pointer_ref_resource_test() ->
                  anonymous,
                  #{anonymous => resource(
                                   anonymous,
-                                  #{<<>> => schema_node([{ref, {Child, <<>>}}])}),
+                                  #{<<>> => schema_node([{marker, <<"$defs">>},
+                                                        {ref, {Child, <<>>}}])}),
                    Child => resource(
                               Child,
                               #{<<>> => schema_node([{type, [integer]}])})}),
@@ -758,7 +766,8 @@ embedded_anchor_ref_resource_test() ->
                  Root,
                  #{Root => resource(
                             Root,
-                            #{<<>> => schema_node([{ref, {Child, <<>>}}])}),
+                            #{<<>> => schema_node([{marker, <<"$defs">>},
+                                                  {ref, {Child, <<>>}}])}),
                    Child => resource(
                              Child, #{<<"leaf">> => <<>>},
                              #{<<>> => schema_node([{type, [string]}])})}),
@@ -942,7 +951,8 @@ cross_draft_embedded_test() ->
         maps:get(Legacy, Resources),
     ?assertEqual(?DIALECT, RootDialect),
     ?assertEqual(?LEGACY, LegacyDialect),
-    ?assertEqual([{ref, {Legacy, <<>>}},
+    ?assertEqual([{marker, <<"$defs">>},
+                  {ref, {Legacy, <<>>}},
                   {prefix_items, [{Root, <<"/prefixItems/0">>}], undefined}],
                  constraints(<<>>, RootNodes)),
     %% В 2019-09 `prefixItems` — неизвестный keyword, и этот dialect его
@@ -992,7 +1002,8 @@ cross_draft_embedded_metaschema_test() ->
     ?assertEqual([Meta], Sources),
     #resource{dialect = ?DIALECT, nodes = RootNodes} = maps:get(Root, Resources),
     #resource{dialect = Meta, nodes = EmbeddedNodes} = maps:get(Embedded, Resources),
-    ?assertEqual([{minimum, 5}], constraints(<<>>, RootNodes)),
+    ?assertEqual([{marker, <<"$defs">>}, {minimum, 5}],
+                 constraints(<<>>, RootNodes)),
     %% Validation в метасхеме не объявлена, поэтому `minimum` внутри неизвестен.
     ?assertEqual([{annotation, <<"minimum">>, 10}], constraints(<<>>, EmbeddedNodes)).
 
@@ -1095,7 +1106,9 @@ anonymous_parent_resource_test() ->
     Expected =
         compiled(
           anonymous,
-          #{anonymous => resource(anonymous, #{<<>> => schema_node([])}),
+          #{anonymous => resource(
+                           anonymous,
+                           #{<<>> => schema_node([{marker, <<"$defs">>}])}),
             Child => resource(
                        Child,
                        #{<<>> => schema_node([{contains,
@@ -1116,7 +1129,8 @@ relative_embedded_resource_test() ->
     Expected =
         compiled(
           Root,
-          #{Root => resource(Root, #{<<>> => schema_node([])}),
+          #{Root => resource(
+                     Root, #{<<>> => schema_node([{marker, <<"$defs">>}])}),
             Child => resource(
                        Child,
                        #{<<>> => schema_node([{properties,

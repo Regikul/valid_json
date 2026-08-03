@@ -150,7 +150,8 @@ compile_node(Schema, Position, #state{profile = Profile} = State)
                 {ok, WithDefinitions} ->
                     case node_constraints(Schema, Position, WithDefinitions) of
                         {ok, Constraints, Unevaluated, Built} ->
-                            Node = #node{constraints = Constraints ++ ExtraConstraints,
+                            Markers = output_markers(Schema),
+                            Node = #node{constraints = Markers ++ Constraints ++ ExtraConstraints,
                                          unevaluated = Unevaluated},
                             {ok, place(Position, Node, Built)};
                         {error, _} = Error ->
@@ -166,6 +167,15 @@ compile_node(Schema, Position, #state{profile = Profile} = State)
 %% невозможно, а называет его собственная локация.
 compile_node(Other, Position, _State) ->
     {error, schema_error({bad_keyword_value, Other}, Position)}.
+
+%% Definition containers не вычисляют instance, но являются видимыми
+%% успешными keyword results в normative verbose example. Marker ничего не
+%% меняет в validity/coverage и остаётся невидимым в плоском basic.
+-spec output_markers(#{binary() => json()}) -> [constraint()].
+output_markers(Schema) ->
+    [{marker, Keyword}
+     || Keyword <- [<<"$defs">>, <<"definitions">>],
+        is_map_key(Keyword, Schema)].
 
 %% Значения unknown keywords не являются schema positions: discovery их уже не
 %% посещал, а emitter лишь сохраняет исходное JSON value как annotation в

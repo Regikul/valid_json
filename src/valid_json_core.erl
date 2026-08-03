@@ -19,8 +19,8 @@ validate(Compiled, Instance, Options) ->
 -spec output_format([option()]) -> format().
 output_format(Options) ->
     case proplists:get_value(output, Options, flag) of
-        Format when Format =:= flag; Format =:= basic ->
+        Format when Format =:= flag; Format =:= basic; Format =:= verbose ->
             Format;
-        Other when Other =:= detailed; Other =:= verbose ->
+        Other when Other =:= detailed ->
             erlang:error({not_implemented, {output, Other}})
     end.

@@ -328,7 +328,7 @@ ref_location_test() ->
     [TargetUnit] = RefUnit#output_unit.nested,
     [TypeUnit] = TargetUnit#output_unit.nested,
     ?assertEqual([<<"$ref">>], RefUnit#output_unit.keyword_location),
-    ?assertEqual({Target, [<<"value">>, <<"$defs">>]},
+    ?assertEqual({Source, [<<"$ref">>]},
                  RefUnit#output_unit.absolute_location),
     ?assertEqual([<<"type">>, <<"$ref">>],
                  TypeUnit#output_unit.keyword_location),
@@ -392,8 +392,8 @@ dynamic_ref_cycle_test() ->
     ?assertEqual({error, {no_progress, {?RESOURCE, <<>>}}},
                  valid_json_eval:run(Self, 1, flag)).
 
-%% Absolute location называет разрешённую цель, а не лексическую: иначе вывод
-%% указывал бы на схему, которая не применялась.
+%% Reference unit называет physical location написанного keyword; вложенный
+%% target schema unit отдельно несёт каноническую разрешённую цель.
 dynamic_ref_location_test() ->
     Artifact = dynamic_tree(#{<<"item">> => <<"/$defs/item">>}),
     [RootUnit] = collect(Artifact, <<"x">>, basic),
@@ -402,7 +402,7 @@ dynamic_ref_location_test() ->
     [DynamicUnit] = InnerUnit#output_unit.nested,
     ?assertEqual([<<"$dynamicRef">>, <<"$ref">>],
                  DynamicUnit#output_unit.keyword_location),
-    ?assertEqual({?RESOURCE, [<<"item">>, <<"$defs">>]},
+    ?assertEqual({<<"https://example.com/inner">>, [<<"$dynamicRef">>]},
                  DynamicUnit#output_unit.absolute_location).
 
 %% Лексическая цель помечена, поэтому recursive reference выбирает самый
@@ -446,8 +446,8 @@ recursive_ref_cycle_test() ->
     ?assertEqual({error, {no_progress, {?RESOURCE, <<>>}}},
                  valid_json_eval:run(Artifact, 1, flag)).
 
-%% Keyword location остаётся синтаксическим путём, а absolute location называет
-%% реально выбранный внешний корень, не лексический inner resource.
+%% Keyword location остаётся синтаксическим путём, а absolute location unit'а
+%% называет physical recursive keyword; выбранный target лежит уровнем ниже.
 recursive_ref_location_test() ->
     Artifact = recursive_tree(true, true),
     Instance = #{<<"outer">> => true,
@@ -457,7 +457,9 @@ recursive_ref_location_test() ->
     [RecursiveUnit] =
         [Unit || Unit <- keywords(collect(Artifact, Instance, basic)),
                  Unit#output_unit.keyword_location =:= RecursiveLocation],
-    ?assertEqual({?RESOURCE, []}, RecursiveUnit#output_unit.absolute_location),
+    ?assertEqual({<<"https://example.com/inner-recursive">>,
+                  [<<"$recursiveRef">>, <<"next">>, <<"properties">>]},
+                 RecursiveUnit#output_unit.absolute_location),
     ?assertEqual([<<"next">>], RecursiveUnit#output_unit.instance_location).
 
 %% Логические applicators спускаются в дочерние nodes общим входом evaluator'а и

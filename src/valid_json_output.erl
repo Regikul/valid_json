@@ -10,7 +10,9 @@
 project(flag, #eval_result{valid = Valid}) ->
     #{<<"valid">> => Valid};
 project(basic, #eval_result{units = [Root]}) ->
-    basic(Root).
+    basic(Root);
+project(verbose, #eval_result{units = [Root]}) ->
+    verbose(Root).
 
 %% basic — корневой unit, внутри которого плоский список потомков: при провале
 %% сообщения об ошибках, при успехе аннотации. Ключ соответствует валидности
@@ -45,6 +47,57 @@ descend(Valid, Unit)                       -> flatten(Valid, Unit).
 carries(false, #output_unit{detail = {error, _}})     -> true;
 carries(true, #output_unit{detail = {annotation, _}}) -> true;
 carries(_Valid, #output_unit{})                       -> false.
+
+%% verbose сохраняет все keyword results и значимые границы подсхем. Schema
+%% unit, стоящий на той же позиции, что применивший его keyword, является
+%% внутренним контейнером evaluator и прозрачен. Границы именованных branches
+%% (`anyOf/0`, `properties/name`, ...), target schema после reference и
+%% boolean-failure остаются самостоятельными output units.
+-spec verbose(#output_unit{}) -> output().
+verbose(Root) ->
+    hierarchy(Root).
+
+-spec hierarchy(#output_unit{}) -> output().
+hierarchy(#output_unit{valid = Valid} = Unit) ->
+    case children(Unit) of
+        []     -> unit(Unit);
+        Nested -> (unit(Unit))#{key(Valid) => Nested}
+    end.
+
+-spec children(#output_unit{}) -> [output()].
+children(#output_unit{nested = Nested} = Parent) ->
+    lists:append([visible(Parent, Unit) || Unit <- Nested]).
+
+%% Target schema даже без keywords важна: её canonical location отличает
+%% написанную reference от применённого ресурса. Для остальных applicators
+%% пустая успешная schema результата не добавляет — так ведёт себя normative
+%% пример с `properties: {"validProp": true}`.
+-spec visible(#output_unit{}, #output_unit{}) -> [output()].
+visible(Parent, #output_unit{kind = schema} = Unit) ->
+    case reference(Parent) of
+        true ->
+            [hierarchy(Unit)];
+        false ->
+            visible_schema(Parent, Unit)
+    end;
+visible(_Parent, #output_unit{kind = keyword} = Unit) ->
+    [hierarchy(Unit)].
+
+-spec visible_schema(#output_unit{}, #output_unit{}) -> [output()].
+visible_schema(_Parent, #output_unit{detail = none, nested = []}) ->
+    [];
+visible_schema(#output_unit{keyword_location = Location},
+               #output_unit{keyword_location = Location, detail = none} = Unit) ->
+    children(Unit);
+visible_schema(_Parent, Unit) ->
+    [hierarchy(Unit)].
+
+-spec reference(#output_unit{}) -> boolean().
+reference(#output_unit{kind = keyword,
+                       keyword_location = [Keyword | _]}) ->
+    lists:member(Keyword, [<<"$ref">>, <<"$dynamicRef">>, <<"$recursiveRef">>]);
+reference(#output_unit{}) ->
+    false.
 
 -spec unit(#output_unit{}) -> output().
 unit(#output_unit{valid = Valid, keyword_location = Keywords,

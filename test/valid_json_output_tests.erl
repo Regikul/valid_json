@@ -115,6 +115,59 @@ basic_depth_test_() ->
                   [{maps:get(<<"keywordLocation">>, Unit),
                     maps:get(<<"instanceLocation">>, Unit)} || Unit <- Printed]).
 
+%% verbose оставляет все keyword results, включая silent success, а имя
+%% вложенной коллекции выбирает по валидности родителя. Локальная ошибка
+%% applicator стоит рядом с его дочерними errors.
+verbose_shape_test_() ->
+    Silent = unit(true, [<<"type">>], none),
+    Boolean = branch(false, [<<"additionalProperties">>], [<<"extra">>],
+                     {error, <<"schema is false">>}, []),
+    Applied = unit(false, [<<"additionalProperties">>],
+                   {error, <<"additional properties failed">>}, [], [Boolean]),
+    ?_assertEqual(
+       projected(false, <<"errors">>,
+                 [printed(true, <<"/type">>, <<>>),
+                  (printed(false, <<"/additionalProperties">>, <<>>))#{
+                    <<"error">> => <<"additional properties failed">>,
+                    <<"errors">> =>
+                        [(printed(false, <<"/additionalProperties">>,
+                                  <<"/extra">>))#{
+                           <<"error">> => <<"schema is false">>}] }]),
+       project(verbose, root(false, [Silent, Applied]))).
+
+%% Внутренний schema unit на той же позиции прозрачен, но target после `$ref`
+%% остаётся отдельным уровнем даже при совпадающем keywordLocation. Так source
+%% reference и canonical target не смешиваются.
+verbose_schema_boundary_test_() ->
+    Type = error_unit([<<"type">>, <<"$ref">>], []),
+    Target = branch(false, [<<"$ref">>], [], none, [Type]),
+    Ref = unit(false, [<<"$ref">>], none, [], [Target]),
+    #{<<"errors">> := [PrintedRef]} = project(verbose, root(false, [Ref])),
+    #{<<"errors">> := [PrintedTarget]} = PrintedRef,
+    [?_assertEqual(<<"/$ref">>, maps:get(<<"keywordLocation">>, PrintedTarget)),
+     ?_assertMatch(#{<<"errors">> :=
+                         [#{<<"keywordLocation">> := <<"/$ref/type">>}]},
+                   PrintedTarget)].
+
+%% Пустая successful boolean schema под обычным applicator не создаёт
+%% служебный JSON-уровень, как в normative properties/true example. Failed
+%% branch под успешным applicator при этом лежит в `annotations` родителя.
+verbose_visibility_test_() ->
+    SilentSchema = branch(true, [<<"a">>, <<"properties">>], [<<"a">>],
+                          none, []),
+    Properties = unit(true, [<<"properties">>],
+                      {annotation, [<<"a">>]}, [], [SilentSchema]),
+    FailedBranch = branch(false, [<<"0">>, <<"anyOf">>], [],
+                          {error, <<"schema is false">>}, []),
+    AnyOf = unit(true, [<<"anyOf">>], none, [], [FailedBranch]),
+    #{<<"annotations">> := [PrintedProperties, PrintedAnyOf]} =
+        project(verbose, root(true, [Properties, AnyOf])),
+    [?_assertNot(is_map_key(<<"annotations">>, PrintedProperties)),
+     ?_assertMatch(#{<<"annotations">> :=
+                         [#{<<"valid">> := false,
+                            <<"keywordLocation">> := <<"/anyOf/0">>}]},
+                   PrintedAnyOf)].
+
 project(Format, #output_unit{valid = Valid} = Root) ->
     valid_json_output:project(Format, #eval_result{valid     = Valid,
                                                    evaluated = valid_json_evaluated:neutral(),
@@ -127,7 +180,8 @@ root(Valid, Nested) ->
 
 %% Unit самого node: своего сегмента у него нет, он стоит там же, где схема.
 branch(Valid, Keywords, Instance, Detail, Nested) ->
-    #output_unit{valid             = Valid,
+    #output_unit{kind              = schema,
+                 valid             = Valid,
                  keyword_location  = Keywords,
                  absolute_location = undefined,
                  instance_location = Instance,
@@ -147,4 +201,9 @@ unit(Valid, Keywords, Detail) ->
     unit(Valid, Keywords, Detail, [], []).
 
 unit(Valid, Keywords, Detail, Instance, Nested) ->
-    branch(Valid, Keywords, Instance, Detail, Nested).
+    (branch(Valid, Keywords, Instance, Detail, Nested))#output_unit{kind = keyword}.
+
+printed(Valid, Keyword, Instance) ->
+    #{<<"valid">>            => Valid,
+      <<"keywordLocation">>  => Keyword,
+      <<"instanceLocation">> => Instance}.

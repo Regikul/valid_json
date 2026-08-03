@@ -42,6 +42,8 @@
     | {dynamic_ref, binary(), addr()}
     | {recursive_ref, addr()}
 
+    | {marker, binary()}
+
     | {multiple_of, number()}
     | {maximum, number()} | {exclusive_maximum, number()}
     | {minimum, number()} | {exclusive_minimum, number()}
@@ -88,8 +90,10 @@
 
 %% Локации — обратные стеки сегментов; escaping делается при печати.
 -type detail() :: {error, binary()} | {annotation, json()} | none.
+-type unit_kind() :: schema | keyword.
 
 -record(output_unit, {
+    kind              :: unit_kind(),
     valid             :: boolean(),
     keyword_location  :: [binary()],
     absolute_location :: {uri(), [binary()]} | undefined,
