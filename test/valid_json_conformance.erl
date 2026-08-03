@@ -32,7 +32,10 @@
                 "optional/cross-draft.json",
                 "optional/format/date.json", "optional/format/time.json",
                 "optional/format/date-time.json",
-                "optional/format/duration.json"]).
+                "optional/format/duration.json",
+                "optional/format/ipv4.json", "optional/format/ipv6.json",
+                "optional/format/hostname.json",
+                "optional/format/email.json"]).
 
 %% Files, существующие только в одном dialect: `prefixItems.json` появился
 %% вместе с самим keyword в Draft 2020-12, обоих файлов `dynamicRef.json` в
@@ -56,7 +59,9 @@
         [{"pattern.json",
           <<"pattern with Unicode property escape requires unicode mode">>},
          {"patternProperties.json",
-          <<"patternProperties with Unicode property escape">>}]).
+          <<"patternProperties with Unicode property escape">>},
+         {"optional/format/hostname.json",
+          <<"validation of A-label (punycode) host names">>}]).
 
 %% Группы, чья цепочка dialects выходит за conformance-профиль
 %% (okf/testing/conformance-policy.md, раздел «Conformance-профиль»). От
@@ -72,7 +77,7 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES,
 %% ?EXCLUDED и ?OUT_OF_PROFILE, и менять его иначе нельзя.
--define(CENSUS, {758, 2937}).
+-define(CENSUS, {766, 3186}).
 
 %% Сьют адресует свои remote documents относительно этого base, повторяя в URI
 %% раскладку директории `remotes`. Число документов закреплено по той же

@@ -9,10 +9,10 @@
 %% и потому не может провалить assertion. Так остаются annotation-only и
 %% пользовательские имена, и стандартные форматы, до которых таблица не дошла.
 unsupported_test_() ->
-    [?_assertEqual(unsupported, valid_json_format:attribute(<<"email">>, <<"@">>)),
+    [?_assertEqual(unsupported, valid_json_format:attribute(<<"uri">>, <<"@">>)),
      ?_assertEqual(unsupported,
                    valid_json_format:attribute(<<"custom-name">>, <<>>)),
-     ?_assertEqual(unsupported, valid_json_format:attribute(<<"ipv6">>, <<"::1">>))].
+     ?_assertEqual(unsupported, valid_json_format:attribute(<<"uuid">>, <<>>))].
 
 %% date — правило `full-date`: четыре цифры года, две месяца, две дня. Длина
 %% месяца считается с григорианским правилом високосного года, включая вековые.
@@ -124,3 +124,87 @@ ipv4_invalid_test_() ->
 
 is_ipv4(String) ->
     valid_json_format:attribute(<<"ipv4">>, String).
+
+%% ipv6 — восемь групп по одной-четыре hex-цифры, одно сжатие `::` и
+%% необязательный dotted-quad в хвосте, стоящий за две группы. Отдельно
+%% закрепляется, что dotted-quad не считается адресом сам по себе и не годится
+%% слева от сжатия.
+ipv6_valid_test_() ->
+    Valid = [<<"::1">>, <<"::">>, <<"d6::">>, <<"::abef">>, <<"::42:ff:1">>,
+             <<"1:d6::42">>, <<"1:2:3:4:5:6::8">>,
+             <<"1:2:3:4:5:6:7:8">>,
+             <<"::ffff:192.168.0.1">>, <<"1:2::192.168.0.1">>,
+             <<"1000:1000:1000:1000:1000:1000:255.255.255.255">>],
+    [?_assert(is_ipv6(String)) || String <- Valid].
+
+ipv6_invalid_test_() ->
+    Invalid = [<<"1">>, <<"127.0.0.1">>, <<"1.2.3.4::">>, <<"::1:2.3.4">>,
+               <<"12345::">>, <<"::abcef">>, <<"::laptop">>,
+               <<"1:2:3:4:5:6:7">>, <<"1:2:3:4:5:6:7:8:9">>,
+               <<":2:3:4:5:6:7:8">>, <<"1:2:3:4:5:6:7:">>, <<":2:3:4::8">>,
+               <<"1::d6::42">>, <<"1:2:3:4:5:::8">>,
+               <<"1::2:192.168.256.1">>, <<"1::2:192.168.ff.1">>,
+               <<"1:2:3:4:1.2.3">>,
+               <<"100:100:100:100:100:100:100:255.255.255.255">>,
+               <<"fe80::/64">>, <<"fe80::a%eth1">>, <<"  ::1">>, <<"::1  ">>,
+               <<"1:2:3:4:5:6:7:৪"/utf8>>, <<"1:2::192.16৪.0.1"/utf8>>, <<>>],
+    [?_assertNot(is_ipv6(String)) || String <- Invalid].
+
+is_ipv6(String) ->
+    valid_json_format:attribute(<<"ipv6">>, String).
+
+%% hostname — метки LDH через точку: дефис не с краю метки, цифра первым знаком
+%% законна, метка не длиннее 63 знаков, имя целиком — 253.
+hostname_valid_test_() ->
+    Valid = [<<"www.example.com">>, <<"hostname">>, <<"h0stn4me">>,
+             <<"1host">>, <<"host-name">>, <<"a-0-b.c">>,
+             <<(binary:copy(<<"a">>, 63))/binary, ".com">>],
+    [?_assert(is_hostname(String)) || String <- Valid].
+
+hostname_invalid_test_() ->
+    Invalid = [<<>>, <<".">>, <<".example">>, <<"example.">>,
+               <<"-hostname">>, <<"hostname-">>, <<"host_name">>,
+               <<"host name">>, <<"example．com"/utf8>>,
+               <<(binary:copy(<<"a">>, 64))/binary, ".com">>,
+               <<(binary:copy(<<"a.">>, 127))/binary, "com">>],
+    [?_assertNot(is_hostname(String)) || String <- Invalid].
+
+is_hostname(String) ->
+    valid_json_format:attribute(<<"hostname">>, String).
+
+%% email — правило `Mailbox`: dot-string либо quoted-string, `@` и домен из
+%% меток или address literal. Разделителем берётся последний `@`, поэтому
+%% quoted-string со своим `@` внутри остаётся верной. SMTP-варианты адресов
+%% отличаются от standalone formats: IPv4 допускает ведущие нули, `::` в IPv6
+%% заменяет не меньше двух групп, а тег `IPv6:` регистронезависим.
+email_valid_test_() ->
+    Valid = [<<"joe.bloggs@example.com">>, <<"te~st@example.com">>,
+             <<"~test@example.com">>, <<"test~@example.com">>,
+             <<"te.s.t@example.com">>,
+             <<"\"joe bloggs\"@example.com">>,
+             <<"\"joe..bloggs\"@example.com">>,
+             <<"\"joe@bloggs\"@example.com">>,
+             <<"\"joe\\\"bloggs\"@example.com">>,
+             <<"joe.bloggs@[127.0.0.1]">>,
+             <<"joe.bloggs@[001.002.003.004]">>,
+             <<"joe.bloggs@[IPv6:::1]">>, <<"joe.bloggs@[ipv6:::1]">>],
+    [?_assert(is_email(String)) || String <- Valid].
+
+email_invalid_test_() ->
+    Invalid = [<<"2962">>, <<"@example.com">>, <<"joe.bloggs@">>,
+               <<".test@example.com">>, <<"test.@example.com">>,
+               <<"te..st@example.com">>, <<"joe bloggs@example.com">>,
+               <<"joe.bloggs@invalid=domain.com">>,
+               <<"joe.bloggs@[127.0.0.300]">>,
+               <<"joe.bloggs@[IPv6:12345::]">>,
+               <<"joe.bloggs@[IPv6:1:2:3:4:5:6::8]">>,
+               <<"joe.bloggs@[tag:127.0.0.1]">>,
+               <<"joe.bloggs@[127.0.0.1">>, <<"joe.bloggs@127.0.0.1]">>,
+               <<"\"joe bloggs@example.com">>,
+               <<"user1@oceania.org, user2@oceania.org">>,
+               <<"\"Winston Smith\" <winston.smith@recdep.minitrue>">>,
+               <<"joe.bloggs@пример.рф"/utf8>>, <<>>],
+    [?_assertNot(is_email(String)) || String <- Invalid].
+
+is_email(String) ->
+    valid_json_format:attribute(<<"email">>, String).

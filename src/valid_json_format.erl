@@ -70,31 +70,16 @@ attribute(<<"date-time">>, String) ->
     valid_json_format_time:date_time(String);
 attribute(<<"duration">>, String) ->
     valid_json_format_time:duration(String);
-%% ipv4 — dotted-quad из четырёх десятичных октетов (RFC 2673, раздел 3.2).
-%% Ведущий ноль запрещён: он читается как восьмеричная запись и делает адрес
-%% двусмысленным.
+%% Сетевые attributes собраны в свой модуль по той же причине: адрес IPv6
+%% кончается dotted-quad, а домен письма бывает и address literal, и именем из
+%% меток hostname, так что разбирать их порознь не выходит.
 attribute(<<"ipv4">>, String) ->
-    case binary:split(String, <<".">>, [global]) of
-        [_, _, _, _] = Octets -> lists:all(fun is_octet/1, Octets);
-        _Other                -> false
-    end;
+    valid_json_format_net:ipv4(String);
+attribute(<<"ipv6">>, String) ->
+    valid_json_format_net:ipv6(String);
+attribute(<<"hostname">>, String) ->
+    valid_json_format_net:hostname(String);
+attribute(<<"email">>, String) ->
+    valid_json_format_net:email(String);
 attribute(_Name, _String) ->
     unsupported.
-
--spec is_octet(binary()) -> boolean().
-is_octet(<<"0">>) ->
-    true;
-is_octet(<<Digit, _/binary>> = Octet) when Digit >= $1, Digit =< $9,
-                                           byte_size(Octet) =< 3 ->
-    is_decimal(Octet) andalso binary_to_integer(Octet) =< 255;
-is_octet(_Octet) ->
-    false.
-
-%% binary_to_integer/1 принимает знак и потому сам по себе фильтром не является.
--spec is_decimal(binary()) -> boolean().
-is_decimal(<<>>) ->
-    true;
-is_decimal(<<Digit, Rest/binary>>) when Digit >= $0, Digit =< $9 ->
-    is_decimal(Rest);
-is_decimal(_Other) ->
-    false.
