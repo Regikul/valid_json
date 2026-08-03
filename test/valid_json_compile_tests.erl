@@ -1040,6 +1040,32 @@ annotation_test_() ->
                                                #{<<"unevaluatedItems">> => #{}}}]))},
                    compile(#{<<"default">> => #{<<"unevaluatedItems">> => #{}}}))].
 
+%% `format` аннотирует в обоих dialects, и объявленный в корневой метасхеме
+%% Draft 2019-09 `false` этого не меняет: он относится к assertion. Имя формата
+%% остаётся открытым значением — незнакомое доходит до IR наравне со
+%% стандартным, а вот нестроковое значение для слота IR невозможно.
+format_test_() ->
+    [?_assertEqual({ok, artifact(schema_node([{format, <<"email">>, false}]))},
+                   compile(#{<<"format">> => <<"email">>})),
+     ?_assertEqual({ok, legacy_artifact(schema_node([{format, <<"email">>, false}]))},
+                   legacy(#{<<"format">> => <<"email">>})),
+     ?_assertEqual({ok, artifact(schema_node([{format, <<"custom-name">>, false}]))},
+                   compile(#{<<"format">> => <<"custom-name">>})),
+     ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/format">>),
+                   compile(#{<<"format">> => 1}))].
+
+%% Аннотации стоят в конце порядка обхода: сначала идёт то, что определяет
+%% вердикт, потом то, что только описывает значение. `format` стоит перед ними:
+%% в P8 он станет assertion, и порядок units из-за этого не поедет.
+format_order_test() ->
+    Schema = #{<<"title">>  => <<"t">>,
+               <<"format">> => <<"email">>,
+               <<"type">>   => <<"string">>},
+    Constraints = [{type, [string]},
+                   {format, <<"email">>, false},
+                   {annotation, <<"title">>, <<"t">>}],
+    ?assertEqual({ok, artifact(schema_node(Constraints))}, compile(Schema)).
+
 %% Аннотации стоят в конце порядка обхода: сначала идёт то, что определяет
 %% вердикт, потом то, что только описывает значение.
 annotation_order_test() ->

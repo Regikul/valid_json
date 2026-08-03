@@ -269,10 +269,13 @@
 - [x] Решить судьбу некорневого `$recursiveAnchor`: принимать boolean-значение
   без эффекта; подсхема с `$id` уже считается корнем отдельного resource.
 - [ ] Реализовать разбор `$vocabulary` и включение keywords по активным
-  vocabularies.
-- [ ] Реализовать `format` как чистую annotation: в обоих dialects это поведение
-  по умолчанию, и без него не компилируется ни одна корневая метасхема. Выбор
-  между annotation и assertion по vocabulary и compile options остаётся в P8.
+  vocabularies; подключить к runner `vocabulary.json` обоих dialects.
+- [x] Реализовать `format` как чистую annotation: в обоих dialects это поведение
+  по умолчанию, и без него не компилируется ни одна корневая метасхема.
+  Объявленный в корневой метасхеме Draft 2019-09 `false` относится только к
+  assertion, поэтому аннотация собирается и там. Подключён обязательный
+  `format.json` обоих dialects. Выбор между annotation и assertion по vocabulary
+  и compile options остаётся в P8.
 - [ ] Реализовать array-form `items` и `additionalItems` Draft 2019-09.
 - [x] Реализовать `$recursiveAnchor` и `$recursiveRef` отдельным IR и правилом
   разрешения: корневой флаг resource и лексическая цель строятся compiler'ом,

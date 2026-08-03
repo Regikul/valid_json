@@ -89,9 +89,9 @@ compile_options([{default_dialect, Dialect} | Rest], _DefaultDialect)
     end;
 compile_options([{assert_format, Assert} | Rest], DefaultDialect)
   when is_boolean(Assert) ->
-    %% Аннотацию `format` даёт P6, а выбор между annotation и assertion — P8.
-    %% Опция уже валидируется production API, но пока не меняет IR, потому что
-    %% соответствующего keyword handler ещё нет.
+    %% Аннотация `format` уже собирается, а выбор между annotation и assertion
+    %% остаётся в P8: до таблицы format algorithms включать проверку нечем.
+    %% Опция валидируется production API, но IR пока не меняет.
     compile_options(Rest, DefaultDialect);
 compile_options(_Options, _DefaultDialect) ->
     erlang:error(badarg).

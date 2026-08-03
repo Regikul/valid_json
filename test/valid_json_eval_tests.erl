@@ -229,6 +229,20 @@ annotation_test_() ->
      ?_assertEqual(neutral(), coverage([Deprecated], 1)),
      ?_assertEqual([], units([Deprecated], 1, flag))].
 
+%% Аннотирующий `format` ведёт себя как annotation-only keyword: аннотацией
+%% становится само имя формата, вердикт всегда успешен, покрытия нет. Незнакомое
+%% имя собирается наравне со стандартным — валидатор из-за него не отказывает.
+format_test_() ->
+    Email = {format, <<"email">>, false},
+    [?_assertEqual([{<<"/format">>, true, {annotation, <<"email">>}}],
+                   located([Email], <<"not an email">>)),
+     ?_assertEqual([{<<"/format">>, true, {annotation, <<"custom-name">>}}],
+                   located([{format, <<"custom-name">>, false}], 1)),
+     ?_assertEqual({ok, #{<<"valid">> => true}},
+                   validate(schema_node([Email]), <<"not an email">>)),
+     ?_assertEqual(neutral(), coverage([Email], <<"a">>)),
+     ?_assertEqual([], units([Email], <<"a">>, flag))].
+
 %% В basic аннотация доходит до плоского списка, а провал соседнего keyword
 %% уносит её оттуда: тот же schema object перестаёт производить аннотации.
 %% Из дерева она не исчезает — её показывает verbose.

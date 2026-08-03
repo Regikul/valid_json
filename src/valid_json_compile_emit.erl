@@ -35,7 +35,8 @@
                 <<"propertyNames">>,
                 <<"allOf">>, <<"anyOf">>, <<"oneOf">>, <<"not">>,
                 [<<"if">>, <<"then">>, <<"else">>],
-                <<"dependentSchemas">> | ?ANNOTATIONS]).
+                <<"dependentSchemas">>,
+                <<"format">> | ?ANNOTATIONS]).
 
 %% Constraints, которые обязаны выполняться после всех остальных: они читают
 %% объединённое покрытие соседей. Порядок между собой тот же, что и у обычных
@@ -58,7 +59,7 @@
 %% указанному dialect и в другом считаются обычными unknown keywords.
 -define(DEFERRED_COMMON,
         [<<"$vocabulary">>,
-         <<"format">>, <<"contentEncoding">>, <<"contentMediaType">>,
+         <<"contentEncoding">>, <<"contentMediaType">>,
          <<"contentSchema">>]).
 %% Отложенных keywords, принадлежащих только Draft 2020-12, сейчас не осталось.
 -define(DEFERRED_2020_12, []).
@@ -416,6 +417,20 @@ constraint(<<"not">> = Keyword, Schema, Position, State) ->
     case subschema(maps:get(Keyword, Schema), below(Keyword, Position), State) of
         {ok, Addr, Built}  -> {ok, {'not', Addr}, Built};
         {error, _} = Error -> Error
+    end;
+%% `format` аннотирует в обоих dialects. В Draft 2019-09 корневая метасхема
+%% объявляет format vocabulary значением `false`, но этот boolean управляет
+%% только assertion: аннотацию спецификация требует собирать независимо от него
+%% (validation.txt:601 и 695). Выбор между annotation и assertion остаётся в P8,
+%% поэтому `Assert` пока всегда false. Имя формата обязано быть строкой
+%% (validation.txt:565): слот IR открыт для любого имени, но не для любого типа.
+constraint(<<"format">> = Keyword, Schema, Position, State) ->
+    case maps:get(Keyword, Schema) of
+        Name when is_binary(Name) ->
+            {ok, {format, Name, false}, State};
+        Other ->
+            {error, schema_error({bad_keyword_value, Other},
+                                 below(Keyword, Position))}
     end;
 %% Значение annotation-only keyword уходит в IR как есть, без проверки и
 %% нормализации. Типы этих keywords ограничивает метасхема, но валидатор её не
