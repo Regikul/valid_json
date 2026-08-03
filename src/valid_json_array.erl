@@ -1,8 +1,8 @@
 %% Array applicators: спуск в подсхемы по элементам массива. `prefixItems` с
-%% хвостовым `items` свёрнуты компилятором в один constraint, `contains` со
-%% своими границами — в другой, но каждый написанный keyword выпускает
-%% собственный unit и собственную аннотацию (okf/architecture/validator-core.md,
-%% «Контракт handler'а»).
+%% хвостовым `items` свёрнуты компилятором в один constraint, array-form `items`
+%% с `additionalItems` — во второй, `contains` со своими границами — в третий, но
+%% каждый написанный keyword выпускает собственный unit и собственную аннотацию
+%% (okf/architecture/validator-core.md, «Контракт handler'а»).
 -module(valid_json_array).
 
 -include("valid_json_core.hrl").
@@ -14,25 +14,31 @@
 %% из списка заново.
 -type application() :: {[binary()], non_neg_integer(), json(), addr()}.
 
+%% Роль keyword в раскладке: список схем по индексам либо одна схема на остаток
+%% массива. Именем keyword роль не определяется — array-form `items` Draft
+%% 2019-09 стоит в префиксе, а одноимённый хвостовой `items` Draft 2020-12 в
+%% остатке.
+-type role() :: prefix | rest.
+
 %% Ненаписанная граница `contains`.
 -type bound() :: non_neg_integer() | undefined.
 
 -spec check(constraint(), json(), #eval_context{}) -> #eval_result{}.
 check({items, Addr}, Instance, Context) when is_list(Instance) ->
-    evaluate([{<<"items">>, elements(Addr, Instance, 0)}], length(Instance), Context);
+    evaluate([{<<"items">>, rest, elements(<<"items">>, Addr, Instance, 0)}],
+             length(Instance), Context);
 %% Keywords применяются только к массиву: другое значение даёт успешный unit без
 %% error и annotation, а не отказ.
 check({items, Addr}, _Instance, Context) ->
     inapplicable([{<<"items">>, Addr}], Context);
 check({prefix_items, Addrs, Tail}, Instance, Context) when is_list(Instance) ->
-    Prefix  = prefix(Addrs, Instance, 0, []),
-    Applied = length(Prefix),
-    Rest    = lists:nthtail(Applied, Instance),
-    evaluate([{<<"prefixItems">>, Prefix},
-              {<<"items">>, elements(Tail, Rest, Applied)}],
-             length(Instance), Context);
+    ordered(<<"prefixItems">>, Addrs, <<"items">>, Tail, Instance, Context);
 check({prefix_items, Addrs, Tail}, _Instance, Context) ->
     inapplicable([{<<"prefixItems">>, Addrs}, {<<"items">>, Tail}], Context);
+check({items_array, Addrs, Tail}, Instance, Context) when is_list(Instance) ->
+    ordered(<<"items">>, Addrs, <<"additionalItems">>, Tail, Instance, Context);
+check({items_array, Addrs, Tail}, _Instance, Context) ->
+    inapplicable([{<<"items">>, Addrs}, {<<"additionalItems">>, Tail}], Context);
 check({contains, Addr, Min, Max, Marks}, Instance, Context) when is_list(Instance) ->
     contains(Addr, Min, Max, Marks, Instance, Context);
 check({contains, Addr, Min, Max, _Marks}, _Instance, Context) ->
@@ -40,30 +46,44 @@ check({contains, Addr, Min, Max, _Marks}, _Instance, Context) ->
                   {<<"minContains">>, Min},
                   {<<"maxContains">>, Max}], Context).
 
-%% Схема из `prefixItems` применяется к элементу с тем же индексом; лишние схемы
-%% и лишние элементы остаются без пары.
--spec prefix([addr()], [json()], non_neg_integer(), [application()]) -> [application()].
-prefix([], _Elements, _Index, Acc) ->
-    lists:reverse(Acc);
-prefix(_Addrs, [], _Index, Acc) ->
-    lists:reverse(Acc);
-prefix([Addr | Addrs], [Element | Elements], Index, Acc) ->
-    Application = {[integer_to_binary(Index), <<"prefixItems">>], Index, Element, Addr},
-    prefix(Addrs, Elements, Index + 1, [Application | Acc]).
+%% Раскладки обоих dialects устроены одинаково: список схем разбирает префикс
+%% массива, одна схема достаётся остатку. Отличаются они только именами
+%% keywords, поэтому дальше несётся роль, а имя нужно локации и тексту ошибки.
+-spec ordered(binary(), [addr()], binary(), addr() | undefined, [json()],
+              #eval_context{}) -> #eval_result{}.
+ordered(Head, Addrs, Tail, TailAddr, Instance, Context) ->
+    Prefix  = prefix(Head, Addrs, Instance, 0, []),
+    Applied = length(Prefix),
+    Rest    = lists:nthtail(Applied, Instance),
+    evaluate([{Head, prefix, Prefix},
+              {Tail, rest, elements(Tail, TailAddr, Rest, Applied)}],
+             length(Instance), Context).
 
-%% `items` без `prefixItems` применяется ко всему массиву, хвостовой — к остатку
+%% Схема из префикса применяется к элементу с тем же индексом; лишние схемы
+%% и лишние элементы остаются без пары.
+-spec prefix(binary(), [addr()], [json()], non_neg_integer(), [application()]) ->
+          [application()].
+prefix(_Keyword, [], _Elements, _Index, Acc) ->
+    lists:reverse(Acc);
+prefix(_Keyword, _Addrs, [], _Index, Acc) ->
+    lists:reverse(Acc);
+prefix(Keyword, [Addr | Addrs], [Element | Elements], Index, Acc) ->
+    Application = {[integer_to_binary(Index), Keyword], Index, Element, Addr},
+    prefix(Keyword, Addrs, Elements, Index + 1, [Application | Acc]).
+
+%% Одиночный `items` применяется ко всему массиву, хвостовой keyword — к остатку
 %% за префиксом: формы отличаются только первым индексом. Своего сегмента у ветви
 %% нет, она стоит на самом keyword.
--spec elements(addr() | undefined, [json()], non_neg_integer()) ->
+-spec elements(binary(), addr() | undefined, [json()], non_neg_integer()) ->
           [application()] | undefined.
-elements(undefined, _Elements, _Index) ->
+elements(_Keyword, undefined, _Elements, _Index) ->
     undefined;
-elements(Addr, Elements, Index) ->
-    [{[<<"items">>], I, Element, Addr} || {I, Element} <- lists:enumerate(Index, Elements)].
+elements(Keyword, Addr, Elements, Index) ->
+    [{[Keyword], I, Element, Addr} || {I, Element} <- lists:enumerate(Index, Elements)].
 
 %% Обрыв разрешён только в режиме flag; в остальных режимах выполняются оба
 %% keyword'а, потому что дерево units должно быть полным.
--spec evaluate([{binary(), [application()] | undefined}], non_neg_integer(),
+-spec evaluate([{binary(), role(), [application()] | undefined}], non_neg_integer(),
                #eval_context{}) -> #eval_result{}.
 evaluate(Written, Length, Context) ->
     evaluate(Written, Length, Context,
@@ -71,12 +91,12 @@ evaluate(Written, Length, Context) ->
 
 evaluate([], _Length, _Context, #eval_result{units = Units} = Result) ->
     Result#eval_result{units = lists:reverse(Units)};
-evaluate([{_Keyword, undefined} | Rest], Length, Context, Result) ->
+evaluate([{_Keyword, _Role, undefined} | Rest], Length, Context, Result) ->
     evaluate(Rest, Length, Context, Result);
-evaluate([{Keyword, Applications} | Rest], Length, Context,
+evaluate([{Keyword, Role, Applications} | Rest], Length, Context,
          #eval_result{valid = Valid, evaluated = Evaluated, units = Units}) ->
     #eval_result{valid = ValidOne, evaluated = EvaluatedOne, units = UnitsOne} =
-        keyword(Keyword, Applications, Length, Context),
+        keyword(Keyword, Role, Applications, Length, Context),
     Merged = #eval_result{valid     = Valid andalso ValidOne,
                           evaluated = valid_json_evaluated:merge(Evaluated, EvaluatedOne),
                           units     = lists:reverse(UnitsOne, Units)},
@@ -85,13 +105,14 @@ evaluate([{Keyword, Applications} | Rest], Length, Context,
         false -> evaluate(Rest, Length, Context, Merged)
     end.
 
--spec keyword(binary(), [application()], non_neg_integer(), #eval_context{}) ->
+-spec keyword(binary(), role(), [application()], non_neg_integer(), #eval_context{}) ->
           #eval_result{}.
-keyword(Keyword, Applications, Length, Context) ->
+keyword(Keyword, Role, Applications, Length, Context) ->
     {Valid, Applied, Units} = apply_all(Applications, Context, true, 0, []),
     #eval_result{valid     = Valid,
-                 evaluated = coverage(Keyword, Valid, Applied, Length),
-                 units     = own(Keyword, Valid, detail(Keyword, Valid, Applied, Length),
+                 evaluated = coverage(Role, Valid, Applied, Length),
+                 units     = own(Keyword, Valid,
+                                 detail(Role, Keyword, Valid, Applied, Length),
                                  Units, Context)}.
 
 %% Покрытие дочерней schema принадлежит ей самой и наверх не идёт: родитель
@@ -110,34 +131,37 @@ apply_all([{Tail, Index, Element, Addr} | Rest], Context, Valid, Applied, Units)
         false -> apply_all(Rest, Context, Accumulated, Applied + 1, Collected)
     end.
 
-%% `items` покрывает весь остаток массива, `prefixItems` — префикс длиной в число
-%% применённых схем, а если их хватило на весь массив, то и его целиком
-%% (validator-core.md, «Покрытие при успехе»). Провалившийся keyword аннотации не
-%% производит и потому покрытия не вносит.
--spec coverage(binary(), boolean(), non_neg_integer(), non_neg_integer()) -> evaluated().
-coverage(_Keyword, false, _Applied, _Length) ->
+%% Keyword остатка покрывает весь остаток массива, keyword префикса — префикс
+%% длиной в число применённых схем, а если их хватило на весь массив, то и его
+%% целиком (validator-core.md, «Покрытие при успехе»). Провалившийся keyword
+%% аннотации не производит и потому покрытия не вносит.
+-spec coverage(role(), boolean(), non_neg_integer(), non_neg_integer()) -> evaluated().
+coverage(_Role, false, _Applied, _Length) ->
     valid_json_evaluated:neutral();
-coverage(<<"items">>, true, _Applied, _Length) ->
+coverage(rest, true, _Applied, _Length) ->
     valid_json_evaluated:items(all);
-coverage(<<"prefixItems">>, true, Applied, Length) when Applied >= Length ->
+coverage(prefix, true, Applied, Length) when Applied >= Length ->
     valid_json_evaluated:items(all);
-coverage(<<"prefixItems">>, true, Applied, _Length) ->
+coverage(prefix, true, Applied, _Length) ->
     valid_json_evaluated:items({Applied, []}).
 
-%% Аннотация `prefixItems` — наибольший индекс, к которому keyword применился,
-%% либо `true`, если он применился ко всем (core.txt:2481). Аннотация `items` —
-%% всегда `true`: применившись хоть куда-то, он покрыл весь остаток
-%% (core.txt:2504). Не применявшийся keyword аннотации не производит.
--spec detail(binary(), boolean(), non_neg_integer(), non_neg_integer()) -> detail().
-detail(Keyword, false, _Applied, _Length) ->
-    {error, message(Keyword)};
-detail(_Keyword, true, 0, _Length) ->
+%% Аннотация keyword префикса — наибольший индекс, к которому он применился,
+%% либо `true`, если он применился ко всем (2020-12 core.txt:2481 про
+%% `prefixItems`, 2019-09 core.txt:2274 про array-form `items`). Аннотация
+%% keyword остатка — всегда `true`: применившись хоть куда-то, он покрыл весь
+%% остаток (2020-12 core.txt:2504, 2019-09 core.txt:2300). Не применявшийся
+%% keyword аннотации не производит.
+-spec detail(role(), binary(), boolean(), non_neg_integer(), non_neg_integer()) ->
+          detail().
+detail(Role, Keyword, false, _Applied, _Length) ->
+    {error, message(Role, Keyword)};
+detail(_Role, _Keyword, true, 0, _Length) ->
     none;
-detail(<<"items">>, true, _Applied, _Length) ->
+detail(rest, _Keyword, true, _Applied, _Length) ->
     {annotation, true};
-detail(<<"prefixItems">>, true, Applied, Length) when Applied >= Length ->
+detail(prefix, _Keyword, true, Applied, Length) when Applied >= Length ->
     {annotation, true};
-detail(<<"prefixItems">>, true, Applied, _Length) ->
+detail(prefix, _Keyword, true, Applied, _Length) ->
     {annotation, Applied - 1}.
 
 %% Подсхема применяется к каждому элементу и после первого совпадения: обрыв
@@ -239,11 +263,19 @@ own(_Keyword, _Valid, _Detail, _Nested, #eval_context{mode = flag}) ->
 own(Keyword, Valid, Detail, Nested, Context) ->
     [valid_json_unit:keyword(Keyword, Valid, Detail, Nested, Context)].
 
--spec message(binary()) -> binary().
-message(<<"items">>) ->
-    <<"array items do not match the schema">>;
-message(<<"prefixItems">>) ->
+%% Keyword префикса раздаёт по схеме на индекс, keyword остатка — одну схему на
+%% всё, что осталось; отсюда и разное число в тексте.
+-spec message(role(), binary()) -> binary().
+message(prefix, <<"prefixItems">>) ->
     <<"array prefix items do not match their schemas">>;
+message(prefix, <<"items">>) ->
+    <<"array items do not match their schemas">>;
+message(rest, <<"items">>) ->
+    <<"array items do not match the schema">>;
+message(rest, <<"additionalItems">>) ->
+    <<"additional array items do not match the schema">>.
+
+-spec message(binary()) -> binary().
 message(<<"contains">>) ->
     <<"array does not contain a matching element">>;
 message(<<"minContains">>) ->

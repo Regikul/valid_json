@@ -280,17 +280,21 @@
   assertion, поэтому аннотация собирается и там. Подключён обязательный
   `format.json` обоих dialects. Выбор между annotation и assertion по vocabulary
   и compile options остаётся в P8.
-- [ ] Реализовать array-form `items` и `additionalItems` Draft 2019-09; здесь
-  же принять отложенные группы `relative pointer ref to array` и
-  `$ref with $recursiveAnchor` из `ref.json` Draft 2019-09.
+- [x] Реализовать array-form `items` и `additionalItems` Draft 2019-09
+  отдельным IR `items_array`: компилятор выбирает раскладку по типу значения
+  `items`, а `additionalItems` без array-form `items` игнорирует. Обе раскладки
+  устроены одинаково — список схем на префикс и одна схема на остаток, — поэтому
+  evaluator несёт роль keyword отдельно от его имени. Отложенные группы
+  `relative pointer ref to array` и `$ref with $recursiveAnchor` из `ref.json`
+  Draft 2019-09 приняты.
 - [x] Реализовать `$recursiveAnchor` и `$recursiveRef` отдельным IR и правилом
   разрешения: корневой флаг resource и лексическая цель строятся compiler'ом,
   evaluator выбирает самый внешний помеченный resource, а обязательный
   `recursiveRef.json` Draft 2019-09 проходит.
-- [~] Учесть различия annotations, unknown keywords и покрытия `contains`
-  между Draft 2019-09 и Draft 2020-12: recursive compatibility теперь
-  исполняется в 2019-09 и становится unknown annotations в 2020-12; остались
-  annotations array-form `items` и `additionalItems`.
+- [x] Учесть различия annotations, unknown keywords и покрытия `contains`
+  между Draft 2019-09 и Draft 2020-12: recursive compatibility исполняется в
+  2019-09 и становится unknown annotations в 2020-12, а array-form `items` и
+  `additionalItems` дают свои annotations и своё покрытие.
 - [ ] Реализовать cross-draft переходы и наследование dialect для embedded и
   remote resources.
 - [ ] Включить проверку schema resources метасхемами Draft 2020-12 и
@@ -302,16 +306,15 @@
   и evaluator fixtures, vocabulary errors — fixtures на неизвестный vocabulary,
   отсутствующий Core и незарегистрированную метасхему; остался cross-draft
   closure.
-- [ ] Подключить к runner `uniqueItems.json` и `items.json` Draft 2019-09: обе
-  раскладки опираются на array-form `items` и `additionalItems`.
-- [~] Подключить к runner `unevaluatedItems.json` Draft 2019-09 целиком и
-  группу `unevaluatedProperties with $recursiveRef`: recursive-группа
-  `unevaluatedProperties` подключена и проходит; `unevaluatedItems.json`
-  остаётся до array-form `items` с `additionalItems`.
+- [x] Подключить к runner `uniqueItems.json` и `items.json` Draft 2019-09: обе
+  раскладки опирались на array-form `items` и `additionalItems`, и теперь оба
+  файла идут общим списком для обоих dialects.
+- [x] Подключить к runner `unevaluatedItems.json` Draft 2019-09 целиком и
+  группу `unevaluatedProperties with $recursiveRef`: обе подключены и проходят.
+  Отложенных групп в runner не осталось вовсе.
 - [x] Подключить к runner `ref.json` и `defs.json` обоих dialects: у каждого
   есть группа с `$ref` на корневую метасхему, и она ждала, пока та станет
-  компилируемой. Обе корневые метасхемы теперь компилируются целиком; две
-  группы `ref.json` Draft 2019-09 остались до array-form `items`.
+  компилируемой. Обе корневые метасхемы компилируются целиком.
 - [ ] Приёмка P6: проходят обязательные files Draft 2019-09 и выбранные
   `optional/cross-draft`, compatibility и recursive cases.
 

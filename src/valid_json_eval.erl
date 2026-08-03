@@ -156,6 +156,8 @@ dispatch({items, _} = Constraint, Instance, Context) ->
     valid_json_array:check(Constraint, Instance, Context);
 dispatch({prefix_items, _, _} = Constraint, Instance, Context) ->
     valid_json_array:check(Constraint, Instance, Context);
+dispatch({items_array, _, _} = Constraint, Instance, Context) ->
+    valid_json_array:check(Constraint, Instance, Context);
 dispatch({contains, _, _, _, _} = Constraint, Instance, Context) ->
     valid_json_array:check(Constraint, Instance, Context);
 dispatch({properties, _, _, _} = Constraint, Instance, Context) ->

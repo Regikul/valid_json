@@ -300,21 +300,63 @@ array_error_test_() ->
                    compile(#{<<"prefixItems">> => [true, #{<<"maximum">> => null}]}))].
 
 %% Раскладку выбирает dialect: schema-form `items` одинаков в обоих, array-form
-%% ждёт P6, а неизвестный для 2019-09 `prefixItems` игнорируется и не мешает
-%% соседнему `items`.
+%% принадлежит только 2019-09, а неизвестный там `prefixItems` игнорируется и не
+%% мешает соседнему `items`.
 array_dialect_test_() ->
     [?_assertEqual({ok, legacy_artifact(#{<<>>        => schema_node([{items,
                                                                        addr(<<"/items">>)}]),
                                           <<"/items">> => true})},
                    legacy(#{<<"items">> => true})),
-     ?_assertEqual(schema_error({not_implemented, <<"items">>}, <<"/items">>),
-                   legacy(#{<<"items">> => [true]})),
      ?_assertEqual({ok, legacy_artifact(schema_node([]))},
                    legacy(#{<<"prefixItems">> => [true]})),
      ?_assertEqual({ok, legacy_artifact(#{<<>> => schema_node([{items,
                                                                  addr(<<"/items">>)}]),
                                           <<"/items">> => true})},
                    legacy(#{<<"prefixItems">> => [false], <<"items">> => true}))].
+
+%% Array-form `items` раздаёт по схеме на индекс, `additionalItems` стоит на
+%% самом keyword и достаётся остатку — раскладка та же, что у `prefixItems` с
+%% хвостовым `items`, только имена другие.
+array_legacy_test_() ->
+    [?_assertEqual({ok, legacy_artifact(#{<<>> => schema_node([{items_array,
+                                                                [addr(<<"/items/0">>),
+                                                                 addr(<<"/items/1">>)],
+                                                                undefined}]),
+                                          <<"/items/0">> => true,
+                                          <<"/items/1">> => schema_node([{const, 1}])})},
+                   legacy(#{<<"items">> => [true, #{<<"const">> => 1}]})),
+     ?_assertEqual({ok, legacy_artifact(#{<<>> => schema_node([{items_array,
+                                                                [addr(<<"/items/0">>)],
+                                                                addr(<<"/additionalItems">>)}]),
+                                          <<"/items/0">>         => true,
+                                          <<"/additionalItems">> => false})},
+                   legacy(#{<<"items">> => [true], <<"additionalItems">> => false})),
+     %% Пустой префикс метасхема запрещает, но в IR он ложится, как `allOf: []`.
+     ?_assertEqual({ok, legacy_artifact(schema_node([{items_array, [], undefined}]))},
+                   legacy(#{<<"items">> => []}))].
+
+%% `additionalItems` без array-form `items` спецификация велит игнорировать:
+%% constraint не собирается ни рядом со schema-form `items`, ни в одиночку. Сама
+%% подсхема остаётся node — discovery признал эту schema position.
+array_legacy_ignored_test_() ->
+    [?_assertEqual({ok, legacy_artifact(#{<<>> => schema_node([{items,
+                                                                addr(<<"/items">>)}]),
+                                          <<"/items">>           => true,
+                                          <<"/additionalItems">> => false})},
+                   legacy(#{<<"items">> => true, <<"additionalItems">> => false})),
+     ?_assertEqual({ok, legacy_artifact(#{<<>>                   => schema_node([]),
+                                          <<"/additionalItems">> => false})},
+                   legacy(#{<<"additionalItems">> => false}))].
+
+array_legacy_error_test_() ->
+    [?_assertEqual(schema_error({bad_keyword_value, null}, <<"/items/1/maximum">>),
+                   legacy(#{<<"items">> => [true, #{<<"maximum">> => null}]})),
+     ?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/additionalItems">>),
+                   legacy(#{<<"items">> => [true], <<"additionalItems">> => 42})),
+     %% Игнорируемый `additionalItems` всё равно обязан быть schema: его node
+     %% выпускается общим проходом.
+     ?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/additionalItems">>),
+                   legacy(#{<<"additionalItems">> => 42}))].
 
 %% Границы попадают в тот же constraint отдельными слотами, а ненаписанная
 %% остаётся `undefined`. Последнее поле — покрывает ли `contains` индексы: это

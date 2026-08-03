@@ -770,21 +770,16 @@ array_units_test_() ->
 %% `true`, если он применился ко всему массиву. Аннотация `items` — всегда
 %% `true`. Не применявшийся keyword аннотации не производит.
 array_annotation_test_() ->
-    Own = fun(Artifact, Instance) ->
-                  [{valid_json_location:pointer(Keywords), Detail}
-                   || #output_unit{keyword_location = Keywords, detail = Detail}
-                          <- own(collect(Artifact, Instance, basic))]
-          end,
     Pair = prefix_items([true, true], undefined),
-    [?_assertEqual([{<<"/prefixItems">>, {annotation, 1}}], Own(Pair, [1, 2, 3])),
-     ?_assertEqual([{<<"/prefixItems">>, {annotation, true}}], Own(Pair, [1, 2])),
-     ?_assertEqual([{<<"/prefixItems">>, {annotation, true}}], Own(Pair, [1])),
-     ?_assertEqual([{<<"/prefixItems">>, none}], Own(Pair, [])),
-     ?_assertEqual([{<<"/items">>, {annotation, true}}], Own(items([]), [1])),
-     ?_assertEqual([{<<"/items">>, none}], Own(items([]), [])),
+    [?_assertEqual([{<<"/prefixItems">>, {annotation, 1}}], own_details(Pair, [1, 2, 3])),
+     ?_assertEqual([{<<"/prefixItems">>, {annotation, true}}], own_details(Pair, [1, 2])),
+     ?_assertEqual([{<<"/prefixItems">>, {annotation, true}}], own_details(Pair, [1])),
+     ?_assertEqual([{<<"/prefixItems">>, none}], own_details(Pair, [])),
+     ?_assertEqual([{<<"/items">>, {annotation, true}}], own_details(items([]), [1])),
+     ?_assertEqual([{<<"/items">>, none}], own_details(items([]), [])),
      %% Хвостовому `items` применяться не к чему, а сам префикс аннотацию даёт.
      ?_assertEqual([{<<"/prefixItems">>, {annotation, true}}, {<<"/items">>, none}],
-                   Own(prefix_items([true], false), [1]))].
+                   own_details(prefix_items([true], false), [1]))].
 
 %% `items` покрывает весь массив, `prefixItems` — свой префикс. Провалившийся
 %% keyword аннотации не даёт, поэтому и покрытия не вносит.
@@ -795,6 +790,65 @@ array_coverage_test_() ->
      %% Схем хватило на весь массив — покрыт весь массив.
      ?_assertEqual({[], all, []}, coverage_of(prefix_items([true, true], undefined), [1, 2])),
      ?_assertEqual({[], all, []}, coverage_of(prefix_items([true], true), [1, 2, 3]))].
+
+%% Раскладка Draft 2019-09 устроена так же, как `prefixItems` с хвостовым
+%% `items`: array-form `items` раздаёт по схеме на индекс, `additionalItems`
+%% достаётся остатку.
+items_array_test_() ->
+    Pair = items_array([[{type, [integer]}], [{type, [string]}]], undefined),
+    Closed = items_array([true], false),
+    [?_assert(verdict(Pair, [1, <<"a">>])),
+     ?_assertNot(verdict(Pair, [1, 2])),
+     %% Длину массива keyword не ограничивает: лишние схемы остаются без пары,
+     %% лишние элементы — без схемы.
+     ?_assert(verdict(Pair, [1])),
+     ?_assert(verdict(Pair, [])),
+     ?_assert(verdict(Pair, [1, <<"a">>, true])),
+     %% Остаток за префиксом достаётся `additionalItems`.
+     ?_assert(verdict(Closed, [1])),
+     ?_assertNot(verdict(Closed, [1, 2])),
+     ?_assert(verdict(items_array([], undefined), [1])),
+     %% Не-массив constraint не ограничивает.
+     ?_assert(verdict(Closed, <<"ab">>))].
+
+items_array_units_test_() ->
+    Tail = items_array([[{type, [integer]}]], [{type, [string]}]),
+    [?_assertEqual([{<<"/items">>, <<>>},
+                    {<<"/items/0/type">>, <<"/0">>},
+                    {<<"/additionalItems">>, <<>>},
+                    {<<"/additionalItems/type">>, <<"/1">>},
+                    {<<"/additionalItems/type">>, <<"/2">>}],
+                   paired(collect(Tail, [1, <<"a">>, <<"b">>], basic))),
+     %% Не-массив: units написанных keywords остаются, но без деталей.
+     ?_assertEqual([{<<"/items">>, true, none}, {<<"/additionalItems">>, true, none}],
+                   printed(collect(Tail, 1, basic)))].
+
+%% Аннотация array-form `items` — наибольший индекс, к которому он применился,
+%% либо `true`, если он применился ко всему массиву. Аннотация `additionalItems`
+%% — всегда `true`. Не применявшийся keyword аннотации не производит.
+items_array_annotation_test_() ->
+    Pair = items_array([true, true], undefined),
+    [?_assertEqual([{<<"/items">>, {annotation, 1}}], own_details(Pair, [1, 2, 3])),
+     ?_assertEqual([{<<"/items">>, {annotation, true}}], own_details(Pair, [1, 2])),
+     ?_assertEqual([{<<"/items">>, {annotation, true}}], own_details(Pair, [1])),
+     ?_assertEqual([{<<"/items">>, none}], own_details(Pair, [])),
+     ?_assertEqual([{<<"/items">>, {annotation, 0}},
+                    {<<"/additionalItems">>, {annotation, true}}],
+                   own_details(items_array([true], true), [1, 2])),
+     %% `additionalItems` применяться не к чему, а сам префикс аннотацию даёт.
+     ?_assertEqual([{<<"/items">>, {annotation, true}},
+                    {<<"/additionalItems">>, none}],
+                   own_details(items_array([true], false), [1]))].
+
+items_array_coverage_test_() ->
+    [?_assertEqual({[], 2, []},
+                   coverage_of(items_array([true, true], undefined), [1, 2, 3])),
+     %% Схем хватило на весь массив — покрыт весь массив.
+     ?_assertEqual({[], all, []},
+                   coverage_of(items_array([true, true], undefined), [1, 2])),
+     ?_assertEqual({[], all, []}, coverage_of(items_array([true], true), [1, 2, 3])),
+     %% Провалившийся keyword аннотации не даёт, поэтому и покрытия не вносит.
+     ?_assertEqual(neutral(), coverage_of(items_array([false], undefined), [1]))].
 
 %% Обрыв разрешён только в режиме flag; в остальных режимах обходятся все
 %% элементы, потому что дерево units должно быть полным.
@@ -1231,6 +1285,13 @@ from_keyword(#output_unit{nested = Nodes}) ->
 %% и говорят о своих значениях, а не о применении.
 own([#output_unit{nested = Keywords}]) -> Keywords.
 
+%% Детали собственных units написанных keywords рядом с их локациями: так
+%% читаются аннотации, которые keyword произвёл на этом инстансе.
+own_details(Artifact, Instance) ->
+    [{valid_json_location:pointer(Keywords), Detail}
+     || #output_unit{keyword_location = Keywords, detail = Detail}
+            <- own(collect(Artifact, Instance, basic))].
+
 %% Собственный unit node: он один, потому что вычисление начинается от корня.
 node_unit(Node, Instance) ->
     [Unit] = units(Node, Instance, basic),
@@ -1295,6 +1356,17 @@ prefix_items(Children, Tail) ->
                 slot(<<"/items">>, Tail)}],
               [{Pointer(Index), Child} || {Index, Child} <- Prefix]
               ++ [{<<"/items">>, Tail} || Tail =/= undefined]).
+
+%% Раскладка Draft 2019-09: схемы array-form `items` адресуются по индексу, а
+%% `additionalItems` стоит на собственном keyword и задаётся `undefined`, если не
+%% написан.
+items_array(Children, Tail) ->
+    Pointer = fun(Index) -> <<"/items/", (integer_to_binary(Index))/binary>> end,
+    Prefix = lists:enumerate(0, Children),
+    branching([{items_array, [addr(Pointer(Index)) || {Index, _Child} <- Prefix],
+                slot(<<"/additionalItems">>, Tail)}],
+              [{Pointer(Index), Child} || {Index, Child} <- Prefix]
+              ++ [{<<"/additionalItems">>, Tail} || Tail =/= undefined]).
 
 contains(Child, Min, Max) ->
     contains(Child, Min, Max, true).

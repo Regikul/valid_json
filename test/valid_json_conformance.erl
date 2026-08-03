@@ -19,6 +19,7 @@
                 "required.json", "dependentRequired.json",
                 "properties.json", "patternProperties.json",
                 "additionalProperties.json", "propertyNames.json",
+                "items.json", "uniqueItems.json",
                 "contains.json", "maxContains.json", "minContains.json",
                 "allOf.json", "anyOf.json", "oneOf.json",
                 "if-then-else.json", "dependentSchemas.json",
@@ -26,30 +27,23 @@
                 "vocabulary.json",
                 "ref.json", "defs.json",
                 "anchor.json", "refRemote.json", "infinite-loop-detection.json",
-                "unevaluatedProperties.json",
+                "unevaluatedProperties.json", "unevaluatedItems.json",
                 "optional/id.json", "optional/unknownKeyword.json"]).
 
-%% Files, подключённые только к одному dialect: раскладка второго ждёт своей
-%% фазы. `prefixItems.json` в Draft 2019-09 не существует вовсе, а тамошние
-%% `uniqueItems.json` и `items.json` опираются на array-form `items` и
-%% `additionalItems` из P6. По той же причине там отложен и весь
-%% `unevaluatedItems.json`: из двадцати шести групп восемнадцать написаны через
-%% array-form `items`, `additionalItems` или recursive keywords, и ?PENDING в
-%% таком объёме перестал бы читаться. Обоих файлов `dynamicRef.json` в
-%% Draft 2019-09 нет вовсе: keyword появился только в 2020-12. Обязательный
-%% `recursiveRef.json`, наоборот, существует только в Draft 2019-09.
+%% Files, существующие только в одном dialect: `prefixItems.json` появился
+%% вместе с самим keyword в Draft 2020-12, обоих файлов `dynamicRef.json` в
+%% Draft 2019-09 нет по той же причине, а обязательный `recursiveRef.json`,
+%% наоборот, существует только в Draft 2019-09. Files, отложенные до своей фазы,
+%% здесь не перечисляются: для этого есть ?PENDING.
 -define(DIALECT_FILES, [{"draft2020-12",
-                         ["prefixItems.json", "uniqueItems.json", "items.json",
-                          "unevaluatedItems.json", "dynamicRef.json",
+                         ["prefixItems.json", "dynamicRef.json",
                           "optional/dynamicRef.json"]},
                         {"draft2019-09", ["recursiveRef.json"]}]).
 
 %% Группы подключённых files, которые ждут keywords следующих фаз: их схемы пока
 %% не компилируются вовсе. Фаза, снимающая группу, вычёркивает свою строку
 %% вместе с работой — так же, как отмечает выполненный пункт роадмапа.
--define(PENDING,
-        [{"draft2019-09", "ref.json", <<"relative pointer ref to array">>},
-         {"draft2019-09", "ref.json", <<"$ref with $recursiveAnchor">>}]).
+-define(PENDING, []).
 
 %% Объявленные расхождения основного набора: okf/testing/conformance-policy.md,
 %% раздел «Известные расхождения». Группа исключается поимённо, чтобы остальные
@@ -64,7 +58,7 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES и
 %% ?EXCLUDED, и менять его иначе нельзя.
--define(CENSUS, {697, 2355}).
+-define(CENSUS, {740, 2512}).
 
 %% Сьют адресует свои remote documents относительно этого base, повторяя в URI
 %% раскладку директории `remotes`. Число документов закреплено по той же

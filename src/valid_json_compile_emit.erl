@@ -28,7 +28,7 @@
                 <<"maxItems">>, <<"minItems">>, <<"uniqueItems">>,
                 <<"maxProperties">>, <<"minProperties">>,
                 <<"required">>, <<"dependentRequired">>,
-                [<<"prefixItems">>, <<"items">>],
+                [<<"prefixItems">>, <<"items">>, <<"additionalItems">>],
                 [<<"contains">>, <<"minContains">>, <<"maxContains">>],
                 [<<"properties">>, <<"patternProperties">>,
                  <<"additionalProperties">>],
@@ -63,10 +63,10 @@
 -define(DEFERRED_COMMON,
         [<<"contentEncoding">>, <<"contentMediaType">>,
          <<"contentSchema">>]).
-%% Отложенных keywords, принадлежащих только Draft 2020-12, сейчас не осталось.
+%% Keywords, отложенных только для одного dialect, сейчас не осталось: списки
+%% пусты, но сохранены, потому что следующие фазы снова их наполнят.
 -define(DEFERRED_2020_12, []).
--define(DEFERRED_2019_09,
-        [<<"additionalItems">>]).
+-define(DEFERRED_2019_09, []).
 
 %% Активность keyword решают vocabularies профиля; на сам draft emitter смотрит
 %% только там, где спецификации расходятся при одинаковом наборе vocabularies:
@@ -354,7 +354,8 @@ constraint([<<"properties">>, <<"patternProperties">>, <<"additionalProperties">
     object(Schema, Position, State);
 constraint([<<"if">>, <<"then">>, <<"else">>], Schema, Position, State) ->
     conditional(Schema, Position, State);
-constraint([<<"prefixItems">>, <<"items">>], Schema, Position, State) ->
+constraint([<<"prefixItems">>, <<"items">>, <<"additionalItems">>],
+           Schema, Position, State) ->
     array(Schema, Position, State);
 constraint([<<"contains">>, <<"minContains">>, <<"maxContains">>],
            Schema, Position, State) ->
@@ -520,30 +521,34 @@ conditional(Schema, Position, State) ->
     end.
 
 %% `prefixItems` с хвостовым `items` — раскладка Draft 2020-12. В Draft 2019-09
-%% ту же работу делают array-form `items` и `additionalItems`: массив пока
-%% отложен до P6, а неизвестный там `prefixItems` игнорируется.
-%% Одиночный `items` со schema-значением одинаков в обоих dialects.
+%% ту же работу делают array-form `items` и `additionalItems`, а неизвестный там
+%% `prefixItems` игнорируется. Одиночный `items` со schema-значением одинаков в
+%% обоих dialects.
 -spec array(#{binary() => json()}, position(), state()) ->
-          {ok, constraint(), state()} | {error, #schema_error{}}.
+          {ok, constraint() | none, state()} | {error, #schema_error{}}.
 array(Schema, Position, #state{profile = #profile{draft = Draft}} = State) ->
     case layout(Draft, Schema) of
-        prefix                 -> prefixed(Schema, Position, State);
-        single                 -> single(Schema, Position, State);
-        {unsupported, Keyword} ->
-            {error, schema_error({not_implemented, Keyword},
-                                 below(Keyword, Position))}
+        prefix -> prefixed(Schema, Position, State);
+        array  -> arrayed(Schema, Position, State);
+        single -> single(Schema, Position, State);
+        none   -> {ok, none, State}
     end.
 
--spec layout(dialect(), #{binary() => json()}) -> prefix | single | {unsupported, binary()}.
+%% `additionalItems` без array-form `items` спецификация велит игнорировать
+%% (validation Draft 2019-09, 9.3.1.2), поэтому constraint не собирается — как у
+%% `then` без `if`. Сама подсхема всё равно остаётся node: discovery признал эту
+%% schema position, и общий emission её обработает.
+-spec layout(dialect(), #{binary() => json()}) -> prefix | array | single | none.
 layout(?DRAFT_2020_12, Schema) ->
     case is_map_key(<<"prefixItems">>, Schema) of
         true  -> prefix;
         false -> single
     end;
 layout(_Dialect, Schema) ->
-    case maps:get(<<"items">>, Schema) of
-        Value when is_list(Value) -> {unsupported, <<"items">>};
-        _Value                    -> single
+    case maps:find(<<"items">>, Schema) of
+        {ok, Value} when is_list(Value) -> array;
+        {ok, _Value}                    -> single;
+        error                           -> none
     end.
 
 %% Своего сегмента у хвостового `items` нет: он стоит на самом keyword, как и
@@ -554,6 +559,18 @@ prefixed(Schema, Position, State) ->
     Slots = [{<<"prefixItems">>, fun ordered/3}, {<<"items">>, fun subschema/3}],
     case slots(Slots, Schema, Position, State) of
         {ok, [Tail, Addrs], Built} -> {ok, {prefix_items, Addrs, Tail}, Built};
+        {error, _} = Error         -> Error
+    end.
+
+%% Раскладка Draft 2019-09: сегментом каждой схемы префикса становится её
+%% десятичный индекс, а `additionalItems` стоит на самом keyword и достаётся
+%% остатку массива.
+-spec arrayed(#{binary() => json()}, position(), state()) ->
+          {ok, constraint(), state()} | {error, #schema_error{}}.
+arrayed(Schema, Position, State) ->
+    Slots = [{<<"items">>, fun ordered/3}, {<<"additionalItems">>, fun subschema/3}],
+    case slots(Slots, Schema, Position, State) of
+        {ok, [Tail, Addrs], Built} -> {ok, {items_array, Addrs, Tail}, Built};
         {error, _} = Error         -> Error
     end.
 
