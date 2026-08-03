@@ -418,16 +418,15 @@
   целиком написан через content keywords этой фазы. Оба файла подключены
   целиком и проходят, а отложенных компилятором keywords не осталось вовсе.
 - [~] Подключить выбранные `optional/format`, content и прочие optional files к
-  runner. Из профиля format подключены пятнадцать файлов обоих диалектов —
+  runner. Из профиля format подключены шестнадцать файлов обоих диалектов —
   `date.json`, `time.json`, `date-time.json`, `duration.json`, `email.json`,
   `hostname.json`, `ipv4.json`, `ipv6.json`, `uri.json`,
   `uri-reference.json`, `uri-template.json`, `json-pointer.json` и
-  `relative-json-pointer.json`, `uuid.json` и `regex.json`; схемы файлов
-  директории `optional/format/`
+  `relative-json-pointer.json`, `uuid.json`, `regex.json` и `unknown.json`;
+  схемы файлов директории `optional/format/`
   компилируются с `{assert_format, true}`, а обязательный `format.json` остаётся
-  с умолчанием. Четыре IDN/IRI-файла исключены намеренно, а `unknown.json`
-  алгоритма не требует, но к runner пока тоже не подключён.
-  Прочие optional profiles ещё не выбраны пунктом выше.
+  с умолчанием. Четыре IDN/IRI-файла исключены намеренно. Прочие optional
+  profiles ещё не выбраны пунктом выше.
 - [ ] Задокументировать результаты дополнительных capability profiles и все
   намеренные исключения.
 - [ ] Приёмка P8: выбранные optional profiles проходят без необъявленных
