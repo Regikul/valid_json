@@ -9,7 +9,10 @@
 %% и потому не может провалить assertion. Так остаются annotation-only и
 %% пользовательские имена, и стандартные форматы, до которых таблица не дошла.
 unsupported_test_() ->
-    [?_assertEqual(unsupported, valid_json_format:attribute(<<"uri">>, <<"@">>)),
+    [?_assertEqual(unsupported,
+                   valid_json_format:attribute(<<"idn-email">>, <<"a@b">>)),
+     ?_assertEqual(unsupported,
+                   valid_json_format:attribute(<<"iri">>, <<"/привет"/utf8>>)),
      ?_assertEqual(unsupported,
                    valid_json_format:attribute(<<"custom-name">>, <<>>)),
      ?_assertEqual(unsupported, valid_json_format:attribute(<<"uuid">>, <<>>))].
@@ -208,3 +211,70 @@ email_invalid_test_() ->
 
 is_email(String) ->
     valid_json_format:attribute(<<"email">>, String).
+
+%% URI-family attributes. Conformance suite дополнительно проверяет полный
+%% набор официальных cases обоих dialects.
+uri_valid_test_() ->
+    Valid = [<<"http://foo.bar/?baz=qux#quux">>,
+             <<"http://-.~_!$&'()*+,;=:%40:80%2f::::::@example.com">>,
+             <<"ldap://[2001:db8::7]/c=GB?objectClass?one">>,
+             <<"mailto:John.Doe@example.com">>,
+             <<"urn:oasis:names:specification:docbook:dtd:xml:4.1.2">>,
+             <<"http://999.999.999.999/">>],
+    Invalid = [<<"//foo.bar/?baz=qux#quux">>, <<"/abc">>, <<"abc">>,
+               <<"http:// shouldfail.com">>, <<":// should fail">>,
+               <<"https://example.org/foobar®.txt"/utf8>>,
+               <<"https://example.org/foobar\\.txt">>,
+               <<"https://example.org/foo bar.txt">>,
+               <<"http://example.com/%6G">>, <<"http://example.com/%A">>,
+               <<"http://example.com/%">>, <<"1http://example.com">>,
+               <<"ht_tp://example.com">>, <<"http://example.com:abc/path">>],
+    checks(<<"uri">>, Valid, Invalid).
+
+uri_reference_valid_test_() ->
+    Valid = [<<>>, <<"http://foo.bar/?baz=qux#quux">>,
+             <<"//foo.bar/?baz=qux#quux">>, <<"/abc">>, <<"abc">>,
+             <<"#fragment">>, <<"../other.json">>, <<"?query">>],
+    Invalid = [<<"\\\\WINDOWS\\fileshare">>, <<"#frag\\ment">>,
+               <<"/foobar®.txt"/utf8>>, <<"https://example.org/foobar\\.txt">>,
+               <<"http://example.com/%ZZ">>],
+    checks(<<"uri-reference">>, Valid, Invalid).
+
+uri_template_valid_test_() ->
+    Valid = [<<>>, <<"http://example.com/dictionary/{term:1}/{term}">>,
+             <<"http://example.com/dictionary">>, <<"dictionary/{term}">>,
+             <<"{var}">>, <<"{+path}">>, <<"{#fragment}">>,
+             <<"{.list*}">>, <<"{/segments*}">>, <<"{?query,number}">>,
+             <<"{&query}">>, <<"{foo%20bar}">>,
+             <<"/привет/{name}"/utf8>>],
+    Invalid = [<<"http://example.com/dictionary/{term:1}/{term">>,
+               <<"{ }">>, <<"{}">>, <<"{var,,other}">>,
+               <<"{var:0}">>, <<"{var:10000}">>, <<"{var**}">>,
+               <<"{.}">>, <<"{foo..bar}">>, <<"{foo%ZZ}">>,
+               <<"foo%q">>, <<"foo{bar">>, <<"foo}bar">>,
+               <<"foo\\bar">>],
+    checks(<<"uri-template">>, Valid, Invalid).
+
+json_pointer_valid_test_() ->
+    Valid = [<<>>, <<"/foo/bar~0/baz~1/%a">>, <<"/foo//bar">>,
+             <<"/foo/bar/">>, <<"/">>, <<"/a~1b">>, <<"/c%d">>,
+             <<"/e^f">>, <<"/g|h">>, <<"/i\\j">>, <<"/k\"l">>,
+             <<"/foo/-/bar">>, <<"/foo/bar/😎"/utf8>>,
+             <<"/foo\0bar\nbaz">>],
+    Invalid = [<<"#">>, <<"a">>, <<"0">>, <<"/foo/bar~">>,
+               <<"/~0~">>, <<"/~2">>, <<"/~~">>, <<"/~-1">>],
+    checks(<<"json-pointer">>, Valid, Invalid).
+
+relative_json_pointer_valid_test_() ->
+    Valid = [<<"0">>, <<"1">>, <<"0/foo/bar">>, <<"2/0/baz/1/zip">>,
+             <<"0#">>, <<"120/foo/bar">>, <<"100">>, <<"1/~0/~1">>],
+    Invalid = [<<"/foo/bar">>, <<"-1/foo/bar">>, <<"+1/foo/bar">>,
+               <<"١/foo"/utf8>>, <<"0##">>, <<"01/a">>, <<"01#">>,
+               <<>>, <<"1/foo~2">>],
+    checks(<<"relative-json-pointer">>, Valid, Invalid).
+
+checks(Name, Valid, Invalid) ->
+    [?_assertEqual(true, valid_json_format:attribute(Name, String))
+     || String <- Valid] ++
+    [?_assertEqual(false, valid_json_format:attribute(Name, String))
+     || String <- Invalid].

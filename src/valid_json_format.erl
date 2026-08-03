@@ -81,5 +81,17 @@ attribute(<<"hostname">>, String) ->
     valid_json_format_net:hostname(String);
 attribute(<<"email">>, String) ->
     valid_json_format_net:email(String);
+%% URI-family attributes share the stdlib RFC 3986 parser where possible;
+%% pointer/template grammars are kept in a separate module.
+attribute(<<"uri">>, String) ->
+    valid_json_format_uri:uri(String);
+attribute(<<"uri-reference">>, String) ->
+    valid_json_format_uri:uri_reference(String);
+attribute(<<"uri-template">>, String) ->
+    valid_json_format_uri:uri_template(String);
+attribute(<<"json-pointer">>, String) ->
+    valid_json_format_uri:json_pointer(String);
+attribute(<<"relative-json-pointer">>, String) ->
+    valid_json_format_uri:relative_json_pointer(String);
 attribute(_Name, _String) ->
     unsupported.

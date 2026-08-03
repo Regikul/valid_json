@@ -6,7 +6,7 @@
 * [Validator design overview](validator-design.md) - Инварианты, классификация keywords, границы core/resources/runtime, план реализации и единый список открытых вопросов.
 * [Validator computational core](validator-core.md) - Модель JSON-значения, constraint IR, evaluator, аннотации, output formats и публичный контракт валидации.
 * [Validator resources and runtime](validator-resources-runtime.md) - Schema resources, URI и dialect, registry, компиляция, ETS ownership, reload и invalidation.
-* [Format attributes](format-attributes.md) - Девятнадцать имён `format`: роль, алгоритм, нормативный источник, ограничения и отложенное решение по IDN и IRI.
+* [Format attributes](format-attributes.md) - Девятнадцать имён `format`: роль, алгоритм, нормативный источник, ограничения и документированное исключение по IDN и IRI.
 
 ## Supporting notes
 

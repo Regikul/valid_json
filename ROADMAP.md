@@ -378,34 +378,31 @@
 ## P8 — format, content и optional profiles
 
 - [ ] **Фаза P8 завершена**
-- [~] Выбрать алгоритмы и состав поддерживаемых Format-Assertion attributes:
-  алгоритм выбран для каждого из девятнадцати имён спецификации. Не выбрано
-  решение по четырём — `idn-email`, `idn-hostname`, `iri`, `iri-reference`:
-  всем им нужен один и тот же аппарат IDNA2008, и выбирать предстоит между
-  документированным исключением и собственной реализацией нужных таблиц. Пока
-  выбора нет, эти четыре остаются чистой аннотацией, а Format-Assertion
-  vocabulary не поддержана, потому что требует полной проверки всех имён.
+- [x] Выбрать алгоритмы и состав поддерживаемых Format-Assertion attributes:
+  алгоритм выбран для каждого из девятнадцати имён спецификации; для четырёх —
+  `idn-email`, `idn-hostname`, `iri`, `iri-reference` — зафиксировано
+  документированное исключение вместо собственной реализации таблиц IDNA2008.
+  Эти четыре остаются чистой аннотацией, а Format-Assertion vocabulary не
+  поддержана, потому что требует полной проверки всех имён.
 - [x] Зафиксировать таблицу: format name, dialect, annotation/assertion,
   алгоритм и ограничения. Таблица лежит в
   `okf/architecture/format-attributes.md`. Столбца dialect в ней нет: набор
   имён в обоих диалектах один и тот же, и это сказано словами вместе с тем,
   чем диалекты действительно расходятся — способом включения вердикта.
 - [~] Реализовать выбор между annotation и assertion для `format` по активным
-  vocabularies и compile options: сама annotation сделана в P6. Половина по
-  compile options выполнена: `assert_format` доходит до IR и включает проверку
-  строки по таблице format algorithms, причём успешная проверка аннотацию не
-  отменяет, а значение другого типа и имя вне таблицы остаются чистой
-  annotation. В самой таблице восемь строк: четыре attributes RFC 3339 —
-  `date`, `time`, `date-time` и `duration`, — разобраны модулем
-  `valid_json_format_time`, а `ipv4`, `ipv6`, `hostname` и `email` — модулем
-  `valid_json_format_net`. Остальные одиннадцать имён таблица пока не держит:
-  для семи алгоритмы выбраны пунктом выше, но не написаны, а четыре IDN/IRI
-  ждут самого решения. Не выполнена половина по vocabularies: Format-Assertion
-  обязывает
-  проверять все форматы спецификации, поэтому до готовой таблицы имя в таблицу
-  vocabularies не вносится, метасхема, объявившая его значением `true`,
-  по-прежнему отвергается, а `optional/format-assertion.json` не подключён —
-  все его cases идут именно через такую метасхему.
+  vocabularies и compile options: сама annotation сделана в P6. По compile
+  options `assert_format` доходит до IR и включает проверку строки по таблице
+  format algorithms, причём успешная проверка аннотацию не отменяет, а значение
+  другого типа и имя вне таблицы остаются чистой annotation. В таблице
+  реализованы тринадцать строк: четыре attributes RFC 3339, четыре сетевых
+  attributes и пять URI attributes (`uri`, `uri-reference`, `uri-template`,
+  `json-pointer`, `relative-json-pointer`). Остальные шесть имён — `uuid`,
+  `regex` и четыре IDN/IRI — остаются вне полной assertion-поддержки; четыре
+  последних являются документированным исключением. Не выполнена половина по
+  vocabularies: Format-Assertion обязывает проверять все форматы спецификации,
+  поэтому его URI в таблицу vocabularies не вносится, метасхема, объявившая его
+  значением `true`, отвергается, а `optional/format-assertion.json` не
+  подключён.
 - [x] Реализовать выбранную обработку `contentEncoding`, `contentMediaType` и
   `contentSchema`, сохранив обязательные annotations. Выбрано поведение по
   умолчанию: содержимое строки не декодируется, не разбирается и не проверяется,
@@ -421,13 +418,14 @@
   целиком написан через content keywords этой фазы. Оба файла подключены
   целиком и проходят, а отложенных компилятором keywords не осталось вовсе.
 - [~] Подключить выбранные `optional/format`, content и прочие optional files к
-  runner. Из профиля format подключены восемь файлов обоих диалектов —
+  runner. Из профиля format подключены тринадцать файлов обоих диалектов —
   `date.json`, `time.json`, `date-time.json`, `duration.json`, `email.json`,
-  `hostname.json`, `ipv4.json` и `ipv6.json`; схемы файлов директории
-  `optional/format/` компилируются с `{assert_format, true}`, а обязательный
-  `format.json` остаётся с умолчанием. Не подключены файлы `uri.json`,
-  `uri-reference.json`, `uri-template.json`, `uuid.json`, `json-pointer.json`,
-  `relative-json-pointer.json` и `regex.json`: каждый ждёт своего algorithm.
+  `hostname.json`, `ipv4.json`, `ipv6.json`, `uri.json`,
+  `uri-reference.json`, `uri-template.json`, `json-pointer.json` и
+  `relative-json-pointer.json`; схемы файлов директории `optional/format/`
+  компилируются с `{assert_format, true}`, а обязательный `format.json` остаётся
+  с умолчанием. Не подключены `uuid.json` и `regex.json`: для них алгоритмы
+  выбраны, но ещё не реализованы. Четыре IDN/IRI-файла исключены намеренно, а
   `unknown.json` алгоритма не требует, но к runner пока тоже не подключён.
   Прочие optional profiles ещё не выбраны пунктом выше.
 - [ ] Задокументировать результаты дополнительных capability profiles и все

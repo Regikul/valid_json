@@ -35,7 +35,12 @@
                 "optional/format/duration.json",
                 "optional/format/ipv4.json", "optional/format/ipv6.json",
                 "optional/format/hostname.json",
-                "optional/format/email.json"]).
+                "optional/format/email.json",
+                "optional/format/uri.json",
+                "optional/format/uri-reference.json",
+                "optional/format/uri-template.json",
+                "optional/format/json-pointer.json",
+                "optional/format/relative-json-pointer.json"]).
 
 %% Files, существующие только в одном dialect: `prefixItems.json` появился
 %% вместе с самим keyword в Draft 2020-12, обоих файлов `dynamicRef.json` в
@@ -77,7 +82,7 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES,
 %% ?EXCLUDED и ?OUT_OF_PROFILE, и менять его иначе нельзя.
--define(CENSUS, {766, 3186}).
+-define(CENSUS, {776, 3448}).
 
 %% Сьют адресует свои remote documents относительно этого base, повторяя в URI
 %% раскладку директории `remotes`. Число документов закреплено по той же
