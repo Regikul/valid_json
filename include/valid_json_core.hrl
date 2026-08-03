@@ -77,6 +77,9 @@
 
     | {annotation, binary(), json()}
     | {format, binary(), Assert :: boolean()}
+    %% Content keywords аннотируют только строки, поэтому у них свой тег, а не
+    %% общий {annotation, _, _}. Значением contentSchema остаётся сама подсхема.
+    | {content, binary(), json()}
 
     | {unevaluated_properties, addr()}
     | {unevaluated_items, addr()}.

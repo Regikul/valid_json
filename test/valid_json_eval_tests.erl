@@ -243,6 +243,37 @@ format_test_() ->
      ?_assertEqual(neutral(), coverage([Email], <<"a">>)),
      ?_assertEqual([], units([Email], <<"a">>, flag))].
 
+%% Content keywords аннотируют только строку и никогда не отказывают: испорченное
+%% содержимое остаётся валидным, потому что декодировать и разбирать его по
+%% умолчанию нельзя. Значение `contentSchema` отдаётся аннотацией целиком, а к
+%% instance подсхема не применяется вовсе.
+content_test_() ->
+    Encoding = {content, <<"contentEncoding">>, <<"base64">>},
+    Media = {content, <<"contentMediaType">>, <<"application/json">>},
+    Inner = #{<<"type">> => <<"object">>},
+    [?_assertEqual([{<<"/contentEncoding">>, true, {annotation, <<"base64">>}}],
+                   located([Encoding], <<"eyJmb28iOi%iYmFyIn0K">>)),
+     ?_assertEqual([{<<"/contentMediaType">>, true,
+                     {annotation, <<"application/json">>}}],
+                   located([Media], <<"{:}">>)),
+     ?_assertEqual([{<<"/contentSchema">>, true, {annotation, Inner}}],
+                   located([{content, <<"contentSchema">>, Inner}], <<"[]">>)),
+     ?_assertEqual({ok, #{<<"valid">> => true}},
+                   validate(schema_node([Encoding, Media]), <<"{:}">>)),
+     ?_assertEqual(neutral(), coverage([Encoding], <<"a">>)),
+     ?_assertEqual([], units([Encoding], <<"a">>, flag))].
+
+%% Значение другого типа content keyword не описывает: unit остаётся успешным,
+%% но annotation не выпускает — то же правило применимости, что и у assertions
+%% над своим типом.
+content_applicability_test_() ->
+    Media = {content, <<"contentMediaType">>, <<"application/json">>},
+    [?_assertEqual([{<<"/contentMediaType">>, true, none}], located([Media], 100)),
+     ?_assertEqual([{<<"/contentMediaType">>, true, none}],
+                   located([Media], #{<<"a">> => <<"{}">>})),
+     ?_assertEqual({ok, #{<<"valid">> => true}}, validate(schema_node([Media]), 100)),
+     ?_assertEqual(neutral(), coverage([Media], 100))].
+
 %% В basic аннотация доходит до плоского списка, а провал соседнего keyword
 %% уносит её оттуда: тот же schema object перестаёт производить аннотации.
 %% Из дерева она не исчезает — её показывает verbose.

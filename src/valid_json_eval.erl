@@ -211,6 +211,8 @@ dispatch({annotation, _, _} = Constraint, Instance, Context) ->
     valid_json_annotate:check(Constraint, Instance, Context);
 dispatch({format, _, _} = Constraint, Instance, Context) ->
     valid_json_annotate:check(Constraint, Instance, Context);
+dispatch({content, _, _} = Constraint, Instance, Context) ->
+    valid_json_annotate:check(Constraint, Instance, Context);
 dispatch(Constraint, Instance, Context) ->
     valid_json_assert:check(Constraint, Instance, Context).
 

@@ -23,7 +23,7 @@
                 "contains.json", "maxContains.json", "minContains.json",
                 "allOf.json", "anyOf.json", "oneOf.json",
                 "if-then-else.json", "dependentSchemas.json",
-                "default.json", "not.json", "format.json",
+                "default.json", "not.json", "format.json", "content.json",
                 "vocabulary.json",
                 "ref.json", "defs.json",
                 "anchor.json", "refRemote.json", "infinite-loop-detection.json",
@@ -69,7 +69,7 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES,
 %% ?EXCLUDED и ?OUT_OF_PROFILE, и менять его иначе нельзя.
--define(CENSUS, {742, 2515}).
+-define(CENSUS, {750, 2551}).
 
 %% Сьют адресует свои remote documents относительно этого base, повторяя в URI
 %% раскладку директории `remotes`. Число документов закреплено по той же

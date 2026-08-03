@@ -1380,15 +1380,68 @@ unknown_keyword_is_not_schema_position_test() ->
     ?assertEqual([<<>>], maps:keys(ChildNodes)).
 
 %% Ещё не реализованный keyword обязан останавливать компиляцию, а не молча
-%% исчезать: иначе преждевременно подключённый файл сьюта пройдёт по недоразумению.
-not_implemented_test_() ->
-    [?_assertEqual(schema_error({not_implemented, <<"contentEncoding">>},
-                                <<"/contentEncoding">>),
-                   compile(#{<<"contentEncoding">> => <<"base64">>})),
-     %% Keyword другого dialect — действительно unknown.
-     ?_assertEqual({ok, artifact(schema_node(
+%% исчезать: иначе преждевременно подключённый файл сьюта пройдёт по
+%% недоразумению. Отложенных keywords сейчас не осталось — content keywords были
+%% последними, — поэтому проверить остаётся только обратное: keyword другого
+%% dialect отложенным не считается и остаётся обычным unknown.
+foreign_dialect_keyword_test_() ->
+    [?_assertEqual({ok, artifact(schema_node(
                                    [{annotation, <<"additionalItems">>, false}]))},
                    compile(#{<<"additionalItems">> => false}))].
+
+%% Content keywords только аннотируют, поэтому их значения уходят в IR как есть
+%% и не нормализуются. Порядок между собой статический, как и у остальных
+%% annotation-only keywords.
+content_test_() ->
+    [?_assertEqual({ok, artifact(schema_node(
+                                   [{content, <<"contentEncoding">>, <<"base64">>}]))},
+                   compile(#{<<"contentEncoding">> => <<"base64">>})),
+     ?_assertEqual({ok, artifact(schema_node(
+                                   [{content, <<"contentMediaType">>,
+                                     <<"application/json">>}]))},
+                   compile(#{<<"contentMediaType">> => <<"application/json">>})),
+     %% Тип значения ограничивает метасхема, а компилятор его не проверяет — то
+     %% же правило, что и у `default` рядом с несовместимым `type`.
+     ?_assertEqual({ok, artifact(schema_node(
+                                   [{content, <<"contentEncoding">>, 1}]))},
+                   compile(#{<<"contentEncoding">> => 1}))].
+
+%% Порядок content keywords между собой статический и не зависит от устройства
+%% map. Значение `contentSchema` остаётся в constraint исходным JSON: подсхема
+%% никогда не применяется к instance, и адрес ей не нужен.
+content_order_test() ->
+    Schema = #{<<"contentSchema">> => #{<<"type">> => <<"object">>},
+               <<"contentMediaType">> => <<"application/json">>,
+               <<"contentEncoding">> => <<"base64">>},
+    {ok, #{resources := Resources}} = compile(Schema),
+    #resource{nodes = Nodes} = maps:get(anonymous, Resources),
+    ?assertEqual([{content, <<"contentEncoding">>, <<"base64">>},
+                  {content, <<"contentMediaType">>, <<"application/json">>},
+                  {content, <<"contentSchema">>, #{<<"type">> => <<"object">>}}],
+                 constraints(<<>>, Nodes)).
+
+%% Значение `contentSchema` схемой является, но schema position не образует:
+%% компилятор внутрь не спускается, node на неё не строит и её `$anchor` в
+%% индекс не заносит. Иначе подсхема, которую спецификация не вычисляет вовсе,
+%% могла бы отвергнуть всю схему висячим `$ref` или неподдержанным `pattern`.
+content_schema_is_not_a_schema_position_test() ->
+    Inner = #{<<"$anchor">> => <<"payload">>, <<"type">> => <<"object">>},
+    Schema = #{<<"contentMediaType">> => <<"application/json">>,
+               <<"contentSchema">> => Inner},
+    {ok, #{resources := Resources}} = compile(Schema),
+    #resource{anchors = Anchors, nodes = Nodes} = maps:get(anonymous, Resources),
+    ?assertEqual(#{}, Anchors),
+    ?assertEqual([<<>>], maps:keys(Nodes)),
+    ?assertEqual([{content, <<"contentMediaType">>, <<"application/json">>},
+                  {content, <<"contentSchema">>, Inner}],
+                 constraints(<<>>, Nodes)).
+
+%% Форму значения проверяет метасхема, а не компилятор: не-schema доходит до IR
+%% аннотацией так же, как `default` несовместимого с `type` вида.
+content_schema_shape_is_left_to_the_metaschema_test() ->
+    ?assertEqual({ok, artifact(schema_node(
+                                 [{content, <<"contentSchema">>, <<"x">>}]))},
+                 compile(#{<<"contentSchema">> => <<"x">>})).
 
 %% На позиции schema стоит значение, которое schema не является: отдельной
 %% причины у него нет, для slot IR оно просто невозможно.

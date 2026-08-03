@@ -13,6 +13,12 @@
                       <<"deprecated">>, <<"readOnly">>, <<"writeOnly">>,
                       <<"examples">>]).
 
+%% Content keywords тоже только аннотируют, но применимы к одним строкам и
+%% потому собираются отдельным тегом IR. Порядок между собой взят из
+%% validation.txt, разделы 8.3-8.5.
+-define(CONTENT, [<<"contentEncoding">>, <<"contentMediaType">>,
+                  <<"contentSchema">>]).
+
 %% Порядок constraints в node задан статически. Наблюдаемое дерево units не
 %% должно зависеть от порядка обхода map, поэтому обход идёт по этому списку,
 %% а не по maps:keys/1. Элемент — один constraint: обычно это сам keyword, а
@@ -36,7 +42,7 @@
                 <<"allOf">>, <<"anyOf">>, <<"oneOf">>, <<"not">>,
                 [<<"if">>, <<"then">>, <<"else">>],
                 <<"dependentSchemas">>,
-                <<"format">> | ?ANNOTATIONS]).
+                <<"format">> | ?ANNOTATIONS ++ ?CONTENT]).
 
 %% Constraints, которые обязаны выполняться после всех остальных: они читают
 %% объединённое покрытие соседей. Порядок между собой тот же, что и у обычных
@@ -60,11 +66,9 @@
 %% расширениями: иначе схема начнёт молча компилироваться до появления их
 %% семантики. Общие отложены для обоих dialects, остальные принадлежат только
 %% указанному dialect и в другом считаются обычными unknown keywords.
--define(DEFERRED_COMMON,
-        [<<"contentEncoding">>, <<"contentMediaType">>,
-         <<"contentSchema">>]).
-%% Keywords, отложенных только для одного dialect, сейчас не осталось: списки
-%% пусты, но сохранены, потому что следующие фазы снова их наполнят.
+%% Отложенных keywords сейчас не осталось: списки пусты, но сохранены, потому
+%% что следующие фазы снова их наполнят.
+-define(DEFERRED_COMMON, []).
 -define(DEFERRED_2020_12, []).
 -define(DEFERRED_2019_09, []).
 
@@ -452,6 +456,20 @@ constraint(<<"format">> = Keyword, Schema, Position, State) ->
 constraint(Keyword, Schema, Position, State) ->
     case lists:member(Keyword, ?ANNOTATIONS) of
         true  -> {ok, {annotation, Keyword, maps:get(Keyword, Schema)}, State};
+        false -> content(Keyword, Schema, Position, State)
+    end.
+
+%% Значение content keyword уходит в IR как есть, по тем же причинам, что и у
+%% annotation-only: типы ограничивает метасхема, а валидатор её не применяет.
+%% Значение `contentSchema` схемой является, но schema position не образует:
+%% к instance она не применяется никогда, поэтому обход внутрь давал бы только
+%% отказ на подсхеме, которую спецификация не вычисляет. Форму этого значения
+%% проверяет метасхема, а в IR оно остаётся собственным значением аннотации.
+-spec content(binary(), #{binary() => json()}, position(), state()) ->
+          {ok, constraint() | none, state()} | {error, #schema_error{}}.
+content(Keyword, Schema, Position, State) ->
+    case lists:member(Keyword, ?CONTENT) of
+        true  -> {ok, {content, Keyword, maps:get(Keyword, Schema)}, State};
         false -> asserted(Keyword, Schema, Position, State)
     end.
 

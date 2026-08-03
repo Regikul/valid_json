@@ -211,7 +211,7 @@ Defaults применяет handler, а не compiler. Это сохраняет
 - Parent-pointer и retrieval-pointer locations embedded resources
   канонизируются compile-time индексом до построения constraints; aliases в
   `compiled()` не сохраняются.
-- Компилятор посещает только schema positions активных keywords и location-reserving `$defs` с совместимым `definitions` ([validation.txt:1416](../references/json-schema/draft-2020-12/validation.txt)); внутрь unknown, `enum`, `const`, `default` и property names он не спускается.
+- Компилятор посещает только schema positions активных keywords и location-reserving `$defs` с совместимым `definitions` ([validation.txt:1416](../references/json-schema/draft-2020-12/validation.txt)); внутрь unknown, `enum`, `const`, `default`, `contentSchema` и property names он не спускается. Значение `contentSchema` является схемой по метасхеме, но к instance не применяется никогда, поэтому обход внутрь давал бы только отказ на подсхеме, которую спецификация не вычисляет; форму этого значения проверяет метасхема.
 - Dangling и non-schema targets — compile errors. `optional/refOfUnknownKeyword` остаётся вне профиля как undefined behavior.
 - Подсхема с `$id` получает новый `rid`; поэтому дочерние переходы всегда хранят полный `addr()`, не голый pointer.
 - `#node.unevaluated` отделяет constraints, которые обязаны выполняться последними.
