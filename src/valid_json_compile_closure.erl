@@ -6,7 +6,7 @@
 -include("valid_json_core.hrl").
 -include("valid_json_resources.hrl").
 
--export([inline/3, document/3, supported_dialect/1]).
+-export([inline/3, document/3, supported_dialect/1, dialect_resolver/2]).
 
 -type result() :: {ok, valid_json_resource_index:index(), [uri()]}
                 | {error, #schema_error{}}.
@@ -39,6 +39,14 @@ supported_dialect(Dialect) ->
                                   location = undefined}}
     end.
 
+%% Встроенные resources решают свой dialect уже во время обхода, а реестр
+%% метасхем принадлежит этому модулю. Индекс получает вместо store функцию:
+%% локацию ошибки он знает точнее, а про документы по-прежнему не знает ничего.
+-spec dialect_resolver(store(), profile()) ->
+          valid_json_resource_index:resolver().
+dialect_resolver(#store{} = Store, #profile{draft = Default}) ->
+    fun(Dialect) -> dialect_profile(Dialect, Store, Default, []) end.
+
 %% Queue содержит только полные JSON documents. Каждый новый document сначала
 %% проходит discovery, затем его index присоединяется к общему. Ссылки сканируем
 %% по признанным schema positions; неизвестные keyword values сюда не попадают.
@@ -58,7 +66,9 @@ close_documents(Store, [Entry | Rest], Default, Index0, Loaded, Sources0) ->
             DialectBase = document_root(Schema, Retrieval),
             case document_profile(Schema, Default, DialectBase, Store) of
                 {ok, Profile, Metaschema} ->
-                    case valid_json_resource_index:discover(Schema, Retrieval, Profile) of
+                    Resolve = dialect_resolver(Store, Default),
+                    case valid_json_resource_index:discover(Schema, Retrieval,
+                                                            Profile, Resolve) of
                         {ok, DocumentIndex} ->
                             case owned_resources(DocumentIndex, Owner, Store) of
                                 ok ->
@@ -66,9 +76,12 @@ close_documents(Store, [Entry | Rest], Default, Index0, Loaded, Sources0) ->
                                         {ok, Index} ->
                                             Pending = referenced_documents(DocumentIndex,
                                                                            Index, Store),
-                                            Sources = add_source(
-                                                        Metaschema,
-                                                        add_source(Source, Sources0)),
+                                            Sources = add_sources(
+                                                        valid_json_resource_index:metaschemas(
+                                                          DocumentIndex),
+                                                        add_source(
+                                                          Metaschema,
+                                                          add_source(Source, Sources0))),
                                             close_documents(
                                               Store, Rest ++ Pending, Default,
                                               Index, Loaded#{Key => true}, Sources);
@@ -107,6 +120,10 @@ add_source(undefined, Sources) ->
     Sources;
 add_source(Source, Sources) ->
     ordsets:add_element(Source, Sources).
+
+-spec add_sources([uri()], [uri()]) -> [uri()].
+add_sources(New, Sources) ->
+    ordsets:union(New, Sources).
 
 %% Профиль документа выбирается его собственным `$schema`, а без него — профилем
 %% компиляции. Наружу уходит и канонический URI прочитанной пользовательской

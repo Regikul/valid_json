@@ -295,17 +295,25 @@
   между Draft 2019-09 и Draft 2020-12: recursive compatibility исполняется в
   2019-09 и становится unknown annotations в 2020-12, а array-form `items` и
   `additionalItems` дают свои annotations и своё покрытие.
-- [ ] Реализовать cross-draft переходы и наследование dialect для embedded и
-  remote resources.
+- [x] Реализовать cross-draft переходы и наследование dialect для embedded и
+  remote resources: dialect выбирается на корне каждого resource, а не один раз
+  на документ. Встроенный resource без `$schema` наследует dialect объемлющего,
+  со своим — меняет его вместе с набором активных keywords, anchors и schema
+  positions своего поддерева; соседние ветки остаются при прежнем профиле.
+  Втянутый по `$ref` документ уже подчинялся собственному `$schema`. Вне корня
+  schema resource `$schema` запрещён обоими dialects и даёт
+  `{misplaced_keyword, <<"$schema">>}`.
 - [ ] Включить проверку schema resources метасхемами Draft 2020-12 и
   Draft 2019-09. Проверка 2020-12 стоит здесь, а не в P5: кроме `$dynamicRef`
   метасхеме нужны `$vocabulary` и `format` этой фазы, а метасхеме 2019-09 — ещё
   и recursive keywords.
-- [~] Добавить compiler fixtures для vocabulary errors, recursive scope и
+- [x] Добавить compiler fixtures для vocabulary errors, recursive scope и
   cross-draft closure: recursive scope покрыт точными resource-index, compiler
   и evaluator fixtures, vocabulary errors — fixtures на неизвестный vocabulary,
-  отсутствующий Core и незарегистрированную метасхему; остался cross-draft
-  closure.
+  отсутствующий Core и незарегистрированную метасхему, cross-draft closure —
+  fixtures на смену и наследование dialect встроенным resource, на dialect
+  втянутого документа, на метасхему встроенного resource в `sources` и на
+  `$schema` вне корня resource.
 - [x] Подключить к runner `uniqueItems.json` и `items.json` Draft 2019-09: обе
   раскладки опирались на array-form `items` и `additionalItems`, и теперь оба
   файла идут общим списком для обоих dialects.
@@ -315,6 +323,11 @@
 - [x] Подключить к runner `ref.json` и `defs.json` обоих dialects: у каждого
   есть группа с `$ref` на корневую метасхему, и она ждала, пока та станет
   компилируемой. Обе корневые метасхемы компилируются целиком.
+- [x] Подключить к runner `optional/cross-draft.json` обоих dialects. Группа
+  Draft 2019-09, ссылающаяся на draft 7, из профиля исключена: её цепочка
+  dialects выходит за заявленный набор, и remote-документа для неё в снапшоте
+  нет. Исключение называет dialect, потому что одноимённая группа Draft 2020-12
+  внутри профиля и проходит.
 - [ ] Приёмка P6: проходят обязательные files Draft 2019-09 и выбранные
   `optional/cross-draft`, compatibility и recursive cases.
 

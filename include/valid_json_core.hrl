@@ -146,6 +146,7 @@
                 | {unknown_dialect, uri()}
                 | {unrecognized_vocabulary, uri()}
                 | core_vocabulary_missing
+                | {misplaced_keyword, binary()}
                 | {name_taken, uri()}
                 | {bad_keyword_value, json()}
                 | {bad_pattern, term()}

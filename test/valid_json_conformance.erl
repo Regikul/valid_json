@@ -28,7 +28,8 @@
                 "ref.json", "defs.json",
                 "anchor.json", "refRemote.json", "infinite-loop-detection.json",
                 "unevaluatedProperties.json", "unevaluatedItems.json",
-                "optional/id.json", "optional/unknownKeyword.json"]).
+                "optional/id.json", "optional/unknownKeyword.json",
+                "optional/cross-draft.json"]).
 
 %% Files, существующие только в одном dialect: `prefixItems.json` появился
 %% вместе с самим keyword в Draft 2020-12, обоих файлов `dynamicRef.json` в
@@ -54,11 +55,21 @@
          {"patternProperties.json",
           <<"patternProperties with Unicode property escape">>}]).
 
+%% Группы, чья цепочка dialects выходит за conformance-профиль
+%% (okf/testing/conformance-policy.md, раздел «Conformance-профиль»). От
+%% ?EXCLUDED отличается природой: это не расхождение реализации с
+%% спецификацией, а объявленная граница профиля. Поэтому и ключ другой —
+%% dialect назван, ведь одноимённая группа соседнего dialect может остаться
+%% внутри профиля, как и происходит в `cross-draft.json`.
+-define(OUT_OF_PROFILE,
+        [{"draft2019-09", "optional/cross-draft.json",
+          <<"refs to historic drafts are processed as historic drafts">>}]).
+
 %% Ожидаемый размер прогона: {групп, cases}. Число закреплено, чтобы прогон, в
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
-%% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES и
-%% ?EXCLUDED, и менять его иначе нельзя.
--define(CENSUS, {740, 2512}).
+%% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES,
+%% ?EXCLUDED и ?OUT_OF_PROFILE, и менять его иначе нельзя.
+-define(CENSUS, {742, 2515}).
 
 %% Сьют адресует свои remote documents относительно этого base, повторяя в URI
 %% раскладку директории `remotes`. Число документов закреплено по той же
@@ -112,10 +123,12 @@ file_tests(Store, Dir, Dialect, File) ->
      [group_tests(Store, Dialect, Group)
       || Group <- read_json(Path), included(Dir, File, Group)]}.
 
-%% Расхождение объявлено для обоих dialects сразу, а фазы группы ждут порознь:
-%% один и тот же keyword появляется в них не одновременно.
+%% Расхождение объявлено для обоих dialects сразу, а фазы группы и границы
+%% профиля называют dialect: один и тот же keyword появляется в dialects не
+%% одновременно, а цепочка ссылок у одноимённых групп бывает разной.
 included(Dir, File, #{<<"description">> := Description}) ->
     not lists:member({File, Description}, ?EXCLUDED) andalso
+        not lists:member({Dir, File, Description}, ?OUT_OF_PROFILE) andalso
         not lists:member({Dir, File, Description}, ?PENDING).
 
 %% Dialect директории задаётся опцией, а не подставляется вместо `$schema`:

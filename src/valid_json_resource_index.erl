@@ -7,11 +7,11 @@
 
 -include("valid_json_resources.hrl").
 
--export([discover/3, root/1, resources/1, anchors/1, dynamic_anchors/1,
+-export([discover/4, root/1, resources/1, anchors/1, dynamic_anchors/1,
          recursive_anchors/1,
-         dialects/1, profiles/1, declaration/2,
+         dialects/1, profiles/1, metaschemas/1, declaration/2,
          merge/2, known/2, resolve/3, resolve_reference/3]).
--export_type([index/0, resource_schemas/0, resource_anchors/0]).
+-export_type([index/0, resource_schemas/0, resource_anchors/0, resolver/0]).
 
 -type resource_schemas() :: #{rid() => #{pointer() => json()}}.
 -type resource_anchors() :: #{rid() => #{binary() => pointer()}}.
@@ -22,6 +22,13 @@
 -type location_key() :: {rid(), pointer()}.
 -type locations() :: #{location_key() => addr()}.
 
+%% Написанный в `$schema` dialect превращает в профиль вызывающий: реестр
+%% пользовательских метасхем принадлежит ему, а индекс о store не знает. Вторым
+%% элементом успеха идёт каноническое имя прочитанной пользовательской
+%% метасхемы либо `undefined` у канонического dialect.
+-type resolver() :: fun((uri()) ->
+                           {ok, profile(), uri() | undefined} | {error, reason()}).
+
 %% Индекс является промежуточным значением compiler и не входит в compiled().
 -opaque index() :: #{root := rid(),
                      resources := resource_schemas(),
@@ -29,11 +36,14 @@
                      dynamic_anchors := resource_anchors(),
                      recursive_anchors := resource_recursive_anchors(),
                      profiles := resource_profiles(),
+                     metaschemas := [uri()],
                      declarations := declarations(),
                      locations := locations()}.
 
 -record(state, {
-    profile   :: profile(),
+    resolve   :: resolver(),
+    profiles = #{} :: resource_profiles(),
+    metaschemas = [] :: [uri()],
     resources = #{} :: resource_schemas(),
     anchors = #{} :: resource_anchors(),
     dynamic_anchors = #{} :: resource_anchors(),
@@ -51,15 +61,20 @@
 -type child() :: {[binary()], json()}.
 
 %% Retrieval задаёт физическое имя документа. Для inline schema это
-%% `anonymous`; корневой `$id` при наличии становится canonical root.
--spec discover(json(), rid(), profile()) ->
+%% `anonymous`; корневой `$id` при наличии становится canonical root. Profile
+%% принадлежит корню документа: его `$schema` прочитан вызывающим до вызова.
+%% Resolve нужен встроенным resources, которые меняют dialect собственным
+%% `$schema` уже во время обхода.
+-spec discover(json(), rid(), profile(), resolver()) ->
           {ok, index()} | {error, #schema_error{}}.
-discover(Schema, Retrieval0, #profile{} = Profile)
-  when Retrieval0 =:= anonymous orelse is_binary(Retrieval0) ->
+discover(Schema, Retrieval0, #profile{} = Profile, Resolve)
+  when (Retrieval0 =:= anonymous orelse is_binary(Retrieval0)),
+       is_function(Resolve, 1) ->
     case normalize_retrieval(Retrieval0) of
         {ok, Retrieval} ->
             case root_id(Schema, Retrieval) of
-                {ok, Root} -> discover_root(Schema, Retrieval, Root, Profile);
+                {ok, Root} ->
+                    discover_root(Schema, Retrieval, Root, Profile, Resolve);
                 {error, Reason} ->
                     {error, schema_error(Reason,
                                          keyword_addr(Retrieval, [], <<"$id">>))}
@@ -67,8 +82,8 @@ discover(Schema, Retrieval0, #profile{} = Profile)
         {error, Reason} ->
             {error, #schema_error{reason = Reason, location = undefined}}
     end;
-discover(Schema, Retrieval, Profile) ->
-    erlang:error(badarg, [Schema, Retrieval, Profile]).
+discover(Schema, Retrieval, Profile, Resolve) ->
+    erlang:error(badarg, [Schema, Retrieval, Profile, Resolve]).
 
 -spec root(index()) -> rid().
 root(#{root := Root}) ->
@@ -101,9 +116,9 @@ dynamic_anchors(#{dynamic_anchors := Anchors}) ->
 recursive_anchors(#{recursive_anchors := Anchors}) ->
     Anchors.
 
-%% Dialect пока выбирается для корня document целиком. Отдельная map нужна уже
-%% сейчас: общий compile index может содержать documents разных dialect, а в
-%% compiled() dialect хранится на каждом resource.
+%% Dialect выбирается на каждом resource: встроенный resource наследует его от
+%% объемлющего либо меняет собственным `$schema`. В compiled() dialect так же
+%% хранится на каждом resource.
 -spec dialects(index()) -> resource_dialects().
 dialects(#{profiles := Profiles}) ->
     maps:map(fun(_Rid, #profile{uri = Uri}) -> Uri end, Profiles).
@@ -113,6 +128,13 @@ dialects(#{profiles := Profiles}) ->
 -spec profiles(index()) -> resource_profiles().
 profiles(#{profiles := Profiles}) ->
     Profiles.
+
+%% Пользовательские метасхемы, прочитанные встроенными resources. Вызывающий
+%% обязан добавить их в `sources`: их `$vocabulary` влияет на артефакт и должно
+%% инвалидировать его при изменении.
+-spec metaschemas(index()) -> [uri()].
+metaschemas(#{metaschemas := Metaschemas}) ->
+    Metaschemas.
 
 %% Локация `$id`, объявившего resource, нужна только compile errors при
 %% объединении documents или сверке со store. У resource без написанного `$id`
@@ -131,6 +153,7 @@ merge(#{root := Root,
         dynamic_anchors := LeftDynamic,
         recursive_anchors := LeftRecursive,
         profiles := LeftProfiles,
+        metaschemas := LeftMetaschemas,
         declarations := LeftDeclarations,
         locations := LeftLocations},
       #{resources := RightResources,
@@ -138,6 +161,7 @@ merge(#{root := Root,
         dynamic_anchors := RightDynamic,
         recursive_anchors := RightRecursive,
         profiles := RightProfiles,
+        metaschemas := RightMetaschemas,
         declarations := RightDeclarations,
         locations := RightLocations}) ->
     case duplicate_resource(LeftResources, RightResources, RightDeclarations) of
@@ -155,6 +179,8 @@ merge(#{root := Root,
                            recursive_anchors => maps:merge(LeftRecursive,
                                                            RightRecursive),
                            profiles => maps:merge(LeftProfiles, RightProfiles),
+                           metaschemas => ordsets:union(LeftMetaschemas,
+                                                        RightMetaschemas),
                            declarations => maps:merge(LeftDeclarations,
                                                       RightDeclarations),
                            locations => maps:merge(LeftLocations, RightLocations)}}
@@ -223,12 +249,13 @@ root_declaration(#{<<"$id">> := _Id}, Retrieval, _Root) ->
 root_declaration(_Schema, _Retrieval, Root) ->
     {Root, <<>>}.
 
--spec discover_root(json(), rid(), rid(), profile()) ->
+-spec discover_root(json(), rid(), rid(), profile(), resolver()) ->
           {ok, index()} | {error, #schema_error{}}.
-discover_root(Schema, Retrieval, Root, Profile) ->
+discover_root(Schema, Retrieval, Root, Profile, Resolve) ->
     Contexts = root_contexts(Root, Retrieval),
     Names = reserve_names([Base || {Base, []} <- Contexts]),
-    State0 = #state{profile = Profile,
+    State0 = #state{resolve = Resolve,
+                    profiles = #{Root => Profile},
                     resources = #{Root => #{}},
                     anchors = #{Root => #{}},
                     dynamic_anchors = #{Root => #{}},
@@ -236,18 +263,19 @@ discover_root(Schema, Retrieval, Root, Profile) ->
                     declarations = #{Root => root_declaration(Schema, Retrieval,
                                                               Root)},
                     names = Names},
-    case walk(Schema, Root, [], Contexts, root, State0) of
+    case walk(Schema, Root, [], Contexts, root, Profile, State0) of
         {ok, #state{resources = Resources, anchors = Anchors,
                     dynamic_anchors = DynamicAnchors,
                     recursive_anchors = RecursiveAnchors,
+                    profiles = Profiles, metaschemas = Metaschemas,
                     locations = Locations, declarations = Declarations}} ->
             {ok, #{root => Root,
                    resources => Resources,
                    anchors => Anchors,
                    dynamic_anchors => DynamicAnchors,
                    recursive_anchors => RecursiveAnchors,
-                   profiles => maps:map(fun(_Rid, _Nodes) -> Profile end,
-                                        Resources),
+                   profiles => Profiles,
+                   metaschemas => Metaschemas,
                    declarations => Declarations,
                    locations => Locations}};
         {error, _} = Error ->
@@ -256,17 +284,23 @@ discover_root(Schema, Retrieval, Root, Profile) ->
 
 %% Root `$id` уже обработан до начала обхода. На остальных map-nodes `$id`
 %% сначала меняет resource boundary, затем node укладывается по новому адресу.
--spec walk(json(), rid(), location(), [context()], root | child, state()) ->
+%% Профиль идёт параметром, а не полем состояния: встроенный resource меняет его
+%% только для собственного поддерева, и соседние ветки обязаны остаться при
+%% профиле объемлющего.
+-spec walk(json(), rid(), location(), [context()], root | child, profile(),
+           state()) ->
           {ok, state()} | {error, #schema_error{}}.
-walk(Schema, Rid, Location, Contexts, RootOrChild, State)
+walk(Schema, Rid, Location, Contexts, RootOrChild, Profile, State)
   when is_boolean(Schema); is_map(Schema) ->
-    case enter_resource(Schema, Rid, Location, Contexts, RootOrChild, State) of
-        {ok, NodeRid, NodeLocation, NodeContexts, Entered} ->
+    case enter_resource(Schema, Rid, Location, Contexts, RootOrChild, Profile,
+                        State) of
+        {ok, NodeRid, NodeLocation, NodeContexts, NodeProfile, Entered} ->
             Addr = addr(NodeRid, NodeLocation),
-            case place(Schema, Addr, NodeContexts, Entered) of
+            case place(Schema, Addr, NodeContexts, NodeProfile, Entered) of
                 {ok, Placed} when is_map(Schema) ->
-                    walk_children(children(Schema, Placed#state.profile),
-                                  NodeRid, NodeLocation, NodeContexts, Placed);
+                    walk_children(children(Schema, NodeProfile),
+                                  NodeRid, NodeLocation, NodeContexts,
+                                  NodeProfile, Placed);
                 {ok, Placed} ->
                     {ok, Placed};
                 {error, _} = Error ->
@@ -275,29 +309,71 @@ walk(Schema, Rid, Location, Contexts, RootOrChild, State)
         {error, _} = Error ->
             Error
     end;
-walk(Other, Rid, Location, _Contexts, _RootOrChild, _State) ->
+walk(Other, Rid, Location, _Contexts, _RootOrChild, _Profile, _State) ->
     {error, schema_error({bad_keyword_value, Other}, addr(Rid, Location))}.
 
--spec enter_resource(json(), rid(), location(), [context()], root | child, state()) ->
-          {ok, rid(), location(), [context()], state()} |
+-spec enter_resource(json(), rid(), location(), [context()], root | child,
+                     profile(), state()) ->
+          {ok, rid(), location(), [context()], profile(), state()} |
           {error, #schema_error{}}.
-enter_resource(_Schema, Rid, Location, Contexts, root, State) ->
-    {ok, Rid, Location, Contexts, State};
-enter_resource(#{<<"$id">> := Id}, Rid, Location, Contexts, child, State) ->
+enter_resource(_Schema, Rid, Location, Contexts, root, Profile, State) ->
+    {ok, Rid, Location, Contexts, Profile, State};
+enter_resource(#{<<"$id">> := Id} = Schema, Rid, Location, Contexts, child,
+               Profile, State) ->
     IdLocation = keyword_addr(Rid, Location, <<"$id">>),
     case resolve_id(Id, Rid) of
         {ok, NewRid} ->
-            case reserve_resource(NewRid, IdLocation, State) of
-                {ok, Reserved} ->
-                    {ok, NewRid, [], [{NewRid, []} | Contexts], Reserved};
+            case resource_profile(Schema, NewRid, Profile, State) of
+                {ok, NewProfile, Resolved} ->
+                    case reserve_resource(NewRid, IdLocation, NewProfile,
+                                          Resolved) of
+                        {ok, Reserved} ->
+                            {ok, NewRid, [], [{NewRid, []} | Contexts],
+                             NewProfile, Reserved};
+                        {error, _} = Error ->
+                            Error
+                    end;
                 {error, _} = Error ->
                     Error
             end;
         {error, Reason} ->
             {error, schema_error(Reason, IdLocation)}
     end;
-enter_resource(_Schema, Rid, Location, Contexts, child, State) ->
-    {ok, Rid, Location, Contexts, State}.
+%% `$schema` разрешён только в корне schema resource; в остальных подсхемах он
+%% запрещён обоими dialects (core.txt:1377 в 2020-12, core.txt:1320 в 2019-09).
+%% Молча игнорировать его нельзя: автор написал бы смену dialect и получил бы
+%% dialect объемлющего.
+enter_resource(#{<<"$schema">> := _} = Schema, Rid, Location, _Contexts, child,
+               _Profile, _State) when not is_map_key(<<"$id">>, Schema) ->
+    {error, schema_error({misplaced_keyword, <<"$schema">>},
+                         keyword_addr(Rid, Location, <<"$schema">>))};
+enter_resource(_Schema, Rid, Location, Contexts, child, Profile, State) ->
+    {ok, Rid, Location, Contexts, Profile, State}.
+
+%% Встроенный resource без `$schema` наследует dialect объемлющего
+%% (core.txt:2122), со своим — меняет его. Прочитанная здесь пользовательская
+%% метасхема запоминается: она обязана попасть в `sources` артефакта.
+-spec resource_profile(json(), rid(), profile(), state()) ->
+          {ok, profile(), state()} | {error, #schema_error{}}.
+resource_profile(#{<<"$schema">> := Dialect}, Rid, _Outer,
+                 #state{resolve = Resolve} = State) when is_binary(Dialect) ->
+    case Resolve(Dialect) of
+        {ok, Profile, Metaschema} ->
+            {ok, Profile, add_metaschema(Metaschema, State)};
+        {error, Reason} ->
+            {error, schema_error(Reason, keyword_addr(Rid, [], <<"$schema">>))}
+    end;
+resource_profile(#{<<"$schema">> := Other}, Rid, _Outer, _State) ->
+    {error, schema_error({bad_keyword_value, Other},
+                         keyword_addr(Rid, [], <<"$schema">>))};
+resource_profile(_Schema, _Rid, Outer, State) ->
+    {ok, Outer, State}.
+
+-spec add_metaschema(uri() | undefined, state()) -> state().
+add_metaschema(undefined, State) ->
+    State;
+add_metaschema(Uri, #state{metaschemas = Metaschemas} = State) ->
+    State#state{metaschemas = ordsets:add_element(Uri, Metaschemas)}.
 
 -spec resolve_id(json(), rid()) -> {ok, rid()} | {error, reason()}.
 resolve_id(Id, Base) when is_binary(Id) ->
@@ -309,12 +385,13 @@ resolve_id(Id, Base) when is_binary(Id) ->
 resolve_id(Id, _Base) ->
     {error, {bad_keyword_value, Id}}.
 
--spec reserve_resource(uri(), addr(), state()) ->
+-spec reserve_resource(uri(), addr(), profile(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
-reserve_resource(Rid, Location,
+reserve_resource(Rid, Location, Profile,
                  #state{resources = Resources, anchors = Anchors,
                         dynamic_anchors = DynamicAnchors,
                         recursive_anchors = RecursiveAnchors,
+                        profiles = Profiles,
                         declarations = Declarations, names = Names} = State) ->
     case maps:is_key(Rid, Names) of
         true ->
@@ -324,42 +401,47 @@ reserve_resource(Rid, Location,
                              anchors = Anchors#{Rid => #{}},
                              dynamic_anchors = DynamicAnchors#{Rid => #{}},
                              recursive_anchors = RecursiveAnchors#{Rid => false},
+                             profiles = Profiles#{Rid => Profile},
                              declarations = Declarations#{Rid => Location},
                              names = Names#{Rid => true}}}
     end.
 
--spec place(json(), addr(), [context()], state()) ->
+-spec place(json(), addr(), [context()], profile(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
-place(Schema, {Rid, Pointer} = Addr, Contexts,
+place(Schema, {Rid, Pointer} = Addr, Contexts, Profile,
       #state{resources = Resources} = State) ->
     Nodes = maps:get(Rid, Resources),
     WithNode = State#state{resources = Resources#{Rid => Nodes#{Pointer => Schema}}},
     case index_contexts(Contexts, Addr, WithNode) of
-        {ok, Indexed} when is_map(Schema) -> index_anchors(Schema, Addr, Indexed);
-        {ok, Indexed}                     -> {ok, Indexed};
-        {error, _} = Error                -> Error
+        {ok, Indexed} when is_map(Schema) ->
+            index_anchors(Schema, Addr, Profile, Indexed);
+        {ok, Indexed} ->
+            {ok, Indexed};
+        {error, _} = Error ->
+            Error
     end.
 
 %% Duplicate names inside one resource have undefined behavior in the drafts;
 %% the compiler deliberately does not invent a schema error for them. The walk
 %% is deterministic, so the last discovered declaration wins internally.
--spec index_anchors(#{binary() => json()}, addr(), state()) ->
+-spec index_anchors(#{binary() => json()}, addr(), profile(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
-index_anchors(Schema, Addr, State) ->
-    case anchor_name(<<"$anchor">>, Schema, Addr, State) of
+index_anchors(Schema, Addr, Profile, State) ->
+    case anchor_name(<<"$anchor">>, Schema, Addr, Profile) of
         {ok, none} ->
-            index_special_anchors(Schema, Addr, State);
+            index_special_anchors(Schema, Addr, Profile, State);
         {ok, Name} ->
-            index_special_anchors(Schema, Addr, put_anchor(Name, Addr, State));
+            index_special_anchors(Schema, Addr, Profile,
+                                  put_anchor(Name, Addr, State));
         {error, _} = Error ->
             Error
     end.
 
--spec index_special_anchors(#{binary() => json()}, addr(), state()) ->
+-spec index_special_anchors(#{binary() => json()}, addr(), profile(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
-index_special_anchors(Schema, Addr, State) ->
-    case index_dynamic_anchor(Schema, Addr, State) of
-        {ok, Dynamic}     -> index_recursive_anchor(Schema, Addr, Dynamic);
+index_special_anchors(Schema, Addr, Profile, State) ->
+    case index_dynamic_anchor(Schema, Addr, Profile, State) of
+        {ok, Dynamic}      -> index_recursive_anchor(Schema, Addr, Profile, Dynamic);
         {error, _} = Error -> Error
     end.
 
@@ -367,11 +449,11 @@ index_special_anchors(Schema, Addr, State) ->
 %% unknown keyword, который dialect игнорирует. Кроме точки расширения для
 %% `$dynamicRef` он создаёт и обычный plain-name fragment наравне с `$anchor`,
 %% поэтому имя попадает в обе карты.
--spec index_dynamic_anchor(#{binary() => json()}, addr(), state()) ->
+-spec index_dynamic_anchor(#{binary() => json()}, addr(), profile(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
-index_dynamic_anchor(Schema, Addr,
-                     #state{profile = #profile{draft = ?DRAFT_2020_12}} = State) ->
-    case anchor_name(<<"$dynamicAnchor">>, Schema, Addr, State) of
+index_dynamic_anchor(Schema, Addr, #profile{draft = ?DRAFT_2020_12} = Profile,
+                     State) ->
+    case anchor_name(<<"$dynamicAnchor">>, Schema, Addr, Profile) of
         {ok, none} ->
             {ok, State};
         {ok, Name} ->
@@ -379,18 +461,18 @@ index_dynamic_anchor(Schema, Addr,
         {error, _} = Error ->
             Error
     end;
-index_dynamic_anchor(_Schema, _Addr, State) ->
+index_dynamic_anchor(_Schema, _Addr, _Profile, State) ->
     {ok, State}.
 
 %% Draft 2019-09 задаёт boolean anchor, который может влиять только из корня
 %% schema resource. `$id` уже перенёс такой node в pointer <<>>, поэтому
 %% некорневое объявление можно принять без эффекта, не угадывая его намерение.
 %% В Draft 2020-12 это неизвестный keyword и его значение не проверяется.
--spec index_recursive_anchor(#{binary() => json()}, addr(), state()) ->
+-spec index_recursive_anchor(#{binary() => json()}, addr(), profile(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
 index_recursive_anchor(Schema, {Rid, Pointer},
-                       #state{profile = #profile{draft = ?DRAFT_2019_09},
-                              recursive_anchors = Anchors} = State) ->
+                       #profile{draft = ?DRAFT_2019_09},
+                       #state{recursive_anchors = Anchors} = State) ->
     case maps:find(<<"$recursiveAnchor">>, Schema) of
         error ->
             {ok, State};
@@ -403,13 +485,12 @@ index_recursive_anchor(Schema, {Rid, Pointer},
                                     <<"$recursiveAnchor">>),
             {error, schema_error({bad_keyword_value, Other}, Location)}
     end;
-index_recursive_anchor(_Schema, _Addr, State) ->
+index_recursive_anchor(_Schema, _Addr, _Profile, State) ->
     {ok, State}.
 
--spec anchor_name(binary(), #{binary() => json()}, addr(), state()) ->
+-spec anchor_name(binary(), #{binary() => json()}, addr(), profile()) ->
           {ok, binary() | none} | {error, #schema_error{}}.
-anchor_name(Keyword, Schema, {Rid, Pointer},
-            #state{profile = #profile{draft = Draft}}) ->
+anchor_name(Keyword, Schema, {Rid, Pointer}, #profile{draft = Draft}) ->
     case maps:find(Keyword, Schema) of
         error ->
             {ok, none};
@@ -571,17 +652,19 @@ index_contexts([{Base, Location} | Rest], Addr,
             {error, schema_error({name_taken, Base}, Addr)}
     end.
 
--spec walk_children([child()], rid(), location(), [context()], state()) ->
+-spec walk_children([child()], rid(), location(), [context()], profile(),
+                    state()) ->
           {ok, state()} | {error, #schema_error{}}.
-walk_children([], _Rid, _Location, _Contexts, State) ->
+walk_children([], _Rid, _Location, _Contexts, _Profile, State) ->
     {ok, State};
-walk_children([{Segments, Schema} | Rest], Rid, Location, Contexts, State) ->
+walk_children([{Segments, Schema} | Rest], Rid, Location, Contexts, Profile,
+              State) ->
     ChildLocation = push(Segments, Location),
     ChildContexts = [{Base, push(Segments, Relative)} ||
                         {Base, Relative} <- Contexts],
-    case walk(Schema, Rid, ChildLocation, ChildContexts, child, State) of
+    case walk(Schema, Rid, ChildLocation, ChildContexts, child, Profile, State) of
         {ok, Walked} ->
-            walk_children(Rest, Rid, Location, Contexts, Walked);
+            walk_children(Rest, Rid, Location, Contexts, Profile, Walked);
         {error, _} = Error ->
             Error
     end.

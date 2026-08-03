@@ -299,6 +299,108 @@ dialect_schema_positions_test() ->
                  resolve_ref(Current, Root, <<"#/prefixItems/0">>)),
     ?assertEqual(error, resolve_ref(Current, Root, <<"#/items/0">>)).
 
+%% Встроенный resource без `$schema` наследует dialect объемлющего: набор
+%% schema positions у него тот же, что у корня документа.
+embedded_dialect_inheritance_test() ->
+    Root = <<"https://example.com/root.json">>,
+    Embedded = <<"https://example.com/embedded.json">>,
+    Tail = <<"https://example.com/tail.json">>,
+    Schema = #{<<"$id">> => Root,
+               <<"$defs">> =>
+                   #{<<"e">> => #{<<"$id">> => Embedded,
+                                  <<"items">> => [#{<<"$id">> => <<"item.json">>}],
+                                  <<"additionalItems">> => #{<<"$id">> => Tail}}}},
+    {ok, Legacy} = discover(Schema, anonymous, ?LEGACY),
+    ?assertEqual(#{Root => ?LEGACY, Embedded => ?LEGACY, Tail => ?LEGACY,
+                   <<"https://example.com/item.json">> => ?LEGACY},
+                 valid_json_resource_index:dialects(Legacy)),
+
+    %% Тот же документ под Draft 2020-12: array-form `items` и `additionalItems`
+    %% не являются schema positions, поэтому `$id` внутри них resource не создаёт.
+    {ok, Current} = discover(Schema, anonymous, ?DIALECT),
+    ?assertEqual(#{Root => ?DIALECT, Embedded => ?DIALECT},
+                 valid_json_resource_index:dialects(Current)).
+
+%% Собственный `$schema` встроенного resource меняет dialect его поддерева и
+%% только его: соседняя ветка остаётся при dialect объемлющего.
+embedded_dialect_switch_test() ->
+    Root = <<"https://example.com/root.json">>,
+    Embedded = <<"https://example.com/embedded.json">>,
+    Schema = #{<<"$id">> => Root,
+               <<"$defs">> =>
+                   #{<<"legacy">> =>
+                         #{<<"$id">> => Embedded,
+                           <<"$schema">> => ?LEGACY,
+                           %% В 2019-09 keyword неизвестен: обход внутрь не идёт.
+                           <<"prefixItems">> => [#{<<"$id">> => <<"prefix.json">>}],
+                           <<"additionalItems">> => #{<<"$id">> => <<"tail.json">>}},
+                     <<"current">> =>
+                         #{<<"prefixItems">> => [#{<<"$id">> => <<"sibling.json">>}]}}},
+    {ok, Index} = discover(Schema, anonymous, ?DIALECT),
+    ?assertEqual(#{Root => ?DIALECT,
+                   Embedded => ?LEGACY,
+                   <<"https://example.com/tail.json">> => ?LEGACY,
+                   <<"https://example.com/sibling.json">> => ?DIALECT},
+                 valid_json_resource_index:dialects(Index)),
+    ?assertEqual(error, resolve_ref(Index, Embedded, <<"#/prefixItems/0">>)),
+    ?assertEqual({ok, {<<"https://example.com/tail.json">>, <<>>}},
+                 resolve_ref(Index, Embedded, <<"#/additionalItems">>)).
+
+%% Anchors тоже подчиняются dialect своего resource, а не документа:
+%% `$dynamicAnchor` в 2019-09-ресурсе не индексируется, `$recursiveAnchor` в нём,
+%% наоборот, начинает действовать.
+embedded_dialect_anchors_test() ->
+    Root = <<"https://example.com/root.json">>,
+    Embedded = <<"https://example.com/embedded.json">>,
+    Schema = #{<<"$id">> => Root,
+               <<"$dynamicAnchor">> => <<"node">>,
+               <<"$defs">> =>
+                   #{<<"legacy">> => #{<<"$id">> => Embedded,
+                                       <<"$schema">> => ?LEGACY,
+                                       <<"$dynamicAnchor">> => <<"node">>,
+                                       <<"$recursiveAnchor">> => true}}},
+    {ok, Index} = discover(Schema, anonymous, ?DIALECT),
+    ?assertEqual(#{Root => #{<<"node">> => <<>>}, Embedded => #{}},
+                 valid_json_resource_index:dynamic_anchors(Index)),
+    ?assertEqual(#{Root => false, Embedded => true},
+                 valid_json_resource_index:recursive_anchors(Index)).
+
+%% Ошибка dialect встроенного resource называет его собственный `$schema`, а не
+%% корень документа.
+embedded_dialect_error_test_() ->
+    Embedded = <<"https://example.com/embedded.json">>,
+    Discover = fun(Dialect) ->
+                       discover(#{<<"$defs">> =>
+                                      #{<<"e">> => #{<<"$id">> => Embedded,
+                                                     <<"$schema">> => Dialect}}},
+                                anonymous)
+               end,
+    Unknown = <<"https://example.com/dialect">>,
+    [?_assertEqual(schema_error({unknown_dialect, Unknown},
+                                {Embedded, <<"/$schema">>}),
+                   Discover(Unknown)),
+     ?_assertEqual(schema_error({bad_keyword_value, 42},
+                                {Embedded, <<"/$schema">>}),
+                   Discover(42))].
+
+%% Оба dialects запрещают `$schema` вне корня schema resource: 2020-12 —
+%% core.txt:1377, 2019-09 — core.txt:1320.
+misplaced_schema_test_() ->
+    Nested = #{<<"$defs">> => #{<<"x">> => #{<<"$schema">> => ?DIALECT}}},
+    [?_assertEqual(schema_error({misplaced_keyword, <<"$schema">>},
+                                {anonymous, <<"/$defs/x/$schema">>}),
+                   discover(Nested, anonymous, ?DIALECT)),
+     ?_assertEqual(schema_error({misplaced_keyword, <<"$schema">>},
+                                {anonymous, <<"/$defs/x/$schema">>}),
+                   discover(Nested, anonymous, ?LEGACY)),
+     %% Корень документа своим `$schema` уже прочитан вызывающим, и запрет его
+     %% не касается.
+     ?_assertMatch({ok, _}, discover(#{<<"$schema">> => ?DIALECT}, anonymous)),
+     %% Вне schema position keyword не проверяется: туда обход не спускается.
+     ?_assertMatch({ok, _},
+                   discover(#{<<"const">> => #{<<"$schema">> => ?DIALECT}},
+                            anonymous))].
+
 id_error_test_() ->
     Root = <<"https://example.com/root.json">>,
     Duplicate = <<"https://example.com/duplicate">>,
@@ -348,10 +450,15 @@ discover(Schema, Retrieval) ->
     discover(Schema, Retrieval, ?DIALECT).
 
 %% Тесты этой границы называют dialect, а профиль строится по встроенной
-%% таблице: собственные vocabulary-tests лежат рядом с их разбором.
+%% таблице: собственные vocabulary-tests лежат рядом с их разбором. Резолвер
+%% берётся над пустым store: пользовательские метасхемы проверяются compiler
+%% fixtures, где реестр есть.
 discover(Schema, Retrieval, Dialect) ->
-    valid_json_resource_index:discover(Schema, Retrieval,
-                                       valid_json_vocabulary:canonical(Dialect)).
+    Profile = valid_json_vocabulary:canonical(Dialect),
+    valid_json_resource_index:discover(
+      Schema, Retrieval, Profile,
+      valid_json_compile_closure:dialect_resolver(valid_json_store:new([]),
+                                                  Profile)).
 
 resolve_ref(Index, Base, Reference) ->
     {ok, ResolvedBase, Target} = valid_json_uri:resolve(Reference, Base),

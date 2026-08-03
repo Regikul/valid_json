@@ -15,7 +15,12 @@
 -spec compile(json(), dialect()) -> {ok, compiled()} | {error, #schema_error{}}.
 compile(Schema, Dialect) ->
     Profile = valid_json_vocabulary:canonical(Dialect),
-    case valid_json_resource_index:discover(Schema, anonymous, Profile) of
+    %% Store у этого входа нет, поэтому пользовательская метасхема встроенного
+    %% resource неотличима от неизвестного dialect — как и на любом другом имени,
+    %% которого нет в реестре.
+    Resolve = valid_json_compile_closure:dialect_resolver(
+                valid_json_store:new([]), Profile),
+    case valid_json_resource_index:discover(Schema, anonymous, Profile, Resolve) of
         {ok, Index} ->
             valid_json_compile_emit:emit(Index, []);
         {error, _} = Error ->

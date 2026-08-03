@@ -913,6 +913,99 @@ production_dialect_test() ->
     #resource{dialect = ?LEGACY} =
         maps:get(anonymous, maps:get(resources, Defaulted)).
 
+%% Встроенный resource со своим `$schema` компилируется своим dialect, а
+%% объемлющий остаётся при своём. Разница видна в одном артефакте: array-form
+%% `items` даёт раскладку только в 2019-09, а `prefixItems` там неизвестен и
+%% этим dialect игнорируется.
+cross_draft_embedded_test() ->
+    Root = <<"https://example.com/root">>,
+    Legacy = <<"https://example.com/legacy">>,
+    Schema = #{<<"$id">> => Root,
+               <<"$schema">> => ?DIALECT,
+               <<"$ref">> => Legacy,
+               <<"prefixItems">> => [#{<<"type">> => <<"string">>}],
+               <<"$defs">> =>
+                   #{<<"legacy">> =>
+                         #{<<"$id">> => Legacy,
+                           <<"$schema">> => ?LEGACY,
+                           <<"prefixItems">> => [#{<<"type">> => <<"string">>}],
+                           <<"items">> => [#{<<"type">> => <<"string">>}],
+                           <<"additionalItems">> => #{<<"type">> => <<"integer">>}}}},
+    {ok, #{resources := Resources}} =
+        valid_json_compile:compile(valid_json_store:new([]), Schema, []),
+    #resource{dialect = RootDialect, nodes = RootNodes} = maps:get(Root, Resources),
+    #resource{dialect = LegacyDialect, nodes = LegacyNodes} =
+        maps:get(Legacy, Resources),
+    ?assertEqual(?DIALECT, RootDialect),
+    ?assertEqual(?LEGACY, LegacyDialect),
+    ?assertEqual([{ref, {Legacy, <<>>}},
+                  {prefix_items, [{Root, <<"/prefixItems/0">>}], undefined}],
+                 constraints(<<>>, RootNodes)),
+    %% В 2019-09 `prefixItems` — неизвестный keyword, и этот dialect его
+    %% игнорирует вовсе; раскладку задают array-form `items` и `additionalItems`.
+    ?assertEqual([{items_array, [{Legacy, <<"/items/0">>}],
+                   {Legacy, <<"/additionalItems">>}}],
+                 constraints(<<>>, LegacyNodes)),
+    %% Внутрь `prefixItems` 2019-09-ресурса компилятор не спускался.
+    ?assertEqual([<<>>, <<"/additionalItems">>, <<"/items/0">>],
+                 lists:sort(maps:keys(LegacyNodes))).
+
+%% Тот же переход между документами: dialect втянутого по `$ref` документа
+%% задаёт его собственный `$schema`, а не dialect ссылающегося.
+cross_draft_remote_test() ->
+    Remote = <<"https://example.com/remote">>,
+    {ok, Remote, Store} =
+        valid_json_store:add(valid_json_store:new([]), Remote,
+                             #{<<"$id">> => Remote,
+                               <<"$schema">> => ?LEGACY,
+                               <<"prefixItems">> => [#{<<"type">> => <<"string">>}]}),
+    {ok, #{resources := Resources, sources := Sources}} =
+        valid_json_compile:compile(Store, #{<<"$ref">> => Remote}, []),
+    ?assertEqual([Remote], Sources),
+    #resource{dialect = ?DIALECT, nodes = EntryNodes} =
+        maps:get(anonymous, Resources),
+    #resource{dialect = ?LEGACY, nodes = RemoteNodes} = maps:get(Remote, Resources),
+    ?assertEqual([{ref, {Remote, <<>>}}], constraints(<<>>, EntryNodes)),
+    %% В 2019-09 `prefixItems` неизвестен, а неизвестные этот dialect игнорирует:
+    %% в 2020-12 тот же keyword дал бы раскладку массива.
+    ?assertEqual([], constraints(<<>>, RemoteNodes)).
+
+%% Пользовательская метасхема, названная встроенным resource, действует только
+%% внутри него и обязана попасть в `sources`: её `$vocabulary` влияет на артефакт.
+cross_draft_embedded_metaschema_test() ->
+    Meta = <<"https://example.com/meta/core-only">>,
+    Store = metaschema_store(Meta, [<<"core">>]),
+    Root = <<"https://example.com/root">>,
+    Embedded = <<"https://example.com/embedded">>,
+    Schema = #{<<"$id">> => Root,
+               <<"minimum">> => 5,
+               <<"$defs">> =>
+                   #{<<"e">> => #{<<"$id">> => Embedded,
+                                  <<"$schema">> => Meta,
+                                  <<"minimum">> => 10}}},
+    {ok, #{resources := Resources, sources := Sources}} =
+        valid_json_compile:compile(Store, Schema, []),
+    ?assertEqual([Meta], Sources),
+    #resource{dialect = ?DIALECT, nodes = RootNodes} = maps:get(Root, Resources),
+    #resource{dialect = Meta, nodes = EmbeddedNodes} = maps:get(Embedded, Resources),
+    ?assertEqual([{minimum, 5}], constraints(<<>>, RootNodes)),
+    %% Validation в метасхеме не объявлена, поэтому `minimum` внутри неизвестен.
+    ?assertEqual([{annotation, <<"minimum">>, 10}], constraints(<<>>, EmbeddedNodes)).
+
+%% Вне корня schema resource `$schema` запрещён обоими dialects, и ошибка
+%% называет его собственную локацию.
+misplaced_schema_test_() ->
+    Compile = fun(Dialect) ->
+                      valid_json_compile:compile(
+                        valid_json_store:new([]),
+                        #{<<"$defs">> => #{<<"x">> => #{<<"$schema">> => ?DIALECT}}},
+                        [{default_dialect, Dialect}])
+              end,
+    Error = {error, #schema_error{reason = {misplaced_keyword, <<"$schema">>},
+                                  location = {anonymous, <<"/$defs/x/$schema">>}}},
+    [?_assertEqual(Error, Compile(?DIALECT)),
+     ?_assertEqual(Error, Compile(?LEGACY))].
+
 production_reference_error_test_() ->
     Missing = <<"https://example.com/missing">>,
     Remote = <<"https://example.com/remote">>,
