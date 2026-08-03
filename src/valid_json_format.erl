@@ -58,8 +58,18 @@ message(Name) ->
 %% Таблица format algorithms. Имя, которого здесь нет, возвращает
 %% `unsupported`: это не «формат неверен», а «проверки нет», и обе ветви
 %% вызывающего различают эти ответы. Уровень поддержки каждого имени
-%% зафиксирован в ROADMAP фазы P8.
+%% зафиксирован в okf/architecture/format-attributes.md.
 -spec attribute(binary(), binary()) -> boolean() | unsupported.
+%% Четыре attributes RFC 3339 разбирает отдельный модуль: арифметика
+%% високосного года и leap second рядом с таблицей не помещается.
+attribute(<<"date">>, String) ->
+    valid_json_format_time:date(String);
+attribute(<<"time">>, String) ->
+    valid_json_format_time:time(String);
+attribute(<<"date-time">>, String) ->
+    valid_json_format_time:date_time(String);
+attribute(<<"duration">>, String) ->
+    valid_json_format_time:duration(String);
 %% ipv4 — dotted-quad из четырёх десятичных октетов (RFC 2673, раздел 3.2).
 %% Ведущий ноль запрещён: он читается как восьмеричная запись и делает адрес
 %% двусмысленным.

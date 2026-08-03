@@ -29,7 +29,10 @@
                 "anchor.json", "refRemote.json", "infinite-loop-detection.json",
                 "unevaluatedProperties.json", "unevaluatedItems.json",
                 "optional/id.json", "optional/unknownKeyword.json",
-                "optional/cross-draft.json"]).
+                "optional/cross-draft.json",
+                "optional/format/date.json", "optional/format/time.json",
+                "optional/format/date-time.json",
+                "optional/format/duration.json"]).
 
 %% Files, существующие только в одном dialect: `prefixItems.json` появился
 %% вместе с самим keyword в Draft 2020-12, обоих файлов `dynamicRef.json` в
@@ -69,7 +72,7 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES,
 %% ?EXCLUDED и ?OUT_OF_PROFILE, и менять его иначе нельзя.
--define(CENSUS, {750, 2551}).
+-define(CENSUS, {758, 2937}).
 
 %% Сьют адресует свои remote documents относительно этого base, повторяя в URI
 %% раскладку директории `remotes`. Число документов закреплено по той же
@@ -119,9 +122,25 @@ count_group({_Title, Fun}) when is_function(Fun, 0)  -> 1.
 
 file_tests(Store, Dir, Dialect, File) ->
     Path = filename:join([tests_dir(), Dir, File]),
+    %% Dialect директории задаётся опцией, а не подставляется вместо `$schema`:
+    %% схема, которая называет свой dialect сама, остаётся сильнее раскладки
+    %% сьюта.
+    Options = [{default_dialect, Dialect}, {schema_validation, trusted}
+               | format_options(File)],
     {filename:join(Dir, File),
-     [group_tests(Store, Dialect, Group)
+     [group_tests(Store, Options, Group)
       || Group <- read_json(Path), included(Dir, File, Group)]}.
+
+%% Профиль format компилируется с включённой проверкой строки: без неё все cases
+%% файлов `optional/format/` проходят подряд и подряд же зеленеют. Обязательный
+%% `format.json` под правило не попадает по самому пути и остаётся с умолчанием
+%% — он закрепляет как раз поведение без вердикта
+%% (okf/testing/conformance-policy.md, раздел «Профиль format»).
+format_options(File) ->
+    case filename:dirname(File) of
+        "optional/format" -> [{assert_format, true}];
+        _Other            -> []
+    end.
 
 %% Расхождение объявлено для обоих dialects сразу, а фазы группы и границы
 %% профиля называют dialect: один и тот же keyword появляется в dialects не
@@ -131,17 +150,13 @@ included(Dir, File, #{<<"description">> := Description}) ->
         not lists:member({Dir, File, Description}, ?OUT_OF_PROFILE) andalso
         not lists:member({Dir, File, Description}, ?PENDING).
 
-%% Dialect директории задаётся опцией, а не подставляется вместо `$schema`:
-%% схема, которая называет свой dialect сама, остаётся сильнее раскладки сьюта.
-group_tests(Store, Dialect, #{<<"description">> := Description,
+group_tests(Store, Options, #{<<"description">> := Description,
                               <<"schema">> := Schema,
                               <<"tests">> := Cases}) ->
     Title = unicode:characters_to_list(Description),
     %% Схемы официального fixture-набора здесь являются доверенным входом:
     %% suite проверяет их применение к data, а не сами schemas по метасхеме.
-    case valid_json_compile:compile(
-           Store, Schema, [{default_dialect, Dialect},
-                           {schema_validation, trusted}]) of
+    case valid_json_compile:compile(Store, Schema, Options) of
         {ok, Compiled} ->
             {Title, [case_test(Compiled, Case) || Case <- Cases]};
         {error, Reason} ->
