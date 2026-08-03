@@ -167,11 +167,38 @@ batch_atomic_test() ->
     {ok, Conflict, Store} =
         valid_json_store:add(valid_json_store:new([]), Existing,
                              #{<<"$id">> => Conflict}),
-    ?assertEqual(schema_error({name_taken, Conflict}),
+    Other = <<"https://example.com/other">>,
+    ?assertEqual({error, [entry_error(Other, {name_taken, Conflict})]},
                  valid_json_store:add(Store, [{Free, true},
-                                              {<<"https://example.com/other">>,
-                                               #{<<"$id">> => Conflict}}])),
+                                              {Other, #{<<"$id">> => Conflict}}])),
     ?assertEqual(undefined, valid_json_store:fetch(Free, Store)).
+
+%% Записи разбираются независимо, поэтому негодные имена показываются все сразу,
+%% и каждая ошибка названа тем написанием, с каким пришёл вызывающий.
+batch_name_errors_test() ->
+    Good = <<"https://example.com/good">>,
+    ?assertEqual({error, [entry_error(<<"relative.json">>,
+                                      relative_uri_without_base),
+                          entry_error(<<"http://[::1">>, invalid_uri)]},
+                 valid_json_store:add(valid_json_store:new([]),
+                                      [{<<"relative.json">>, true},
+                                       {Good, true},
+                                       {<<"http://[::1">>, true}])).
+
+%% Конфликты имён тоже собираются все: отвергнутая запись не вставляется, но
+%% обход продолжается.
+batch_conflicts_test() ->
+    Taken = <<"https://example.com/taken">>,
+    Free = <<"https://example.com/free">>,
+    First = <<"https://example.com/first">>,
+    Second = <<"https://example.com/second">>,
+    {ok, Taken, Store} =
+        valid_json_store:add(valid_json_store:new([]), Taken, true),
+    ?assertEqual({error, [entry_error(First, {name_taken, Taken}),
+                          entry_error(Second, {name_taken, Taken})]},
+                 valid_json_store:add(Store, [{First, #{<<"$id">> => Taken}},
+                                              {Free, true},
+                                              {Second, #{<<"$id">> => Taken}}])).
 
 remove_test() ->
     Retrieval = <<"https://example.com/retrieval">>,
@@ -219,3 +246,7 @@ builtin_test() ->
 
 schema_error(Reason) ->
     {error, #schema_error{reason = Reason, location = undefined}}.
+
+%% Списочная регистрация называет каждую ошибку записью, к которой она относится.
+entry_error(Uri, Reason) ->
+    {Uri, #schema_error{reason = Reason, location = undefined}}.

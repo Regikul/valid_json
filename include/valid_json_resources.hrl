@@ -36,6 +36,8 @@
 }).
 
 -type store() :: #store{}.
--type store_option() :: {base_uri, uri()}.
+%% Опция самого реестра. Опции размещённого хранилища шире и принадлежат
+%% управляющему: реестр про диалект и format ничего не знает.
+-type registry_option() :: {base_uri, uri()}.
 
 -endif.

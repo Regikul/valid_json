@@ -6,12 +6,12 @@
 
 -include("valid_json_resources.hrl").
 
--export([new/1, add/2, add/3, remove/2, fetch/2]).
--export_type([store/0, store_option/0]).
+-export([new/1, add/2, add/3, remove/2, fetch/2, canonical_names/1]).
+-export_type([store/0, registry_option/0]).
 
 %% `new/1` не имеет error-ветви по публичному контракту. Ошибочная опция —
 %% ошибка вызова API, поэтому она завершается badarg, а не schema_error.
--spec new([store_option()]) -> store().
+-spec new([registry_option()]) -> store().
 new(Options) when is_list(Options) ->
     case base_option(Options) of
         {ok, Base} -> #store{base = Base};
@@ -20,21 +20,30 @@ new(Options) when is_list(Options) ->
 new(Options) ->
     erlang:error(badarg, [Options]).
 
+%% Запись здесь одна, поэтому имя ошибки вызывающий знает и без нас.
 -spec add(store(), uri(), json()) ->
           {ok, uri(), store()} | {error, #schema_error{}}.
 add(Store, Uri, Json) ->
     case add(Store, [{Uri, Json}]) of
         {ok, [Canonical], Added} -> {ok, Canonical, Added};
-        {error, _} = Error       -> Error
+        {error, [{Uri, Error}]}  -> {error, Error}
     end.
 
 %% Списочная регистрация атомарна относительно значения: сначала строятся все
 %% documents и снимаются заменяемые записи, затем проверяются конфликты. Ошибка
 %% не возвращает промежуточный store вызывающему.
+%%
+%% Ошибки собираются все: записи разбираются независимо, и показать разом весь
+%% испорченный вызов полезнее, чем первую попавшуюся запись. Имя ошибки — то
+%% написание, с каким пришёл вызывающий: канонического имени у отвергнутой
+%% записи может не быть вовсе, а `name_taken` называет чужое.
+%%
+%% Фазы не смешиваются: пока хоть одно имя не разрешилось, конфликты не
+%% считаются — считать их не из чего, документов нет.
 -spec add(store(), [{uri(), json()}]) ->
-          {ok, [uri()], store()} | {error, #schema_error{}}.
+          {ok, [uri()], store()} | {error, [{uri(), #schema_error{}}]}.
 add(#store{} = Store, Entries) when is_list(Entries) ->
-    case documents(Entries, Store#store.base, []) of
+    case documents(Entries, Store#store.base) of
         {ok, Added} -> insert_all(Added, Store);
         {error, _} = Error -> Error
     end;
@@ -60,6 +69,14 @@ fetch(Uri, #store{documents = Documents}) ->
         Document  -> Document
     end.
 
+%% Оба ключа документа дают одно каноническое имя, поэтому список без повторов.
+%% Встроенная область сюда не попадает: её документы в реестре не лежат.
+-spec canonical_names(store()) -> [uri()].
+canonical_names(#store{documents = Documents}) ->
+    ordsets:from_list([Canonical
+                       || #document{canonical = Canonical}
+                              <- maps:values(Documents)]).
+
 -spec base_option([term()]) -> {ok, rid()} | error.
 base_option([]) ->
     {ok, anonymous};
@@ -82,16 +99,26 @@ hierarchical_base(Uri) ->
             error
     end.
 
--spec documents([term()], rid(), [#document{}]) ->
-          {ok, [#document{}]} | {error, #schema_error{}}.
-documents([], _Base, Acc) ->
-    {ok, lists:reverse(Acc)};
-documents([{Uri, Json} | Rest], Base, Acc) when is_binary(Uri) ->
+%% Записи разбираются независимо друг от друга, поэтому ошибки одной не мешают
+%% увидеть ошибки остальных. Документ сохраняется вместе с именем записи: под
+%% ним же называется ошибка следующей фазы.
+-spec documents([term()], rid()) ->
+          {ok, [{uri(), #document{}}]} | {error, [{uri(), #schema_error{}}]}.
+documents(Entries, Base) ->
+    case lists:foldl(fun(Entry, Acc) -> build(Entry, Base, Acc) end,
+                     {[], []}, Entries) of
+        {Documents, []} -> {ok, lists:reverse(Documents)};
+        {_Documents, Errors} -> {error, lists:reverse(Errors)}
+    end.
+
+-spec build(term(), rid(), {[{uri(), #document{}}], [{uri(), #schema_error{}}]}) ->
+          {[{uri(), #document{}}], [{uri(), #schema_error{}}]}.
+build({Uri, Json}, Base, {Documents, Errors}) when is_binary(Uri) ->
     case document(Uri, Json, Base) of
-        {ok, Document} -> documents(Rest, Base, [Document | Acc]);
-        {error, _} = Error -> Error
+        {ok, Document}     -> {[{Uri, Document} | Documents], Errors};
+        {error, Error}     -> {Documents, [{Uri, Error} | Errors]}
     end;
-documents(_Entries, _Base, _Acc) ->
+build(_Entry, _Base, _Acc) ->
     erlang:error(badarg).
 
 -spec document(uri(), json(), rid()) -> {ok, #document{}} | {error, #schema_error{}}.
@@ -142,33 +169,34 @@ names([Uri | Rest], Base, Acc) when is_binary(Uri) ->
 names(_Uris, _Base, _Acc) ->
     erlang:error(badarg).
 
--spec insert_all([#document{}], store()) ->
-          {ok, [uri()], store()} | {error, #schema_error{}}.
+-spec insert_all([{uri(), #document{}}], store()) ->
+          {ok, [uri()], store()} | {error, [{uri(), #schema_error{}}]}.
 insert_all(Added, #store{documents = Existing} = Store) ->
-    Retrievals = [Uri || #document{retrieval = Uri} <- Added],
+    Retrievals = [Uri || {_Entry, #document{retrieval = Uri}} <- Added],
     Stripped = strip_replacements(Retrievals, Existing),
-    case lists:foldl(fun insert/2, {ok, [], Stripped}, Added) of
-        {ok, Canonicals, Documents} ->
+    case lists:foldl(fun insert/2, {[], [], Stripped}, Added) of
+        {Canonicals, [], Documents} ->
             {ok, lists:reverse(Canonicals), Store#store{documents = Documents}};
-        {error, _} = Error ->
-            Error
+        {_Canonicals, Errors, _Documents} ->
+            {error, lists:reverse(Errors)}
     end.
 
--spec insert(#document{}, {ok, [uri()], #{uri() => #document{}}} |
-                            {error, #schema_error{}}) ->
-          {ok, [uri()], #{uri() => #document{}}} | {error, #schema_error{}}.
-insert(_Document, {error, _} = Error) ->
-    Error;
-insert(#document{retrieval = Retrieval, canonical = Canonical} = Document,
-       {ok, Canonicals, Documents0}) ->
+%% Отвергнутая запись не вставляется, а обход продолжается: так за один вызов
+%% видно все конфликты. Невидимым остаётся один — конфликт с записью, которая и
+%% сама отвергнута, потому что в реестр она не попала.
+-spec insert({uri(), #document{}},
+             {[uri()], [{uri(), #schema_error{}}], #{uri() => #document{}}}) ->
+          {[uri()], [{uri(), #schema_error{}}], #{uri() => #document{}}}.
+insert({Entry, #document{retrieval = Retrieval, canonical = Canonical} = Document},
+       {Canonicals, Errors, Documents0}) ->
     %% Повтор одного retrieval внутри batch — тот же upsert, что между вызовами.
     Documents = strip_replacement(Retrieval, Documents0),
     case free_names([Retrieval, Canonical], Documents) of
         ok ->
             Stored = Documents#{Retrieval => Document, Canonical => Document},
-            {ok, [Canonical | Canonicals], Stored};
-        {error, _} = Error ->
-            Error
+            {[Canonical | Canonicals], Errors, Stored};
+        {error, Error} ->
+            {Canonicals, [{Entry, Error} | Errors], Documents0}
     end.
 
 -spec strip_replacements([uri()], #{uri() => #document{}}) ->

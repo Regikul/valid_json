@@ -1,7 +1,7 @@
 {application, valid_json, [
     {description, "An OTP library"},
     {vsn, "0.1.0"},
-    {registered, [valid_json_sup]},
+    {registered, [valid_json_sup, valid_json_keeper, valid_json_manager]},
     {mod, {valid_json_app, []}},
     {applications, [
         kernel,
