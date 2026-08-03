@@ -15,7 +15,8 @@ unsupported_test_() ->
                    valid_json_format:attribute(<<"iri">>, <<"/привет"/utf8>>)),
      ?_assertEqual(unsupported,
                    valid_json_format:attribute(<<"custom-name">>, <<>>)),
-     ?_assertEqual(unsupported, valid_json_format:attribute(<<"uuid">>, <<>>))].
+     ?_assertEqual(unsupported,
+                   valid_json_format:attribute(<<"idn-hostname">>, <<"example">>))].
 
 %% date — правило `full-date`: четыре цифры года, две месяца, две дня. Длина
 %% месяца считается с григорианским правилом високосного года, включая вековые.
@@ -102,6 +103,42 @@ is_date_time(String) ->
 
 is_duration(String) ->
     valid_json_format:attribute(<<"duration">>, String).
+
+%% uuid — ASCII hex groups 8-4-4-4-12. Version, variant and all-zero value are
+%% intentionally accepted; the format checks only the RFC 4122 string shape.
+uuid_valid_test_() ->
+    Valid = [<<"2EB8AA08-AA98-11EA-B4AA-73B441D16380">>,
+             <<"2eb8aa08-aa98-11ea-b4aa-73b441d16380">>,
+             <<"2eb8aa08-AA98-11EA-B4Aa-73B441D16380">>,
+             <<"00000000-0000-0000-0000-000000000000">>,
+             <<"99c17cbb-656f-664a-940f-1a4568f03487">>],
+    [?_assert(is_uuid(String)) || String <- Valid].
+
+uuid_invalid_test_() ->
+    Invalid = [<<"2eb8aa08-aa98-11ea-b4aa-73b441d1638">>,
+               <<"2eb8aa08-aa98-11ea-73b441d16380">>,
+               <<"2eb8aa08-aa98-11ea-b4ga-73b441d16380">>,
+               <<"2eb8aa08aa9811eab4aa73b441d16380">>,
+               <<"urn:uuid:2eb8aa08-aa98-11ea-b4aa-73b441d16380">>,
+               <<"2eb8aa08-aa98-11ea-b4aa-73b441d16380-">>,
+               <<"২eb8aa08-aa98-11ea-b4aa-73b441d16380"/utf8>>, <<>>],
+    [?_assertNot(is_uuid(String)) || String <- Invalid].
+
+is_uuid(String) ->
+    valid_json_format:attribute(<<"uuid">>, String).
+
+%% regex — compileability only; matching the expression against a subject is
+%% outside the format attribute's contract.
+regex_valid_test_() ->
+    Valid = [<<"([abc])+\\s+$">>, <<"^a+$">>, <<"">>, <<"[A-Z]+">>],
+    [?_assert(is_regex(String)) || String <- Valid].
+
+regex_invalid_test_() ->
+    Invalid = [<<"^(abc]">>, <<"(">>, <<"[z-a]">>, <<"\\">>],
+    [?_assertNot(is_regex(String)) || String <- Invalid].
+
+is_regex(String) ->
+    valid_json_format:attribute(<<"regex">>, String).
 
 %% ipv4 — ровно четыре десятичных октета без ведущих нулей. Отвергаются как
 %% чужие записи того же адреса (shorthand, hex, octal, целое число), так и любые

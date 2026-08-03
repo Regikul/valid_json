@@ -93,5 +93,9 @@ attribute(<<"json-pointer">>, String) ->
     valid_json_format_uri:json_pointer(String);
 attribute(<<"relative-json-pointer">>, String) ->
     valid_json_format_uri:relative_json_pointer(String);
+attribute(<<"uuid">>, String) ->
+    valid_json_format_misc:uuid(String);
+attribute(<<"regex">>, String) ->
+    valid_json_format_misc:regex(String);
 attribute(_Name, _String) ->
     unsupported.

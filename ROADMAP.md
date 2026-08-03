@@ -394,11 +394,11 @@
   options `assert_format` доходит до IR и включает проверку строки по таблице
   format algorithms, причём успешная проверка аннотацию не отменяет, а значение
   другого типа и имя вне таблицы остаются чистой annotation. В таблице
-  реализованы тринадцать строк: четыре attributes RFC 3339, четыре сетевых
+  реализованы пятнадцать строк: четыре attributes RFC 3339, четыре сетевых
   attributes и пять URI attributes (`uri`, `uri-reference`, `uri-template`,
-  `json-pointer`, `relative-json-pointer`). Остальные шесть имён — `uuid`,
-  `regex` и четыре IDN/IRI — остаются вне полной assertion-поддержки; четыре
-  последних являются документированным исключением. Не выполнена половина по
+  `json-pointer`, `relative-json-pointer`), а также `uuid` и `regex`. Остальные
+  четыре имени — IDN/IRI — остаются вне полной assertion-поддержки и являются
+  документированным исключением. Не выполнена половина по
   vocabularies: Format-Assertion обязывает проверять все форматы спецификации,
   поэтому его URI в таблицу vocabularies не вносится, метасхема, объявившая его
   значением `true`, отвергается, а `optional/format-assertion.json` не
@@ -418,15 +418,15 @@
   целиком написан через content keywords этой фазы. Оба файла подключены
   целиком и проходят, а отложенных компилятором keywords не осталось вовсе.
 - [~] Подключить выбранные `optional/format`, content и прочие optional files к
-  runner. Из профиля format подключены тринадцать файлов обоих диалектов —
+  runner. Из профиля format подключены пятнадцать файлов обоих диалектов —
   `date.json`, `time.json`, `date-time.json`, `duration.json`, `email.json`,
   `hostname.json`, `ipv4.json`, `ipv6.json`, `uri.json`,
   `uri-reference.json`, `uri-template.json`, `json-pointer.json` и
-  `relative-json-pointer.json`; схемы файлов директории `optional/format/`
+  `relative-json-pointer.json`, `uuid.json` и `regex.json`; схемы файлов
+  директории `optional/format/`
   компилируются с `{assert_format, true}`, а обязательный `format.json` остаётся
-  с умолчанием. Не подключены `uuid.json` и `regex.json`: для них алгоритмы
-  выбраны, но ещё не реализованы. Четыре IDN/IRI-файла исключены намеренно, а
-  `unknown.json` алгоритма не требует, но к runner пока тоже не подключён.
+  с умолчанием. Четыре IDN/IRI-файла исключены намеренно, а `unknown.json`
+  алгоритма не требует, но к runner пока тоже не подключён.
   Прочие optional profiles ещё не выбраны пунктом выше.
 - [ ] Задокументировать результаты дополнительных capability profiles и все
   намеренные исключения.
