@@ -13,6 +13,9 @@
 -export([compile_unchecked/2]).
 -endif.
 
+%% `schema_validation` называет формат, в котором проверка метасхемой доложит о
+%% провале. Значение `trusted`, отключающее проверку, принимается только в test
+%% build: в обычной сборке оно неотличимо от любой другой незнакомой опции.
 -type compile_option() :: {default_dialect, dialect()}
                         | {assert_format, boolean()}
                         | {schema_validation, schema_validation()}.
@@ -119,6 +122,20 @@ finish(_Store, {error, _} = Error, _SchemaValidation, _AssertFormat) ->
 compile_options(Options) ->
     compile_options(Options, ?DRAFT_2020_12, basic, false).
 
+%% Пропуск проверки метасхемой нужен вручную выписанным fixtures и conformance
+%% runner'у, где схемы заведомо валидны. Поставляемая библиотека проверяет
+%% всегда (validator-resources-runtime.md, «Проверка схем и ошибки»), поэтому
+%% вне test build `trusted` неотличим от любой другой негодной опции.
+-ifdef(TEST).
+-define(SCHEMA_VALIDATION(Mode),
+        Mode =:= trusted; Mode =:= flag; Mode =:= basic;
+        Mode =:= detailed; Mode =:= verbose).
+-else.
+-define(SCHEMA_VALIDATION(Mode),
+        Mode =:= flag; Mode =:= basic;
+        Mode =:= detailed; Mode =:= verbose).
+-endif.
+
 %% `assert_format` меняет IR и потому является compile option, а не option
 %% вычисления (validator-resources-runtime.md, «Опции»). По умолчанию `format`
 %% только аннотирует: включать проверку без явной настройки спецификация
@@ -143,8 +160,7 @@ compile_options([{assert_format, Assert} | Rest], DefaultDialect,
     compile_options(Rest, DefaultDialect, SchemaValidation, Assert);
 compile_options([{schema_validation, Mode} | Rest], DefaultDialect,
                 _SchemaValidation, AssertFormat)
-  when Mode =:= trusted; Mode =:= flag; Mode =:= basic;
-       Mode =:= detailed; Mode =:= verbose ->
+  when ?SCHEMA_VALIDATION(Mode) ->
     compile_options(Rest, DefaultDialect, Mode, AssertFormat);
 compile_options(_Options, _DefaultDialect, _SchemaValidation, _AssertFormat) ->
     erlang:error(badarg).

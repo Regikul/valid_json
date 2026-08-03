@@ -17,7 +17,7 @@
 %% ветвь assertion, которую компилятор строит по опции `assert_format` либо по
 %% активной Format-Assertion vocabulary.
 -spec check(constraint(), json(), #eval_context{}) -> #eval_result{}.
-check({format, Name, Assert}, Instance, #eval_context{mode = flag}) ->
+check({format, Name, Assert}, Instance, #eval_context{format = flag}) ->
     #eval_result{valid = holds(Assert, Name, Instance),
                  evaluated = valid_json_evaluated:neutral(), units = []};
 check({format, Name, Assert}, Instance, Context) ->

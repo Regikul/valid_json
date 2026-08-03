@@ -1400,6 +1400,19 @@ flag_output_test_() ->
      ?_assertEqual({ok, #{<<"valid">> => false}},
                    validate(schema_node([{type, [string]}]), 1))].
 
+%% Опция вызова разбирается так же, как опции store и compile: негодное значение
+%% и незнакомый ключ — ошибка вызова API. Промолчать нельзя, потому что тихим
+%% умолчанием стал бы flag, а он не собирает units и лишил бы вызывающего всей
+%% запрошенной диагностики.
+output_option_error_test_() ->
+    Artifact = artifact(schema_node([{type, [integer]}])),
+    [?_assertError(badarg, valid_json_core:validate(Artifact, 1, [{output, bogus}])),
+     ?_assertError(badarg, valid_json_core:validate(Artifact, 1, [{outpt, basic}])),
+     ?_assertError(badarg, valid_json_core:validate(Artifact, 1, [output])),
+     ?_assertError(badarg, valid_json_core:validate(Artifact, 1, not_a_list)),
+     ?_assertEqual({ok, #{<<"valid">> => true}},
+                   valid_json_core:validate(Artifact, 1, []))].
+
 valid(Constraints, Instance) ->
     {ok, #eval_result{valid = Valid}} = run(schema_node(Constraints), Instance),
     Valid.

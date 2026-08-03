@@ -77,7 +77,7 @@ dependent([{Name, Addr} | Rest], Instance, Context, Result) ->
                Result,
                branch(Addr, <<"dependentSchemas">>, [Name], Instance, Context)),
     case Merged#eval_result.valid =:= false andalso
-         Context#eval_context.mode =:= flag of
+         Context#eval_context.format =:= flag of
         true  -> Merged;
         false -> dependent(Rest, Instance, Context, Merged)
     end.
@@ -177,7 +177,7 @@ finish({Matched, Seen, Error, Evaluated, Units}) ->
 %% понадобиться `unevaluated*` выше по обходу.
 -spec stopped(stop(), tuple(), #eval_context{}) -> boolean().
 stopped(Stop, {Matched, Seen, _Error, _Evaluated, _Units},
-        #eval_context{mode = flag, coverage = false}) ->
+        #eval_context{format = flag, coverage = false}) ->
     Stop(Matched, Seen);
 stopped(_Stop, _Acc, #eval_context{}) ->
     false.
@@ -228,7 +228,7 @@ branch(Addr, Keyword, Tail, Instance, #eval_context{keyword_location = Location}
 %% принадлежит keyword, который провалиться не может.
 -spec result(binary(), boolean(), binary() | none, evaluated(), [#output_unit{}],
              #eval_context{}) -> #eval_result{}.
-result(_Keyword, Valid, _Message, Evaluated, _Units, #eval_context{mode = flag}) ->
+result(_Keyword, Valid, _Message, Evaluated, _Units, #eval_context{format = flag}) ->
     #eval_result{valid = Valid, evaluated = Evaluated, units = []};
 result(Keyword, Valid, Message, Evaluated, Units, Context) ->
     Unit = valid_json_unit:keyword(Keyword, Valid, detail(Valid, Message), Units, Context),

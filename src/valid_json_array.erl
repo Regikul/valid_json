@@ -96,7 +96,7 @@ evaluate([{_Keyword, _Role, undefined} | Rest], Length, Context, Result) ->
 evaluate([{Keyword, Role, Applications} | Rest], Length, Context, Result) ->
     Merged = valid_json_eval:conjoin(
                Result, keyword(Keyword, Role, Applications, Length, Context)),
-    case Merged#eval_result.valid =:= false andalso Context#eval_context.mode =:= flag of
+    case Merged#eval_result.valid =:= false andalso Context#eval_context.format =:= flag of
         true  -> Merged;
         false -> evaluate(Rest, Length, Context, Merged)
     end.
@@ -131,7 +131,7 @@ apply_all([{Tail, Index, Element, Addr} | Rest], Context, Result, Applied) ->
     Merged = valid_json_eval:conjoin(
                Result, branch(Addr, Tail, Index, Element, Context)),
     case Merged#eval_result.valid =:= false andalso
-         Context#eval_context.mode =:= flag of
+         Context#eval_context.format =:= flag of
         true  -> {Merged, Applied + 1};
         false -> apply_all(Rest, Context, Merged, Applied + 1)
     end.
@@ -312,7 +312,7 @@ branch(Addr, Tail, Index, Element, Context) ->
 %% вердиктом.
 -spec own(binary(), boolean(), detail(), [#output_unit{}], #eval_context{}) ->
           [#output_unit{}].
-own(_Keyword, _Valid, _Detail, _Nested, #eval_context{mode = flag}) ->
+own(_Keyword, _Valid, _Detail, _Nested, #eval_context{format = flag}) ->
     [];
 own(Keyword, Valid, Detail, Nested, Context) ->
     [valid_json_unit:keyword(Keyword, Valid, Detail, Nested, Context)].
@@ -338,7 +338,7 @@ message(<<"maxContains">>) ->
     <<"array contains too many matching elements">>.
 
 -spec inapplicable([{binary(), term()}], #eval_context{}) -> #eval_result{}.
-inapplicable(_Slots, #eval_context{mode = flag}) ->
+inapplicable(_Slots, #eval_context{format = flag}) ->
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
 inapplicable(Slots, Context) ->
     Units = [valid_json_unit:keyword(Keyword, true, none, Context)

@@ -92,7 +92,7 @@ missing_dependents(Dependencies, Object) ->
 %% Чистые assertions не вносят покрытия. В режиме flag units не собираются:
 %% там ответ исчерпывается вердиктом.
 -spec report(constraint(), boolean(), json(), #eval_context{}) -> #eval_result{}.
-report(_Constraint, Valid, _Instance, #eval_context{mode = flag}) ->
+report(_Constraint, Valid, _Instance, #eval_context{format = flag}) ->
     #eval_result{valid = Valid, evaluated = valid_json_evaluated:neutral(), units = []};
 report(Constraint, Valid, Instance, Context) ->
     Unit = valid_json_unit:keyword(keyword(Constraint), Valid,

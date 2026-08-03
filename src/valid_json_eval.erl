@@ -15,7 +15,7 @@ run(#{root := Root} = Compiled, Instance, Format) ->
                             instance_location = [],
                             dynamic_scope     = [Root],
                             guard             = sets:new([{version, 2}]),
-                            mode              = Format,
+                            format            = Format,
                             coverage          = false},
     case eval({Root, <<>>}, Instance, Context) of
         #eval_result{valid = undefined, error = Error} -> {error, Error};
@@ -138,7 +138,7 @@ eval_all(Constraints, Unevaluated, Instance, Context) ->
 %% (validator-core.md, «Output unit и локации»). В режиме flag units не
 %% собираются вовсе: ответ исчерпывается вердиктом.
 -spec node_units(boolean(), detail(), [#output_unit{}], #eval_context{}) -> [#output_unit{}].
-node_units(_Valid, _Detail, _Nested, #eval_context{mode = flag}) ->
+node_units(_Valid, _Detail, _Nested, #eval_context{format = flag}) ->
     [];
 node_units(Valid, Detail, Nested, Context) ->
     [valid_json_unit:schema(Valid, Detail, Nested, Context)].
@@ -159,7 +159,7 @@ eval_constraints([], _Instance, _Context, _Short, Result) ->
 eval_constraints([Constraint | Rest], Instance, Context, Short, Result) ->
     Merged = conjoin(Result, dispatch(Constraint, Instance, Context)),
     case Merged#eval_result.valid of
-        false when Short, Context#eval_context.mode =:= flag ->
+        false when Short, Context#eval_context.format =:= flag ->
             Merged;
         _ ->
             %% После no_progress обход продолжается: более поздний false
@@ -220,7 +220,7 @@ dispatch(Constraint, Instance, Context) ->
 %% В остальных структурных режимах его silent unit сохранён в diagnostic tree,
 %% но basic отфильтрует его как unit без detail.
 -spec marker(binary(), #eval_context{}) -> #eval_result{}.
-marker(_Keyword, #eval_context{mode = flag}) ->
+marker(_Keyword, #eval_context{format = flag}) ->
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
 marker(Keyword, Context) ->
     #eval_result{valid = true,
@@ -233,13 +233,13 @@ marker(Keyword, Context) ->
 %% указывает на каноническую target schema, как требует output contract.
 -spec reference(binary(), addr(), json(), #eval_context{}) -> #eval_result{}.
 reference(Keyword, Addr, Instance,
-          #eval_context{keyword_location = Location, mode = Mode} = Context) ->
+          #eval_context{keyword_location = Location, format = Format} = Context) ->
     Target = Context#eval_context{keyword_location = [Keyword | Location]},
     case eval(Addr, Instance, Target) of
         #eval_result{valid = undefined} = Error ->
             Error;
         #eval_result{valid = Valid, units = Units} = Result ->
-            case Mode of
+            case Format of
                 flag ->
                     Result;
                 _ ->

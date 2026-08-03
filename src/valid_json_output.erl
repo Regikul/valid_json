@@ -56,18 +56,18 @@ carries(_Valid, #output_unit{})                       -> false.
 %% потомком, а развилка остаётся branch node без обязательного local detail.
 -spec detailed(#output_unit{}) -> output().
 detailed(#output_unit{valid = Valid} = Root) ->
-    Mode = mode(Valid),
-    Nested = prune_children(Mode, Root),
-    Detail = selected_detail(Mode, Root#output_unit.detail, Nested),
+    Kept = kept_detail(Valid),
+    Nested = prune_children(Kept, Root),
+    Detail = selected_detail(Kept, Root#output_unit.detail, Nested),
     tree(Root#output_unit{detail = Detail, nested = Nested}).
 
--spec mode(boolean()) -> error | annotation.
-mode(false) -> error;
-mode(true)  -> annotation.
+-spec kept_detail(boolean()) -> error | annotation.
+kept_detail(false) -> error;
+kept_detail(true)  -> annotation.
 
 -spec prune_children(error | annotation, #output_unit{}) -> [#output_unit{}].
-prune_children(Mode, #output_unit{nested = Nested}) ->
-    lists:append([prune(Mode, Unit) || Unit <- Nested]).
+prune_children(Kept, #output_unit{nested = Nested}) ->
+    lists:append([prune(Kept, Unit) || Unit <- Nested]).
 
 %% Detailed сохраняет только ветви, чей verdict совпадает с корнем. Поэтому
 %% failed branch успешного applicator'а не выглядит ошибкой общего результата,
@@ -77,9 +77,9 @@ prune(error, #output_unit{valid = true}) ->
     [];
 prune(annotation, #output_unit{valid = false}) ->
     [];
-prune(Mode, Unit) ->
-    Nested = prune_children(Mode, Unit),
-    Detail = selected_detail(Mode, Unit#output_unit.detail, Nested),
+prune(Kept, Unit) ->
+    Nested = prune_children(Kept, Unit),
+    Detail = selected_detail(Kept, Unit#output_unit.detail, Nested),
     compact(Unit#output_unit{detail = Detail, nested = Nested}).
 
 %% Error applicator'а — общий итог ветвления. Когда дочерние причины уже есть,
@@ -89,7 +89,7 @@ prune(Mode, Unit) ->
 -spec selected_detail(error | annotation, detail(), [#output_unit{}]) -> detail().
 selected_detail(error, {error, _} = Detail, []) -> Detail;
 selected_detail(annotation, {annotation, _} = Detail, _Nested) -> Detail;
-selected_detail(_Mode, _Detail, _Nested) -> none.
+selected_detail(_Kept, _Detail, _Nested) -> none.
 
 -spec compact(#output_unit{}) -> [#output_unit{}].
 compact(#output_unit{detail = none, nested = []}) ->

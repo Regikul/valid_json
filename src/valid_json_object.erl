@@ -61,7 +61,7 @@ scan([Name | Rest], Addr, Context, Result) ->
                Result,
                branch(Addr, [<<"propertyNames">>], Name, Name, Context)),
     case Merged#eval_result.valid =:= false andalso
-         Context#eval_context.mode =:= flag of
+         Context#eval_context.format =:= flag of
         true  -> Merged;
         false -> scan(Rest, Addr, Context, Merged)
     end.
@@ -127,7 +127,7 @@ evaluate([{_Keyword, undefined} | Rest], Instance, Context, Result) ->
 evaluate([{Keyword, Applications} | Rest], Instance, Context, Result) ->
     Merged = valid_json_eval:conjoin(
                Result, keyword(Keyword, Applications, Instance, Context)),
-    case Merged#eval_result.valid =:= false andalso Context#eval_context.mode =:= flag of
+    case Merged#eval_result.valid =:= false andalso Context#eval_context.format =:= flag of
         true  -> Merged;
         false -> evaluate(Rest, Instance, Context, Merged)
     end.
@@ -168,7 +168,7 @@ apply_all([{Tail, Name, Addr} | Rest], Instance, Context, Result, Names) ->
                Result,
                branch(Addr, Tail, Name, maps:get(Name, Instance), Context)),
     case Merged#eval_result.valid =:= false andalso
-         Context#eval_context.mode =:= flag of
+         Context#eval_context.format =:= flag of
         true  -> {Merged, lists:reverse([Name | Names])};
         false -> apply_all(Rest, Instance, Context, Merged, [Name | Names])
     end.
@@ -190,7 +190,7 @@ branch(Addr, Tail, Name, Value, Context) ->
 %% вердиктом.
 -spec own(binary(), boolean(), detail(), [#output_unit{}], #eval_context{}) ->
           [#output_unit{}].
-own(_Keyword, _Valid, _Detail, _Nested, #eval_context{mode = flag}) ->
+own(_Keyword, _Valid, _Detail, _Nested, #eval_context{format = flag}) ->
     [];
 own(Keyword, Valid, Detail, Nested, Context) ->
     [valid_json_unit:keyword(Keyword, Valid, Detail, Nested, Context)].
@@ -210,7 +210,7 @@ message(<<"propertyNames">>) ->
     <<"object property names do not match the schema">>.
 
 -spec inapplicable([{binary(), term()}], #eval_context{}) -> #eval_result{}.
-inapplicable(_Slots, #eval_context{mode = flag}) ->
+inapplicable(_Slots, #eval_context{format = flag}) ->
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
 inapplicable(Slots, Context) ->
     Units = [valid_json_unit:keyword(Keyword, true, none, Context)

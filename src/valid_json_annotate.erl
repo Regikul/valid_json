@@ -14,7 +14,7 @@
 %% и применимы к любому типу. В режиме flag units не собираются: там ответ
 %% исчерпывается вердиктом, а вердикт эти keywords не меняют.
 -spec check(constraint(), json(), #eval_context{}) -> #eval_result{}.
-check({annotation, _Keyword, _Value}, _Instance, #eval_context{mode = flag}) ->
+check({annotation, _Keyword, _Value}, _Instance, #eval_context{format = flag}) ->
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
 check({annotation, Keyword, Value}, _Instance, Context) ->
     Unit = valid_json_unit:keyword(Keyword, true, {annotation, Value}, Context),
@@ -26,7 +26,7 @@ check({annotation, Keyword, Value}, _Instance, Context) ->
 %% содержимое строки по умолчанию нельзя (validation.txt:939), так что вердикт
 %% успешен и для испорченного содержимого: и `contentEncoding`, и
 %% `contentMediaType`, и `contentSchema` остаются чистыми annotations.
-check({content, _Keyword, _Value}, _Instance, #eval_context{mode = flag}) ->
+check({content, _Keyword, _Value}, _Instance, #eval_context{format = flag}) ->
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
 check({content, Keyword, Value}, Instance, Context) when is_binary(Instance) ->
     Unit = valid_json_unit:keyword(Keyword, true, {annotation, Value}, Context),

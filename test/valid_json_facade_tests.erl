@@ -16,11 +16,11 @@ store_add_and_validate_test() ->
         ?assertEqual({ok, [Uri]},
                      valid_json:store_add(Store, Uri, Schema)),
         ?assertEqual({ok, #{<<"valid">> => true}},
-                     valid_json:store_validate_uri(
+                     valid_json:store_validate(
                        Store, Uri, 1, [{output, flag}])),
         ?assertMatch(
           {ok, #{<<"valid">> := false, <<"errors">> := [_ | _]}},
-          valid_json:store_validate_uri(
+          valid_json:store_validate(
             Store, Uri, <<"not an integer">>, [{output, detailed}]))
     end).
 
@@ -33,7 +33,7 @@ store_add_mutual_refs_test() ->
         ?assertEqual({ok, [First, Second]},
                      valid_json:store_add(Store, Entries)),
         ?assertEqual({ok, #{<<"valid">> => true}},
-                     valid_json:store_validate_uri(
+                     valid_json:store_validate(
                        Store, First, #{<<"second">> => 1}, [{output, flag}]))
     end).
 
@@ -44,13 +44,13 @@ store_remove_test() ->
                         Store, Uri, #{<<"type">> => <<"integer">>}),
         ?assertEqual(ok, valid_json:store_remove(Store, [Uri])),
         ?assertEqual({error, not_found},
-                     valid_json:store_validate_uri(Store, Uri, 1, []))
+                     valid_json:store_validate(Store, Uri, 1, []))
     end).
 
 store_validate_unknown_test() ->
     with_store(fun(Store) ->
         ?assertEqual({error, not_found},
-                     valid_json:store_validate_uri(
+                     valid_json:store_validate(
                        Store, <<"https://example.com/missing">>,
                        bad_instance, [{output, invalid}]))
     end).
@@ -83,7 +83,7 @@ standard_store_test() ->
         ?assertEqual({ok, [Uri]},
                      valid_json:add(Uri, #{<<"type">> => <<"integer">>})),
         ?assertEqual({ok, #{<<"valid">> => true}},
-                     valid_json:validate_uri(Uri, 1, [{output, flag}])),
+                     valid_json:validate(Uri, 1, [{output, flag}])),
         ?assertEqual(ok, valid_json:remove([Uri]))
     after
         ok = application:stop(valid_json)

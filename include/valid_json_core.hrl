@@ -120,7 +120,7 @@
 %% node — адрес вычисляемого сейчас node. Отдельного поля под текущий resource
 %% нет: это первая половина адреса, а вторая задаёт абсолютную локацию units.
 %% coverage говорит, ждёт ли покрытие этого поддерева `unevaluated*` выше по
-%% обходу. Пока ждёт, обрывать перебор ветвей нельзя даже в режиме flag: успех
+%% обходу. Пока ждёт, обрывать перебор ветвей нельзя даже при формате flag: успех
 %% первой ветви `anyOf` не отменяет аннотаций остальных.
 -record(eval_context, {
     schema            :: compiled(),
@@ -129,7 +129,7 @@
     instance_location :: [binary()],
     dynamic_scope     :: [rid()],
     guard             :: sets:set(frame()),
-    mode              :: format(),
+    format            :: format(),
     coverage          :: boolean()
 }).
 
@@ -169,7 +169,6 @@
                 | {not_implemented, binary()}.
 
 -type format()     :: flag | basic | detailed | verbose.
--type schema_validation() :: trusted | format().
 -type option()     :: {output, format()}.
 -type output()     :: json().
 -type eval_error() :: {no_progress, addr()}.

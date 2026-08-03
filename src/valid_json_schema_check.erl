@@ -115,15 +115,17 @@ metaschema(#profile{uri = Uri, draft = Draft}, Store, Mode, Cache) ->
           ok | {error, #schema_error{}}.
 validate(_Compiled, _MetaUri, _Rid, _Schema, trusted) ->
     ok;
-validate(Compiled, MetaUri, Rid, Schema, Mode) ->
-    case valid_json_eval:run(Compiled, Schema, Mode) of
+validate(Compiled, MetaUri, Rid, Schema, Format)
+  when Format =:= flag; Format =:= basic;
+       Format =:= detailed; Format =:= verbose ->
+    case valid_json_eval:run(Compiled, Schema, Format) of
         {ok, #eval_result{valid = true}} ->
             ok;
         {ok, #eval_result{valid = false} = Result} ->
             {error, #schema_error{
                       reason = schema_invalid,
                       location = {Rid, <<>>},
-                      validation_output = valid_json_output:project(Mode, Result)}};
+                      validation_output = valid_json_output:project(Format, Result)}};
         {error, EvalError} ->
             {error, #schema_error{
                       reason = {metaschema_evaluation_failed, MetaUri, EvalError},

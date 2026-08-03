@@ -105,7 +105,7 @@ apply_all([{Segment, Value} | Rest], Addr, Keyword, Context, Result, Applied) ->
     Merged = valid_json_eval:conjoin(
                Result, branch(Addr, Keyword, Segment, Value, Context)),
     case Merged#eval_result.valid =:= false andalso
-         Context#eval_context.mode =:= flag of
+         Context#eval_context.format =:= flag of
         true  -> {Merged, lists:reverse([Segment | Applied])};
         false -> apply_all(Rest, Addr, Keyword, Context, Merged,
                            [Segment | Applied])
@@ -126,7 +126,7 @@ branch(Addr, Keyword, Segment, Value, Context) ->
 %% вердиктом.
 -spec own(binary(), boolean(), detail(), [#output_unit{}], #eval_context{}) ->
           [#output_unit{}].
-own(_Keyword, _Valid, _Detail, _Nested, #eval_context{mode = flag}) ->
+own(_Keyword, _Valid, _Detail, _Nested, #eval_context{format = flag}) ->
     [];
 own(Keyword, Valid, Detail, Nested, Context) ->
     [valid_json_unit:keyword(Keyword, Valid, Detail, Nested, Context)].
@@ -138,7 +138,7 @@ message(<<"unevaluatedItems">>) ->
     <<"unevaluated array items do not match the schema">>.
 
 -spec inapplicable(binary(), #eval_context{}) -> #eval_result{}.
-inapplicable(_Keyword, #eval_context{mode = flag}) ->
+inapplicable(_Keyword, #eval_context{format = flag}) ->
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
 inapplicable(Keyword, Context) ->
     #eval_result{valid     = true,
