@@ -3,7 +3,7 @@
   "$id": "https://json-schema.org/draft/2019-09/output/schema",
   "description": "A schema that validates the minimum requirements for validation output",
 
-  "anyOf": [
+  "oneOf": [
     { "$ref": "#/$defs/flag" },
     { "$ref": "#/$defs/basic" },
     { "$ref": "#/$defs/detailed" },
@@ -15,7 +15,7 @@
         "valid": { "type": "boolean" },
         "keywordLocation": {
           "type": "string",
-          "format": "json-pointer"
+          "format": "uri-reference"
         },
         "absoluteKeywordLocation": {
           "type": "string",
@@ -23,10 +23,7 @@
         },
         "instanceLocation": {
           "type": "string",
-          "format": "json-pointer"
-        },
-        "error": {
-          "type": "string"
+          "format": "uri-reference"
         },
         "errors": {
           "$ref": "#/$defs/outputUnitArray"
@@ -44,14 +41,7 @@
             }
           },
           "then": {
-            "anyOf": [
-              {
-                "required": [ "error" ]
-              },
-              {
-                "required": [ "errors" ]
-              }
-            ]
+            "required": [ "errors" ]
           }
         },
         {

@@ -1,12 +1,10 @@
 {
     "$schema": "https://json-schema.org/draft/2019-09/schema",
     "$id": "https://json-schema.org/draft/2019-09/meta/applicator",
-    "$vocabulary": {
-        "https://json-schema.org/draft/2019-09/vocab/applicator": true
-    },
     "$recursiveAnchor": true,
 
     "title": "Applicator vocabulary meta-schema",
+    "type": ["object", "boolean"],
     "properties": {
         "additionalItems": { "$recursiveRef": "#" },
         "unevaluatedItems": { "$recursiveRef": "#" },
@@ -18,12 +16,7 @@
         },
         "contains": { "$recursiveRef": "#" },
         "additionalProperties": { "$recursiveRef": "#" },
-        "unevaluatedProperties": {
-            "type": "object",
-            "additionalProperties": {
-                "$recursiveRef": "#"
-            }
-        },
+        "unevaluatedProperties": { "$recursiveRef": "#" },
         "properties": {
             "type": "object",
             "additionalProperties": { "$recursiveRef": "#" },
