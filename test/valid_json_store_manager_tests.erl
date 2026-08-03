@@ -309,7 +309,7 @@ wait_restart(Name, Old, Attempts) ->
 valid(Store, Uri, Instance) ->
     {ok, Compiled} = valid_json_store_manager:lookup(Store, Uri),
     {ok, #{<<"valid">> := Valid}} =
-        valid_json:validate(Compiled, Instance, [{output, flag}]),
+        valid_json_core:validate(Compiled, Instance, [{output, flag}]),
     Valid.
 
 ref_property(Name, Uri) ->

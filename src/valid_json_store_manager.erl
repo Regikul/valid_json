@@ -20,8 +20,10 @@
 
 -export([start_link/2, manager_name/1, add/2, remove/2, lookup/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
--export_type([store_option/0]).
+-export_type([add_error/0, store_option/0]).
 
+-type add_error() :: {registration, [{uri(), #schema_error{}}]}
+                   | {compilation, [{uri(), #schema_error{}}]}.
 -type store_option() :: {base_uri, uri()}
                       | {default_dialect, dialect()}
                       | {assert_format, boolean()}.
@@ -50,10 +52,7 @@ manager_name(Store) ->
 %% артефактов дело не дошло, и канонического имени у отвергнутой записи может не
 %% быть вовсе. У `compilation` ключ — каноническое имя, то самое, по которому
 %% ходят в таблицу.
--spec add(atom(), [{uri(), json()}]) ->
-          {ok, [uri()]}
-        | {error, {registration, [{uri(), #schema_error{}}]}}
-        | {error, {compilation, [{uri(), #schema_error{}}]}}.
+-spec add(atom(), [{uri(), json()}]) -> {ok, [uri()]} | {error, add_error()}.
 add(Store, Entries) when is_list(Entries) ->
     gen_server:call(manager_name(Store), {add, Entries}).
 
@@ -104,9 +103,7 @@ handle_info(_Message, State) ->
 %% Реестр меняется первым, но принимается только вместе с артефактами: до
 %% успешной компиляции всего пересобираемого набора состояние остаётся прежним.
 -spec add_entries([{uri(), json()}], #state{}) ->
-          {{ok, [uri()]}
-         | {error, {registration | compilation, [{uri(), #schema_error{}}]}},
-           #state{}}.
+          {{ok, [uri()]} | {error, add_error()}, #state{}}.
 add_entries(Entries, #state{table = Table, store = Store0,
                             options = Options} = State) ->
     Old = valid_json_store:canonical_names(Store0),

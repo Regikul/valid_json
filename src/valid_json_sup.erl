@@ -8,9 +8,9 @@
 
 -behaviour(supervisor).
 
--export([start_link/0, init/1]).
+-include("valid_json_resources.hrl").
 
--define(STANDARD_STORE, valid_json).
+-export([start_link/0, init/1]).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).

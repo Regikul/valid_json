@@ -336,7 +336,7 @@ basic(Schema, Instance) ->
         valid_json_compile:compile(valid_json_store:new([]), Schema,
                                    [{default_dialect, Dialect},
                                     {schema_validation, trusted}]),
-    valid_json:validate(Artifact, Instance, [{output, basic}]).
+    valid_json_core:validate(Artifact, Instance, [{output, basic}]).
 
 assert_detailed(Dialect, Expected, Schema, Instance) ->
     assert_structured(detailed, Dialect, Expected, Schema, Instance).
@@ -352,7 +352,7 @@ assert_recursive_output(Format, Dialect, Id) ->
                                    [{default_dialect, Dialect},
                                     {schema_validation, trusted}]),
     {ok, #{<<"valid">> := true} = Actual} =
-        valid_json:validate(Artifact, 1, [{output, Format}]),
+        valid_json_core:validate(Artifact, 1, [{output, Format}]),
     assert_output_schema(Dialect, Actual).
 
 assert_structured(Format, Dialect, {ok, Expected}, Schema, Instance) ->
@@ -360,7 +360,7 @@ assert_structured(Format, Dialect, {ok, Expected}, Schema, Instance) ->
         valid_json_compile:compile(valid_json_store:new([]), Schema,
                                    [{default_dialect, Dialect},
                                     {schema_validation, trusted}]),
-    {ok, Actual} = valid_json:validate(Artifact, Instance, [{output, Format}]),
+    {ok, Actual} = valid_json_core:validate(Artifact, Instance, [{output, Format}]),
     ?assertEqual(Expected, Actual),
     assert_output_schema(Dialect, Actual).
 
@@ -376,7 +376,7 @@ assert_output_schema(Dialect, Actual) ->
                                    [{default_dialect, Dialect},
                                     {schema_validation, trusted}]),
     ?assertEqual({ok, #{<<"valid">> => true}},
-                 valid_json:validate(Verifier, Actual, [{output, flag}])).
+                 valid_json_core:validate(Verifier, Actual, [{output, flag}])).
 
 root(Valid, Id, Key, Nested) ->
     {ok, #{<<"valid">>                    => Valid,

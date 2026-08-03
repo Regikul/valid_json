@@ -182,7 +182,7 @@ case_test(Compiled, #{<<"description">> := Description,
     {Title,
      fun() ->
          ?assertEqual({ok, #{<<"valid">> => Expected}},
-                      valid_json:validate(Compiled, Data, [{output, flag}]))
+                      valid_json_core:validate(Compiled, Data, [{output, flag}]))
      end}.
 
 read_json(Path) ->

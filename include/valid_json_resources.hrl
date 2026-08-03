@@ -7,6 +7,8 @@
 
 -include("valid_json_core.hrl").
 
+-define(STANDARD_STORE, valid_json).
+
 -define(DRAFT_2020_12,
         <<"https://json-schema.org/draft/2020-12/schema">>).
 -define(DRAFT_2019_09,

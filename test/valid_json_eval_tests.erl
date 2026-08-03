@@ -1385,7 +1385,7 @@ dropped_annotation_test_() ->
                           <<"keywordLocation">>  => <<>>,
                           <<"instanceLocation">> => <<>>,
                           <<"annotations">>      => []}},
-                   valid_json:validate(Artifact, Instance, [{output, basic}])),
+                   valid_json_core:validate(Artifact, Instance, [{output, basic}])),
      %% В дереве units аннотация остаётся: её показывает verbose.
      ?_assertEqual([{<<"/anyOf">>, true, none},
                     {<<"/anyOf/0/properties">>, true, {annotation, [<<"a">>]}},
@@ -1523,7 +1523,7 @@ assert_formats(Expected, Artifact, Instance) ->
       [flag, basic, detailed, verbose]).
 
 validation_outcome(Artifact, Instance, Format) ->
-    case valid_json:validate(Artifact, Instance, [{output, Format}]) of
+    case valid_json_core:validate(Artifact, Instance, [{output, Format}]) of
         {ok, #{<<"valid">> := Valid}} -> {ok, Valid};
         {error, Error}                 -> {error, Error}
     end.
@@ -1647,7 +1647,7 @@ absolute(Artifact, Instance) ->
 %% Проекция печатает ту же локацию отдельным ключом.
 printed_absolute(Artifact, Instance) ->
     {ok, #{<<"errors">> := [Unit]}} =
-        valid_json:validate(Artifact, Instance, [{output, basic}]),
+        valid_json_core:validate(Artifact, Instance, [{output, basic}]),
     maps:get(<<"absoluteKeywordLocation">>, Unit).
 
 %% Сообщение существует только у провалившегося constraint, поэтому берётся из
@@ -1657,13 +1657,13 @@ message(Constraint, Instance) ->
     Message.
 
 basic(Node, Instance) ->
-    valid_json:validate(artifact(Node), Instance, [{output, basic}]).
+    valid_json_core:validate(artifact(Node), Instance, [{output, basic}]).
 
 %% Плоский список провалов уже готовой проекции: он показывает, что до неё
 %% дошло, а что осталось только в дереве.
 errors(Artifact, Instance) ->
     {ok, #{<<"errors">> := Errors}} =
-        valid_json:validate(Artifact, Instance, [{output, basic}]),
+        valid_json_core:validate(Artifact, Instance, [{output, basic}]),
     Errors.
 
 coverage(Constraints, Instance) ->
@@ -1674,7 +1674,7 @@ run(Node, Instance) ->
     valid_json_eval:run(artifact(Node), Instance, flag).
 
 validate(Node, Instance) ->
-    valid_json:validate(artifact(Node), Instance, [{output, flag}]).
+    valid_json_core:validate(artifact(Node), Instance, [{output, flag}]).
 
 %% Сообщение провалившегося keyword рядом с его локацией: у успеха деталей может
 %% не быть вовсе, поэтому оно печатается только там, где есть.
