@@ -130,14 +130,16 @@
     coverage          :: boolean()
 }).
 
-%% Ошибка схемы. Текста в записи нет: машинный контракт исчерпывается причиной и
-%% локацией, а формулировку вычисляет valid_json_error:format_error/1
+%% Ошибка схемы. Текста в записи нет: машинный контракт состоит из причины,
+%% локации и, для schema_invalid, стандартного output проверки метасхемой;
+%% формулировку вычисляет valid_json_error:format_error/1
 %% (okf/architecture/validator-resources-runtime.md, «Ошибки схемы»). Локация
 %% называет позицию, значение которой виновато: сам keyword либо schema
 %% position. У регистрации локации нет.
 -record(schema_error, {
-    reason   :: reason(),
-    location :: addr() | undefined
+    reason                       :: reason(),
+    location                     :: addr() | undefined,
+    validation_output = undefined :: output() | undefined
 }).
 
 %% Каталог причин задан в дизайне и растёт вместе с фазами; здесь перечислено
@@ -156,13 +158,14 @@
                 | core_vocabulary_missing
                 | {misplaced_keyword, binary()}
                 | {name_taken, uri()}
-                | {schema_invalid, #output_unit{}}
+                | schema_invalid
                 | {metaschema_evaluation_failed, uri(), eval_error()}
                 | {bad_keyword_value, json()}
                 | {bad_pattern, term()}
                 | {not_implemented, binary()}.
 
 -type format()     :: flag | basic | detailed | verbose.
+-type schema_validation() :: trusted | format().
 -type option()     :: {output, format()}.
 -type output()     :: json().
 -type eval_error() :: {no_progress, addr()}.

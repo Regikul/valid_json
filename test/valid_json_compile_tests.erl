@@ -24,7 +24,7 @@ type_test_() ->
                    compile(#{<<"type">> => <<"integer">>})),
      ?_assertEqual({ok, artifact(schema_node([{type, [string, null]}]))},
                    compile(#{<<"type">> => [<<"string">>, <<"null">>]})),
-     %% Страховочный IR slot допускает пустой список; production-отказ
+     %% Страховочный IR slot допускает пустой список; публичный compile-отказ
      %% метасхемы проверяется в valid_json_metaschema_tests.
      ?_assertEqual({ok, artifact(schema_node([{type, []}]))},
                    compile(#{<<"type">> => []}))].
@@ -151,7 +151,7 @@ logical_test_() ->
                                    <<"/not">>  => schema_node([{const, 1}])})},
                    compile(#{<<"not">> => #{<<"const">> => 1}})),
      %% Пустой список ветвей метасхема запрещает, но в IR он ложится.
-     %% То же разделение: emitter тотален, а production meta-schema gate
+     %% То же разделение: emitter тотален, а публичная проверка метасхемой
      %% отвергает пустой schemaArray отдельным тестом.
      ?_assertEqual({ok, artifact(schema_node([{all_of, []}]))},
                    compile(#{<<"allOf">> => []}))].
@@ -818,7 +818,7 @@ remote_anchor_via_retrieval_test() ->
                 Canonical => resource(
                                Canonical, #{<<"leaf">> => <<>>},
                                #{<<>> => schema_node([{type, [string]}])})}},
-    ?assertEqual({ok, Expected}, valid_json_compile:compile(Store, Schema, [])).
+    ?assertEqual({ok, Expected}, trusted_compile(Store, Schema, [])).
 
 %% Все documents загружаются до emission, поэтому цикл A <-> B даёт конечный
 %% IR и не зависит от порядка batch-регистрации.
@@ -835,7 +835,7 @@ remote_cycle_finite_ir_test() ->
           resources =>
               #{A => resource(A, #{<<>> => schema_node([{ref, {B, <<>>}}])}),
                 B => resource(B, #{<<>> => schema_node([{ref, {A, <<>>}}])})}},
-    ?assertEqual({ok, Expected}, valid_json_compile:compile_uri(Store, A, [])).
+    ?assertEqual({ok, Expected}, trusted_compile_uri(Store, A, [])).
 
 %% Замыкание строится транзитивно, а sources содержит документы, не resources:
 %% embedded `$id` отдельным source не становится.
@@ -851,7 +851,7 @@ remote_transitive_sources_test() ->
            {B, #{<<"$ref">> => C,
                  <<"$defs">> => #{<<"local">> => #{<<"$id">> => Embedded}}}},
            {C, #{<<"type">> => <<"integer">>}}]),
-    {ok, Compiled} = valid_json_compile:compile_uri(Store, A, []),
+    {ok, Compiled} = trusted_compile_uri(Store, A, []),
     ?assertEqual(A, maps:get(root, Compiled)),
     ?assertEqual([A, B, C], maps:get(sources, Compiled)),
     ?assertEqual([A, B, C, Embedded],
@@ -868,7 +868,7 @@ remote_pointer_evaluation_test() ->
     {ok, Canonical, Store} =
         valid_json_store:add(valid_json_store:new([]), Retrieval, Remote),
     Schema = #{<<"$ref">> => <<Retrieval/binary, "#/$defs/integer">>},
-    {ok, Compiled} = valid_json_compile:compile(Store, Schema, []),
+    {ok, Compiled} = trusted_compile(Store, Schema, []),
     ?assertMatch({ok, #eval_result{valid = true}},
                  valid_json_eval:run(Compiled, 1, flag)),
     ?assertMatch({ok, #eval_result{valid = false}},
@@ -889,7 +889,7 @@ remote_parent_pointer_alias_test() ->
         valid_json_store:add(valid_json_store:new([]), Retrieval, Remote),
     Ref = <<Retrieval/binary, "#/$defs/child/properties/x">>,
     {ok, Compiled} =
-        valid_json_compile:compile(Store, #{<<"$ref">> => Ref}, []),
+        trusted_compile(Store, #{<<"$ref">> => Ref}, []),
     #resource{nodes = #{<<>> := #node{constraints = [{ref, Target}]}}} =
         maps:get(anonymous, maps:get(resources, Compiled)),
     ?assertEqual({Child, <<"/properties/x">>}, Target).
@@ -905,7 +905,7 @@ compile_uri_alias_and_base_test() ->
           [{<<"root.json">>, #{<<"$id">> => Canonical,
                                 <<"$ref">> => <<"target.json">>}},
            {Target, #{<<"type">> => <<"boolean">>}}]),
-    {ok, Compiled} = valid_json_compile:compile_uri(Store, <<"root.json">>, []),
+    {ok, Compiled} = trusted_compile_uri(Store, <<"root.json">>, []),
     ?assertEqual(Canonical, maps:get(root, Compiled)),
     ?assertEqual([Canonical, Target], maps:get(sources, Compiled)),
     #resource{nodes = #{<<>> := #node{constraints = [{ref, {Target, <<>>}}]}}} =
@@ -914,15 +914,15 @@ compile_uri_alias_and_base_test() ->
     ?assertEqual(Retrieval,
                  (valid_json_store:fetch(Retrieval, Store))#document.retrieval).
 
-production_dialect_test() ->
+public_dialect_test() ->
     Legacy = #{<<"$schema">> => ?LEGACY, <<"type">> => <<"integer">>},
     {ok, Compiled} =
-        valid_json_compile:compile(valid_json_store:new([]), Legacy, []),
+        trusted_compile(valid_json_store:new([]), Legacy, []),
     #resource{dialect = ?LEGACY} =
         maps:get(anonymous, maps:get(resources, Compiled)),
     {ok, Defaulted} =
-        valid_json_compile:compile(valid_json_store:new([]), #{},
-                                   [{default_dialect, ?LEGACY}]),
+        trusted_compile(valid_json_store:new([]), #{},
+                        [{default_dialect, ?LEGACY}]),
     #resource{dialect = ?LEGACY} =
         maps:get(anonymous, maps:get(resources, Defaulted)).
 
@@ -945,7 +945,7 @@ cross_draft_embedded_test() ->
                            <<"items">> => [#{<<"type">> => <<"string">>}],
                            <<"additionalItems">> => #{<<"type">> => <<"integer">>}}}},
     {ok, #{resources := Resources}} =
-        valid_json_compile:compile(valid_json_store:new([]), Schema, []),
+        trusted_compile(valid_json_store:new([]), Schema, []),
     #resource{dialect = RootDialect, nodes = RootNodes} = maps:get(Root, Resources),
     #resource{dialect = LegacyDialect, nodes = LegacyNodes} =
         maps:get(Legacy, Resources),
@@ -974,7 +974,7 @@ cross_draft_remote_test() ->
                                <<"$schema">> => ?LEGACY,
                                <<"prefixItems">> => [#{<<"type">> => <<"string">>}]}),
     {ok, #{resources := Resources, sources := Sources}} =
-        valid_json_compile:compile(Store, #{<<"$ref">> => Remote}, []),
+        trusted_compile(Store, #{<<"$ref">> => Remote}, []),
     ?assertEqual([Remote], Sources),
     #resource{dialect = ?DIALECT, nodes = EntryNodes} =
         maps:get(anonymous, Resources),
@@ -998,7 +998,7 @@ cross_draft_embedded_metaschema_test() ->
                                   <<"$schema">> => Meta,
                                   <<"minimum">> => 10}}},
     {ok, #{resources := Resources, sources := Sources}} =
-        valid_json_compile:compile(Store, Schema, []),
+        trusted_compile(Store, Schema, []),
     ?assertEqual([Meta], Sources),
     #resource{dialect = ?DIALECT, nodes = RootNodes} = maps:get(Root, Resources),
     #resource{dialect = Meta, nodes = EmbeddedNodes} = maps:get(Embedded, Resources),
@@ -1021,7 +1021,7 @@ misplaced_schema_test_() ->
     [?_assertEqual(Error, Compile(?DIALECT)),
      ?_assertEqual(Error, Compile(?LEGACY))].
 
-production_reference_error_test_() ->
+public_reference_error_test_() ->
     Missing = <<"https://example.com/missing">>,
     Remote = <<"https://example.com/remote">>,
     Store = valid_json_store:new([]),
@@ -1239,7 +1239,7 @@ vocabulary_disabled_test() ->
     Schema = #{<<"$schema">> => Meta,
                <<"properties">> => #{<<"a">> => #{<<"minimum">> => 10}},
                <<"minimum">> => 5},
-    {ok, Compiled} = valid_json_compile:compile(Store, Schema, []),
+    {ok, Compiled} = trusted_compile(Store, Schema, []),
     #{resources := #{anonymous := #resource{dialect = Dialect, nodes = Nodes}},
       sources := Sources} = Compiled,
     %% Dialect артефакта называет то, что написано в `$schema`, а метасхема
@@ -1262,7 +1262,7 @@ vocabulary_disabled_applicator_test() ->
     Properties = #{<<"a">> => #{<<"$id">> => Inner, <<"type">> => <<"string">>}},
     Schema = #{<<"$schema">> => Meta, <<"properties">> => Properties},
     {ok, #{resources := Resources}} =
-        valid_json_compile:compile(Store, Schema, []),
+        trusted_compile(Store, Schema, []),
     ?assertEqual([anonymous], maps:keys(Resources)),
     #resource{nodes = Nodes} = maps:get(anonymous, Resources),
     ?assertEqual([<<>>], maps:keys(Nodes)),
@@ -1287,7 +1287,7 @@ vocabulary_unrecognized_test_() ->
           [{Required, metaschema(Required, Declared(true))},
            {Optional, metaschema(Optional, Declared(false))}]),
     Compile = fun(Meta) ->
-                      valid_json_compile:compile(
+                      trusted_compile(
                         Store, #{<<"$schema">> => Meta,
                                  <<"type">> => <<"number">>}, [])
               end,
@@ -1309,7 +1309,7 @@ vocabulary_unrecognized_test_() ->
                               reason = {unrecognized_vocabulary,
                                         vocab(<<"format-assertion">>)},
                               location = {anonymous, <<"/$schema">>}}},
-                   valid_json_compile:compile(
+                   trusted_compile(
                      WithAssertion, #{<<"$schema">> => Assertion,
                                       <<"format">> => <<"email">>}, []))].
 
@@ -1325,7 +1325,7 @@ vocabulary_core_test_() ->
           [{Missing, metaschema(Missing, #{vocab(<<"validation">>) => true})},
            {Disabled, metaschema(Disabled, #{vocab(<<"core">>) => false})}]),
     Compile = fun(Meta) ->
-                      valid_json_compile:compile(Store, #{<<"$schema">> => Meta}, [])
+                      trusted_compile(Store, #{<<"$schema">> => Meta}, [])
               end,
     Error = fun(Reason) ->
                     {error, #schema_error{reason = Reason,
@@ -1404,6 +1404,16 @@ not_a_schema_test_() ->
 
 compile(Schema) ->
     valid_json_compile:compile_unchecked(Schema, ?DIALECT).
+
+%% Эти fixtures проверяют closure, dialect/vocabulary и форму публичного
+%% артефакта. Корректность самих статических schemas покрыта meta-schema suite.
+trusted_compile(Store, Schema, Options) ->
+    valid_json_compile:compile(
+      Store, Schema, [{schema_validation, trusted} | Options]).
+
+trusted_compile_uri(Store, Uri, Options) ->
+    valid_json_compile:compile_uri(
+      Store, Uri, [{schema_validation, trusted} | Options]).
 
 %% Пользовательская метасхема — обычный документ реестра: компилятор читает из
 %% неё только `$vocabulary`, а её собственный dialect выбирает набор URI.

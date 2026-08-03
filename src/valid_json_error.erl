@@ -1,6 +1,6 @@
-%% Текст ошибки схемы. В самой записи его нет: машинный контракт исчерпывается
-%% причиной и локацией, а формулировка остаётся политикой реализации и может
-%% меняться, не задевая вызывающих
+%% Текст ошибки схемы. В самой записи его нет: машинный контракт состоит из
+%% причины, локации и необязательного validation output, а формулировка остаётся
+%% политикой реализации и может меняться, не задевая вызывающих
 %% (okf/architecture/validator-resources-runtime.md, «Ошибки схемы»).
 -module(valid_json_error).
 
@@ -42,7 +42,7 @@ reason(core_vocabulary_missing) ->
     "meta-schema does not require the Core vocabulary";
 reason({name_taken, Uri}) ->
     ["URI is already used by another document: ", Uri];
-reason({schema_invalid, _RootOutputUnit}) ->
+reason(schema_invalid) ->
     "schema does not conform to its meta-schema";
 reason({metaschema_evaluation_failed, Uri, EvalError}) ->
     ["meta-schema evaluation failed for ", Uri, ": ",

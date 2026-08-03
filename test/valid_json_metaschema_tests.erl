@@ -1,4 +1,4 @@
-%% Bootstrap, публикация и production meta-schema gate. Точные emitter fixtures
+%% Bootstrap, публикация и публичная проверка метасхемой. Точные emitter fixtures
 %% живут отдельно: здесь проверяется именно пользовательский compile contract.
 -module(valid_json_metaschema_tests).
 
@@ -45,12 +45,14 @@ builtin_documents_are_published_test() ->
                  valid_json_metaschema:fetch(
                    <<"https://json-schema.org/draft/2020-12/output/schema">>)).
 
-builtin_metaschemas_compile_through_production_test_() ->
+builtin_metaschemas_compile_through_public_api_test_() ->
     Store = valid_json_store:new([]),
     [?_assertMatch({ok, #{root := ?DRAFT_2020_12, sources := []}},
-                   valid_json_compile:compile_uri(Store, ?DRAFT_2020_12, [])),
+                   valid_json_compile:compile_uri(
+                     Store, ?DRAFT_2020_12, [{schema_validation, flag}])),
      ?_assertMatch({ok, #{root := ?DRAFT_2019_09, sources := []}},
-                   valid_json_compile:compile_uri(Store, ?DRAFT_2019_09, []))].
+                   valid_json_compile:compile_uri(
+                     Store, ?DRAFT_2019_09, [{schema_validation, flag}]))].
 
 canonical_metaschema_rejection_test_() ->
     [?_test(assert_schema_invalid(
@@ -77,9 +79,62 @@ canonical_metaschema_rejection_test_() ->
 
 inline_compile_entry_uses_metaschema_test() ->
     ?assertMatch(
-       {error, #schema_error{reason = {schema_invalid, _},
+       {error, #schema_error{reason = schema_invalid,
+                             validation_output = #{<<"valid">> := false},
                              location = {anonymous, <<>>}}},
        valid_json_compile:compile(#{<<"type">> => []}, ?DRAFT_2020_12)).
+
+schema_validation_modes_test_() ->
+    Store = valid_json_store:new([]),
+    Schema = #{<<"type">> => []},
+    Compile = fun(Options) ->
+                      valid_json_compile:compile(Store, Schema, Options)
+              end,
+    [?_assertEqual(Compile([{schema_validation, basic}]), Compile([])),
+     ?_assertEqual(
+        {error, #schema_error{reason = schema_invalid,
+                              location = {anonymous, <<>>},
+                              validation_output = #{<<"valid">> => false}}},
+        Compile([{schema_validation, flag}])),
+     ?_assertMatch(
+        {error, #schema_error{reason = schema_invalid,
+                              validation_output =
+                                  #{<<"valid">> := false,
+                                    <<"errors">> := [_ | _]}}},
+        Compile([{schema_validation, basic}])),
+     ?_assertMatch(
+        {error, #schema_error{reason = schema_invalid,
+                              validation_output =
+                                  #{<<"valid">> := false,
+                                    <<"errors">> := [_ | _]}}},
+        Compile([{schema_validation, detailed}])),
+     ?_assertMatch(
+        {error, #schema_error{reason = schema_invalid,
+                              validation_output =
+                                  #{<<"valid">> := false,
+                                    <<"errors">> := [_ | _]}}},
+        Compile([{schema_validation, verbose}])),
+     ?_assertMatch({ok, #{root := anonymous}},
+                   Compile([{schema_validation, trusted}]))].
+
+invalid_schema_validation_mode_test_() ->
+    Store = valid_json_store:new([]),
+    [?_assertError(badarg,
+                   valid_json_compile:compile(
+                     Store, true, [{schema_validation, unknown}])),
+     ?_assertError(badarg,
+                   valid_json_compile:compile_uri(
+                     Store, ?DRAFT_2020_12,
+                     [{schema_validation, unknown}]))].
+
+trusted_still_checks_references_test() ->
+    Missing = <<"https://example.com/missing">>,
+    ?assertEqual(
+       {error, #schema_error{reason = {unknown_document, Missing},
+                             location = {anonymous, <<"/$ref">>}}},
+       valid_json_compile:compile(
+         valid_json_store:new([]), #{<<"$ref">> => Missing},
+         [{schema_validation, trusted}])).
 
 non_schema_position_rejection_test_() ->
     [?_test(assert_schema_invalid(42, ?DRAFT_2020_12, <<>>, ?DRAFT_2020_12)),
@@ -101,7 +156,7 @@ cross_draft_resources_are_checked_separately_test() ->
                       <<"$schema">> => ?DRAFT_2019_09,
                       <<"items">> => [true]}}},
     ?assertMatch({ok, #{resources := #{Root := _, Child := _}}},
-                 production(ValidCompound, ?DRAFT_2020_12)),
+                 checked_compile(ValidCompound, ?DRAFT_2020_12, flag)),
     InvalidCompound =
         #{<<"$id">> => Root,
           <<"$schema">> => ?DRAFT_2019_09,
@@ -110,9 +165,9 @@ cross_draft_resources_are_checked_separately_test() ->
                     #{<<"$id">> => Child,
                       <<"$schema">> => ?DRAFT_2020_12,
                       <<"items">> => [true]}}},
-    {error, #schema_error{reason = {schema_invalid, _},
+    {error, #schema_error{reason = schema_invalid,
                           location = {Child, <<>>}}} =
-        production(InvalidCompound, ?DRAFT_2019_09).
+        checked_compile(InvalidCompound, ?DRAFT_2019_09, flag).
 
 custom_metaschema_is_an_ordinary_store_document_test() ->
     Meta = <<"https://example.com/meta">>,
@@ -128,11 +183,12 @@ custom_metaschema_is_an_ordinary_store_document_test() ->
         valid_json_store:add(valid_json_store:new([]),
                              [{Meta, MetaJson}, {Rules, RulesJson}]),
     Bad = #{<<"$schema">> => Meta, <<"x-extension">> => 1},
-    {error, #schema_error{reason = {schema_invalid, _},
+    {error, #schema_error{reason = schema_invalid,
                           location = {anonymous, <<>>}}} =
-        valid_json_compile:compile(Store, Bad, []),
+        valid_json_compile:compile(Store, Bad, [{schema_validation, flag}]),
     Good = Bad#{<<"x-extension">> => <<"value">>},
-    {ok, Compiled} = valid_json_compile:compile(Store, Good, []),
+    {ok, Compiled} =
+        valid_json_compile:compile(Store, Good, [{schema_validation, flag}]),
     ?assertEqual([Meta, Rules], maps:get(sources, Compiled)),
     %% `$schema` использует метасхему для проверки, но не втягивает её nodes в
     %% пользовательский artifact как обычный `$ref`.
@@ -160,6 +216,25 @@ custom_metaschema_no_progress_outcome_test() ->
           location = {anonymous, <<>>}}},
        valid_json_compile:compile(Store, #{<<"$schema">> => Unknown}, [])).
 
+schema_validation_is_propagated_to_custom_metaschema_test() ->
+    Meta = <<"https://example.com/meta/invalid">>,
+    MetaJson = #{<<"$id">> => Meta,
+                 <<"$schema">> => ?DRAFT_2020_12,
+                 <<"type">> => []},
+    {ok, Meta, Store} =
+        valid_json_store:add(valid_json_store:new([]), Meta, MetaJson),
+    Schema = #{<<"$schema">> => Meta},
+    ?assertEqual(
+       {error, #schema_error{reason = schema_invalid,
+                             location = {Meta, <<>>},
+                             validation_output = #{<<"valid">> => false}}},
+       valid_json_compile:compile(Store, Schema,
+                                  [{schema_validation, flag}])),
+    {ok, Compiled} =
+        valid_json_compile:compile(Store, Schema,
+                                   [{schema_validation, trusted}]),
+    ?assertEqual([Meta], maps:get(sources, Compiled)).
+
 recursive_metaschema(Id, DecisiveBranch) ->
     #{<<"$id">> => Id,
       <<"$schema">> => ?DRAFT_2020_12,
@@ -170,30 +245,30 @@ recursive_metaschema(Id, DecisiveBranch) ->
 
 assert_schema_invalid(Schema, Draft, InstancePointer, AbsoluteUri) ->
     {error, #schema_error{
-              reason = {schema_invalid,
-                        #output_unit{valid = false,
-                                     keyword_location = [],
-                                     absolute_location = {Draft, []},
-                                     instance_location = []} = Root},
-              location = {anonymous, <<>>}}} = production(Schema, Draft),
-    ?assert(has_error(InstancePointer, AbsoluteUri, Root)).
+              reason = schema_invalid,
+              validation_output =
+                  #{<<"valid">> := false,
+                    <<"absoluteKeywordLocation">> := RootLocation,
+                    <<"instanceLocation">> := <<>>,
+                    <<"errors">> := Errors},
+              location = {anonymous, <<>>}}} =
+        checked_compile(Schema, Draft, basic),
+    ?assertEqual(<<Draft/binary, "#">>, RootLocation),
+    ?assert(lists:any(
+              fun(#{<<"instanceLocation">> := Instance,
+                    <<"absoluteKeywordLocation">> := Absolute}) ->
+                      Instance =:= InstancePointer andalso
+                          absolute_uri(Absolute) =:= AbsoluteUri;
+                 (_) ->
+                      false
+              end,
+              Errors)).
 
-has_error(InstancePointer, AbsoluteUri,
-          #output_unit{detail = Detail,
-                       absolute_location = Absolute,
-                       instance_location = Instance,
-                       nested = Nested}) ->
-    Here = case {Detail, Absolute} of
-               {{error, _}, {AbsoluteUri, _}} ->
-                   valid_json_location:pointer(Instance) =:= InstancePointer;
-               _ ->
-                   false
-           end,
-    Here orelse lists:any(fun(Unit) ->
-                                  has_error(InstancePointer, AbsoluteUri, Unit)
-                          end,
-                          Nested).
+absolute_uri(Fragment) ->
+    [Uri, _Pointer] = binary:split(Fragment, <<"#">>),
+    Uri.
 
-production(Schema, Draft) ->
+checked_compile(Schema, Draft, Mode) ->
     valid_json_compile:compile(valid_json_store:new([]), Schema,
-                               [{default_dialect, Draft}]).
+                               [{default_dialect, Draft},
+                                {schema_validation, Mode}]).

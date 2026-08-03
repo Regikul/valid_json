@@ -51,10 +51,7 @@ reference_reason_test_() ->
                        <<"https://example.com/missing">>))].
 
 metaschema_reason_test() ->
-    Unit = #output_unit{valid = false, keyword_location = [],
-                        absolute_location = undefined,
-                        instance_location = [], detail = none, nested = []},
-    ?assert(contains(format({schema_invalid, Unit}, {anonymous, <<>>}),
+    ?assert(contains(format(schema_invalid, {anonymous, <<>>}),
                      <<"meta-schema">>)).
 
 format(Reason, Location) ->

@@ -76,14 +76,18 @@ case_test(Dir, File, GroupDescription, CaseDescription, Schema, Data,
                CaseDescription, " [", Name, "]"]),
     {Title,
      fun() ->
+             %% Обе schemas поставляются самим output suite; здесь проверяются
+             %% output semantics и соответствие результата output schema.
              {ok, Artifact} =
                  valid_json_compile:compile(
-                   Store, Schema, [{default_dialect, Dialect}]),
+                   Store, Schema, [{default_dialect, Dialect},
+                                   {schema_validation, trusted}]),
              {ok, Actual} =
                  valid_json:validate(Artifact, Data, [{output, Format}]),
              {ok, Verifier} =
                  valid_json_compile:compile(
-                   Store, OutputSchema, [{default_dialect, Dialect}]),
+                   Store, OutputSchema, [{default_dialect, Dialect},
+                                         {schema_validation, trusted}]),
              ?assertEqual(
                 {ok, #{<<"valid">> => true}},
                 valid_json:validate(Verifier, Actual, [{output, flag}]))

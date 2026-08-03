@@ -288,8 +288,8 @@ check_reference_keywords([Keyword | Rest], Rid, Pointer, Schema, Index) ->
                 {error, _} = Error -> Error
             end;
         {ok, _Other} ->
-            %% `type: string` соответствующего meta-schema выпустит
-            %% schema_invalid с полным basic output.
+            %% `type: string` соответствующей метасхемы выпустит schema_invalid
+            %% с output выбранного вызывающим режима.
             check_reference_keywords(Rest, Rid, Pointer, Schema, Index)
     end.
 

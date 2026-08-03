@@ -7,14 +7,15 @@
 -include("valid_json_resources.hrl").
 
 -export([compile/2, compile/3, compile_uri/3]).
--export_type([compile_option/0]).
+-export_type([compile_option/0, schema_validation/0]).
 
 -ifdef(TEST).
 -export([compile_unchecked/2]).
 -endif.
 
 -type compile_option() :: {default_dialect, dialect()}
-                        | {assert_format, boolean()}.
+                        | {assert_format, boolean()}
+                        | {schema_validation, schema_validation()}.
 
 -spec compile(json(), dialect()) -> {ok, compiled()} | {error, #schema_error{}}.
 compile(Schema, Dialect) ->
@@ -26,15 +27,15 @@ compile(Schema, Dialect) ->
                 valid_json_store:new([]), Profile),
     case valid_json_resource_index:discover(Schema, anonymous, Profile, Resolve) of
         {ok, Index} ->
-            finish(valid_json_store:new([]), {ok, Index, []});
+            finish(valid_json_store:new([]), {ok, Index, []}, basic);
         {error, _} = Error ->
             Error
     end.
 
 -ifdef(TEST).
 %% Точные emitter fixtures проверяют страховочную тотальность и форму IR
-%% отдельно от production meta-schema gate. Функция существует только в test
-%% build; пользовательские compile-входы всегда проходят finish/2.
+%% отдельно от публичной проверки метасхемой. Функция существует только в test
+%% build; пользовательские compile-входы всегда проходят finish/3.
 -spec compile_unchecked(json(), dialect()) ->
           {ok, compiled()} | {error, #schema_error{}}.
 compile_unchecked(Schema, Dialect) ->
@@ -47,16 +48,17 @@ compile_unchecked(Schema, Dialect) ->
     end.
 -endif.
 
-%% Production entry для inline schema. Store остаётся read-only: closure
+%% Публичный entry для inline schema. Store остаётся read-only: closure
 %% втягивает только документы, достижимые по `$ref`, а evaluator получает
 %% готовый толстый artifact без registry lookup.
 -spec compile(store(), json(), [compile_option()]) ->
           {ok, compiled()} | {error, #schema_error{}}.
 compile(#store{} = Store, Schema, Options) when is_list(Options) ->
     case compile_options(Options) of
-        {ok, DefaultDialect} ->
+        {ok, DefaultDialect, SchemaValidation} ->
             finish(Store, valid_json_compile_closure:inline(Store, Schema,
-                                                            DefaultDialect));
+                                                            DefaultDialect),
+                   SchemaValidation);
         {error, _} = Error ->
             Error
     end;
@@ -70,7 +72,7 @@ compile(Store, Schema, Options) ->
 compile_uri(#store{} = Store, Uri, Options)
   when is_binary(Uri), is_list(Options) ->
     case compile_options(Options) of
-        {ok, DefaultDialect} ->
+        {ok, DefaultDialect, SchemaValidation} ->
             case entry_name(Uri, Store#store.base) of
                 {ok, Name} ->
                     case valid_json_store:fetch(Name, Store) of
@@ -79,7 +81,8 @@ compile_uri(#store{} = Store, Uri, Options)
                                                   location = undefined}};
                         #document{} = Document ->
                             finish(Store, valid_json_compile_closure:document(
-                                            Store, Document, DefaultDialect))
+                                            Store, Document, DefaultDialect),
+                                   SchemaValidation)
                     end;
                 {error, _} = Error ->
                     Error
@@ -92,12 +95,12 @@ compile_uri(Store, Uri, Options) ->
 
 -spec finish(store(),
              {ok, valid_json_resource_index:index(), [uri()]}
-           | {error, #schema_error{}}) ->
+           | {error, #schema_error{}}, schema_validation()) ->
           {ok, compiled()} | {error, #schema_error{}}.
-finish(Store, {ok, Index, Sources0}) ->
+finish(Store, {ok, Index, Sources0}, SchemaValidation) ->
     case valid_json_resource_index:check_references(Index) of
         ok ->
-            case valid_json_schema_check:check(Index, Store) of
+            case valid_json_schema_check:check(Index, Store, SchemaValidation) of
                 {ok, MetaSources} ->
                     Sources = ordsets:union(Sources0, MetaSources),
                     valid_json_compile_emit:emit(Index, Sources);
@@ -107,31 +110,38 @@ finish(Store, {ok, Index, Sources0}) ->
         {error, _} = Error ->
             Error
     end;
-finish(_Store, {error, _} = Error) ->
+finish(_Store, {error, _} = Error, _SchemaValidation) ->
     Error.
 
 -spec compile_options([term()]) ->
-          {ok, dialect()} | {error, #schema_error{}}.
+          {ok, dialect(), schema_validation()} | {error, #schema_error{}}.
 compile_options(Options) ->
-    compile_options(Options, ?DRAFT_2020_12).
+    compile_options(Options, ?DRAFT_2020_12, basic).
 
--spec compile_options([term()], dialect()) ->
-          {ok, dialect()} | {error, #schema_error{}}.
-compile_options([], DefaultDialect) ->
-    {ok, DefaultDialect};
-compile_options([{default_dialect, Dialect} | Rest], _DefaultDialect)
+-spec compile_options([term()], dialect(), schema_validation()) ->
+          {ok, dialect(), schema_validation()} | {error, #schema_error{}}.
+compile_options([], DefaultDialect, SchemaValidation) ->
+    {ok, DefaultDialect, SchemaValidation};
+compile_options([{default_dialect, Dialect} | Rest], _DefaultDialect,
+                SchemaValidation)
   when is_binary(Dialect) ->
     case valid_json_compile_closure:supported_dialect(Dialect) of
-        {ok, Normalized}   -> compile_options(Rest, Normalized);
+        {ok, Normalized}   -> compile_options(Rest, Normalized, SchemaValidation);
         {error, _} = Error -> Error
     end;
-compile_options([{assert_format, Assert} | Rest], DefaultDialect)
+compile_options([{assert_format, Assert} | Rest], DefaultDialect,
+                SchemaValidation)
   when is_boolean(Assert) ->
     %% Аннотация `format` уже собирается, а выбор между annotation и assertion
     %% остаётся в P8: до таблицы format algorithms включать проверку нечем.
-    %% Опция валидируется production API, но IR пока не меняет.
-    compile_options(Rest, DefaultDialect);
-compile_options(_Options, _DefaultDialect) ->
+    %% Опция валидируется публичным API, но IR пока не меняет.
+    compile_options(Rest, DefaultDialect, SchemaValidation);
+compile_options([{schema_validation, Mode} | Rest], DefaultDialect,
+                _SchemaValidation)
+  when Mode =:= trusted; Mode =:= flag; Mode =:= basic;
+       Mode =:= detailed; Mode =:= verbose ->
+    compile_options(Rest, DefaultDialect, Mode);
+compile_options(_Options, _DefaultDialect, _SchemaValidation) ->
     erlang:error(badarg).
 
 -spec entry_name(uri(), rid()) ->

@@ -137,7 +137,11 @@ group_tests(Store, Dialect, #{<<"description">> := Description,
                               <<"schema">> := Schema,
                               <<"tests">> := Cases}) ->
     Title = unicode:characters_to_list(Description),
-    case valid_json_compile:compile(Store, Schema, [{default_dialect, Dialect}]) of
+    %% Схемы официального fixture-набора здесь являются доверенным входом:
+    %% suite проверяет их применение к data, а не сами schemas по метасхеме.
+    case valid_json_compile:compile(
+           Store, Schema, [{default_dialect, Dialect},
+                           {schema_validation, trusted}]) of
         {ok, Compiled} ->
             {Title, [case_test(Compiled, Case) || Case <- Cases]};
         {error, Reason} ->

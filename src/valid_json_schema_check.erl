@@ -5,35 +5,38 @@
 
 -include("valid_json_resources.hrl").
 
--export([check/2]).
+-export([check/3]).
 
 -type cache() :: #{uri() => compiled()}.
 
--spec check(valid_json_resource_index:index(), store()) ->
+-spec check(valid_json_resource_index:index(), store(), schema_validation()) ->
           {ok, [uri()]} | {error, #schema_error{}}.
-check(Index, #store{} = Store) ->
+check(Index, #store{} = Store, Mode) ->
     Root = valid_json_resource_index:root(Index),
     Resources = valid_json_resource_index:resources(Index),
     Profiles = valid_json_resource_index:profiles(Index),
     Rids = [Root | lists:sort(maps:keys(Resources) -- [Root])],
-    Instances = resource_instances(Rids, Resources, Index),
-    check_resources(Rids, Instances, Profiles, Store, #{}, []).
+    Instances = case Mode of
+                    trusted -> #{};
+                    _       -> resource_instances(Rids, Resources, Index)
+                end,
+    check_resources(Rids, Instances, Profiles, Store, Mode, #{}, []).
 
--spec check_resources([rid()], #{rid() => json()},
-                      #{rid() => profile()}, store(), cache(), [uri()]) ->
+-spec check_resources([rid()], #{rid() => json()}, #{rid() => profile()},
+                      store(), schema_validation(), cache(), [uri()]) ->
           {ok, [uri()]} | {error, #schema_error{}}.
-check_resources([], _Instances, _Profiles, _Store, _Cache, Sources) ->
+check_resources([], _Instances, _Profiles, _Store, _Mode, _Cache, Sources) ->
     {ok, Sources};
-check_resources([Rid | Rest], Instances, Profiles, Store, Cache0, Sources0) ->
+check_resources([Rid | Rest], Instances, Profiles, Store, Mode, Cache0, Sources0) ->
     Profile = maps:get(Rid, Profiles),
-    case metaschema(Profile, Store, Cache0) of
+    case metaschema(Profile, Store, Mode, Cache0) of
         {ok, Compiled, Cache, MetaSources} ->
-            Schema = maps:get(Rid, Instances),
-            case validate(Compiled, Profile#profile.uri, Rid, Schema) of
+            Schema = maps:get(Rid, Instances, undefined),
+            case validate(Compiled, Profile#profile.uri, Rid, Schema, Mode) of
                 ok ->
                     Sources = ordsets:union(Sources0, MetaSources),
-                    check_resources(Rest, Instances, Profiles, Store, Cache,
-                                    Sources);
+                    check_resources(Rest, Instances, Profiles, Store, Mode,
+                                    Cache, Sources);
                 {error, _} = Error ->
                     Error
             end;
@@ -84,13 +87,13 @@ replace_at(Value, [Segment | Rest], Replacement) when is_list(Value) ->
     {Before, [Child | After]} = lists:split(Index, Value),
     Before ++ [replace_at(Child, Rest, Replacement) | After].
 
--spec metaschema(profile(), store(), cache()) ->
+-spec metaschema(profile(), store(), schema_validation(), cache()) ->
           {ok, compiled(), cache(), [uri()]} | {error, #schema_error{}}.
-metaschema(#profile{uri = ?DRAFT_2020_12}, _Store, Cache) ->
+metaschema(#profile{uri = ?DRAFT_2020_12}, _Store, _Mode, Cache) ->
     {ok, valid_json_metaschema:compiled(?DRAFT_2020_12), Cache, []};
-metaschema(#profile{uri = ?DRAFT_2019_09}, _Store, Cache) ->
+metaschema(#profile{uri = ?DRAFT_2019_09}, _Store, _Mode, Cache) ->
     {ok, valid_json_metaschema:compiled(?DRAFT_2019_09), Cache, []};
-metaschema(#profile{uri = Uri, draft = Draft}, Store, Cache) ->
+metaschema(#profile{uri = Uri, draft = Draft}, Store, Mode, Cache) ->
     case maps:find(Uri, Cache) of
         {ok, Compiled} ->
             {ok, Compiled, Cache, maps:get(sources, Compiled)};
@@ -98,7 +101,8 @@ metaschema(#profile{uri = Uri, draft = Draft}, Store, Cache) ->
             %% Метасхема без собственного `$schema` наследует default draft,
             %% уже вычисленный при построении profile этого resource.
             case valid_json_compile:compile_uri(
-                   Store, Uri, [{default_dialect, Draft}]) of
+                   Store, Uri, [{default_dialect, Draft},
+                                {schema_validation, Mode}]) of
                 {ok, Compiled} ->
                     {ok, Compiled, Cache#{Uri => Compiled},
                      maps:get(sources, Compiled)};
@@ -107,15 +111,19 @@ metaschema(#profile{uri = Uri, draft = Draft}, Store, Cache) ->
             end
     end.
 
--spec validate(compiled(), uri(), rid(), json()) ->
+-spec validate(compiled(), uri(), rid(), json(), schema_validation()) ->
           ok | {error, #schema_error{}}.
-validate(Compiled, MetaUri, Rid, Schema) ->
-    case valid_json_eval:run(Compiled, Schema, basic) of
+validate(_Compiled, _MetaUri, _Rid, _Schema, trusted) ->
+    ok;
+validate(Compiled, MetaUri, Rid, Schema, Mode) ->
+    case valid_json_eval:run(Compiled, Schema, Mode) of
         {ok, #eval_result{valid = true}} ->
             ok;
-        {ok, #eval_result{valid = false, units = [Root]}} ->
-            {error, #schema_error{reason = {schema_invalid, Root},
-                                  location = {Rid, <<>>}}};
+        {ok, #eval_result{valid = false} = Result} ->
+            {error, #schema_error{
+                      reason = schema_invalid,
+                      location = {Rid, <<>>},
+                      validation_output = valid_json_output:project(Mode, Result)}};
         {error, EvalError} ->
             {error, #schema_error{
                       reason = {metaschema_evaluation_failed, MetaUri, EvalError},

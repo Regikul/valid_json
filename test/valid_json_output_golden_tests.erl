@@ -331,9 +331,11 @@ id(Tag, Case) ->
 
 basic(Schema, Instance) ->
     Dialect = maps:get(<<"$schema">>, Schema),
+    %% Golden fixtures статичны и проверяют только проекцию output.
     {ok, Artifact} =
         valid_json_compile:compile(valid_json_store:new([]), Schema,
-                                   [{default_dialect, Dialect}]),
+                                   [{default_dialect, Dialect},
+                                    {schema_validation, trusted}]),
     valid_json:validate(Artifact, Instance, [{output, basic}]).
 
 assert_detailed(Dialect, Expected, Schema, Instance) ->
@@ -347,7 +349,8 @@ assert_recursive_output(Format, Dialect, Id) ->
                     #{<<"anyOf">> => [true, #{<<"$ref">> => <<"#">>}]}),
     {ok, Artifact} =
         valid_json_compile:compile(valid_json_store:new([]), Schema,
-                                   [{default_dialect, Dialect}]),
+                                   [{default_dialect, Dialect},
+                                    {schema_validation, trusted}]),
     {ok, #{<<"valid">> := true} = Actual} =
         valid_json:validate(Artifact, 1, [{output, Format}]),
     assert_output_schema(Dialect, Actual).
@@ -355,7 +358,8 @@ assert_recursive_output(Format, Dialect, Id) ->
 assert_structured(Format, Dialect, {ok, Expected}, Schema, Instance) ->
     {ok, Artifact} =
         valid_json_compile:compile(valid_json_store:new([]), Schema,
-                                   [{default_dialect, Dialect}]),
+                                   [{default_dialect, Dialect},
+                                    {schema_validation, trusted}]),
     {ok, Actual} = valid_json:validate(Artifact, Instance, [{output, Format}]),
     ?assertEqual(Expected, Actual),
     assert_output_schema(Dialect, Actual).
@@ -369,7 +373,8 @@ assert_output_schema(Dialect, Actual) ->
     Wrapper = #{<<"$schema">> => Dialect, <<"$ref">> => Uri},
     {ok, Verifier} =
         valid_json_compile:compile(Store, Wrapper,
-                                   [{default_dialect, Dialect}]),
+                                   [{default_dialect, Dialect},
+                                    {schema_validation, trusted}]),
     ?assertEqual({ok, #{<<"valid">> => true}},
                  valid_json:validate(Verifier, Actual, [{output, flag}])).
 
