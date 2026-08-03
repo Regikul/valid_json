@@ -372,7 +372,7 @@
   выполняет восемь закреплённых `basic` cases, валидирует каждый фактический
   output схемой case и защищён census `{8, 8, 8}`.
 - [x] Приёмка P7: проходят все восемь официальных output cases и собственные
-  golden tests четырёх заявленных форматов; полный EUnit-прогон содержит 3627
+  golden tests четырёх заявленных форматов; полный EUnit-прогон содержит 3640
   тестов и проходит без провалов.
 
 ## P8 — format, content и optional profiles
@@ -423,6 +423,14 @@ Runtime не входит в conformance-фазы и развивается от
 
 ## Сквозные задачи
 
+- [x] Закрепить независимость результата вычисления от output format:
+  `flag`, `basic`, `detailed` и `verbose` для одной пары schema/instance должны
+  одинаково возвращать verdict либо evaluation error; short-circuit может
+  уменьшать только diagnostic tree. Для неопределённой спецификацией
+  бесконечной рекурсии принят локальный контракт: решающий boolean поглощает
+  `no_progress`, иначе ошибка распространяется; неизвестное покрытие для
+  `unevaluated*` поглощать нельзя. Контракт подтверждён cross-format,
+  output-schema и meta-schema gate regression tests.
 - [ ] Добавить CI-команды для compile, EUnit и выбранных conformance profiles.
 - [ ] Публиковать количество запущенных групп и cases по каждому dialect/file.
 - [ ] Поддерживать отдельные точные fixtures на границах compiler, resolver,

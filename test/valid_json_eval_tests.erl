@@ -842,6 +842,98 @@ items_array_annotation_test_() ->
                     {<<"/additionalItems">>, none}],
                    own_details(items_array([true], false), [1]))].
 
+%% Output format управляет только объёмом диагностики. Даже если полный обход
+%% доходит до рекурсивной ветви, уже определённый boolean-результат обязан быть
+%% тем же, что и у short-circuit режима flag. Если результата для поглощения
+%% ошибки нет, все четыре формата возвращают один и тот же no_progress.
+no_progress_logical_outcome_test() ->
+    AnyTrueFirst = cyclic_branches(any_of, <<"anyOf">>, [true, cycle]),
+    AnyTrueLast = cyclic_branches(any_of, <<"anyOf">>, [cycle, true]),
+    AnyUnknown = cyclic_branches(any_of, <<"anyOf">>, [false, cycle]),
+    AllFalseFirst = cyclic_branches(all_of, <<"allOf">>, [false, cycle]),
+    AllFalseLast = cyclic_branches(all_of, <<"allOf">>, [cycle, false]),
+    AllUnknown = cyclic_branches(all_of, <<"allOf">>, [true, cycle]),
+    OneDecided = cyclic_branches(one_of, <<"oneOf">>, [true, true, cycle]),
+    OneUnknown = cyclic_branches(one_of, <<"oneOf">>, [true, false, cycle]),
+    assert_formats({ok, true}, AnyTrueFirst, 1),
+    assert_formats({ok, true}, AnyTrueLast, 1),
+    assert_formats({error, {no_progress, addr(<<"/anyOf/1">>)}}, AnyUnknown, 1),
+    assert_formats({ok, false}, AllFalseFirst, 1),
+    assert_formats({ok, false}, AllFalseLast, 1),
+    assert_formats({error, {no_progress, addr(<<"/allOf/1">>)}}, AllUnknown, 1),
+    assert_formats({ok, false}, OneDecided, 1),
+    assert_formats({error, {no_progress, addr(<<"/oneOf/2">>)}}, OneUnknown, 1).
+
+%% У `not` и выбранной conditional-ветви нет второго boolean-операнда, поэтому
+%% no_progress существенен. Невыбранная ветвь по-прежнему не вычисляется.
+no_progress_unary_outcome_test() ->
+    Negated = branching([{'not', addr(<<"/not">>)}],
+                        [{<<"/not">>, self_cycle(<<"/not">>)}]),
+    Condition = conditional(self_cycle(<<"/if">>), true, false),
+    Selected = conditional(true, self_cycle(<<"/then">>), false),
+    Unselected = conditional(false, self_cycle(<<"/then">>), true),
+    assert_formats({error, {no_progress, addr(<<"/not">>)}}, Negated, 1),
+    assert_formats({error, {no_progress, addr(<<"/if">>)}}, Condition, 1),
+    assert_formats({error, {no_progress, addr(<<"/then">>)}}, Selected, 1),
+    assert_formats({ok, true}, Unselected, 1).
+
+%% Schema object и применяющие подсхему контейнеры являются конъюнкциями:
+%% известный false поглощает ошибку независимо от порядка обхода. Это отдельно
+%% защищает продолжение структурного обхода после no_progress ради позднего
+%% решающего провала.
+no_progress_conjunction_outcome_test() ->
+    Loop = addr(<<"/$defs/loop">>),
+    Conjunction = tree(#{<<>> => schema_node([{ref, Loop}, {const, 2}]),
+                         <<"/$defs/loop">> => self_cycle(<<"/$defs/loop">>)}),
+    Properties = branching(
+                   [{properties,
+                     #{<<"a">> => addr(<<"/properties/a">>),
+                       <<"b">> => addr(<<"/properties/b">>)},
+                     undefined, undefined}],
+                   [{<<"/properties/a">>, self_cycle(<<"/properties/a">>)},
+                    {<<"/properties/b">>, false}]),
+    PropertyNames = property_names(self_cycle(<<"/propertyNames">>)),
+    Dependent = branching(
+                  [{dependent_schemas,
+                    #{<<"a">> => addr(<<"/dependentSchemas/a">>),
+                      <<"b">> => addr(<<"/dependentSchemas/b">>)}}],
+                  [{<<"/dependentSchemas/a">>,
+                    self_cycle(<<"/dependentSchemas/a">>)},
+                   {<<"/dependentSchemas/b">>, false}]),
+    Prefix = branching(
+               [{prefix_items, [addr(<<"/prefixItems/0">>),
+                                addr(<<"/prefixItems/1">>)], undefined}],
+               [{<<"/prefixItems/0">>, self_cycle(<<"/prefixItems/0">>)},
+                {<<"/prefixItems/1">>, false}]),
+    Unevaluated = unevaluated_tree(
+                    [],
+                    [{unevaluated_properties,
+                      addr(<<"/unevaluatedProperties">>)}],
+                    conditional_child(<<"/unevaluatedProperties">>)),
+    assert_formats({ok, false}, Conjunction, 1),
+    assert_formats({ok, false}, Properties, #{<<"a">> => 1, <<"b">> => 2}),
+    assert_formats({error, {no_progress, addr(<<"/propertyNames">>)}},
+                   PropertyNames, #{<<"a">> => 1}),
+    assert_formats({ok, false}, Dependent, #{<<"a">> => 1, <<"b">> => 2}),
+    assert_formats({ok, false}, Prefix, [1, 2]),
+    assert_formats({ok, false}, Unevaluated, #{<<"a">> => 1, <<"b">> => 2}).
+
+%% Для contains неизвестны отдельные результаты и, следовательно, диапазон
+%% числа совпадений. Границы могут уже определить boolean; но если наверху есть
+%% unevaluatedItems, неизвестный набор совпавших индексов не позволяет строить
+%% маску покрытия и ошибка остаётся существенной.
+no_progress_contains_outcome_test() ->
+    DecidedTrue = cyclic_contains(undefined, undefined, false),
+    Unknown = cyclic_contains(2, undefined, false),
+    DecidedFalse = cyclic_contains(undefined, 0, false),
+    CoverageUnknown = cyclic_contains(undefined, undefined, true),
+    assert_formats({ok, true}, DecidedTrue, [1, 2]),
+    assert_formats({error, {no_progress, addr(<<"/contains/else">>)}},
+                   Unknown, [1, 2]),
+    assert_formats({ok, false}, DecidedFalse, [1, 2]),
+    assert_formats({error, {no_progress, addr(<<"/contains/else">>)}},
+                   CoverageUnknown, [1, 2]).
+
 items_array_coverage_test_() ->
     [?_assertEqual({[], 2, []},
                    coverage_of(items_array([true, true], undefined), [1, 2, 3])),
@@ -1319,6 +1411,68 @@ branches(Tag, Keyword, Children, Instance) ->
                          lists:zip(Pointers, Children)),
     {ok, #eval_result{valid = Valid}} = valid_json_eval:run(Artifact, Instance, flag),
     Valid.
+
+%% Логический applicator с обычными boolean-ветвями и специальной ветвью
+%% `cycle`, которая ссылается на собственный node при той же instance location.
+cyclic_branches(Tag, Keyword, Children) ->
+    Pointers = [<<"/", Keyword/binary, "/", (integer_to_binary(Index))/binary>>
+                || Index <- lists:seq(0, length(Children) - 1)],
+    Nodes = [{Pointer, cyclic_child(Child, Pointer)}
+             || {Pointer, Child} <- lists:zip(Pointers, Children)],
+    branching([{Tag, [addr(Pointer) || Pointer <- Pointers]}], Nodes).
+
+cyclic_child(cycle, Pointer) -> self_cycle(Pointer);
+cyclic_child(Child, _Pointer) -> Child.
+
+self_cycle(Pointer) ->
+    schema_node([{ref, addr(Pointer)}]).
+
+%% На значении 1 условие выбирает Then, на остальных — Else. Возвращается map,
+%% который можно встроить в дерево фикстуры вместе с её корнем.
+conditional_children(Base, Then, Else) ->
+    If = <<Base/binary, "/if">>,
+    ThenPointer = <<Base/binary, "/then">>,
+    ElsePointer = <<Base/binary, "/else">>,
+    #{Base => schema_node([{if_then_else, addr(If), addr(ThenPointer),
+                            addr(ElsePointer)}]),
+      If => schema_node([{const, 1}]),
+      ThenPointer => child(Then),
+      ElsePointer => child(Else)}.
+
+conditional_child(Base) ->
+    conditional_children(Base, self_cycle(<<Base/binary, "/then">>), false).
+
+cyclic_contains(Min, Max, WithUnevaluated) ->
+    Children = conditional_children(
+                 <<"/contains">>, true,
+                 self_cycle(<<"/contains/else">>)),
+    Unevaluated = case WithUnevaluated of
+                      true  -> [{unevaluated_items,
+                                 addr(<<"/unevaluatedItems">>)}];
+                      false -> []
+                  end,
+    Root = #node{constraints = [{contains, addr(<<"/contains">>),
+                                 Min, Max, true}],
+                 unevaluated = Unevaluated},
+    Extra = case WithUnevaluated of
+                true  -> Children#{<<"/unevaluatedItems">> => false};
+                false -> Children
+            end,
+    tree(Extra#{<<>> => Root}).
+
+assert_formats(Expected, Artifact, Instance) ->
+    lists:foreach(
+      fun(Format) ->
+              ?assertEqual({Format, Expected},
+                           {Format, validation_outcome(Artifact, Instance, Format)})
+      end,
+      [flag, basic, detailed, verbose]).
+
+validation_outcome(Artifact, Instance, Format) ->
+    case valid_json:validate(Artifact, Instance, [{output, Format}]) of
+        {ok, #{<<"valid">> := Valid}} -> {ok, Valid};
+        {error, Error}                 -> {error, Error}
+    end.
 
 %% Составной object constraint со всеми тремя написанными keywords: "a" берёт
 %% properties, имена на "b" — паттерн, остальные — additionalProperties.

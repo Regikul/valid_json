@@ -48,6 +48,15 @@ dropped_annotation_test_() ->
      || {Tag, Dialect} <- ?DRAFTS,
         Id <- [id(Tag, <<"dropped-annotation">>)]].
 
+%% Полный структурный обход видит рекурсивную вторую ветвь, но первая `true`
+%% уже определяет verdict anyOf. Все output formats обязаны сохранить успех, а
+%% различающиеся JSON-проекции — пройти официальную output schema своего draft.
+recursive_decisive_output_test_() ->
+    [?_test(assert_recursive_output(Format, Dialect, Id))
+     || {Tag, Dialect} <- ?DRAFTS,
+        Format <- [flag, basic, detailed, verbose],
+        Id <- [id(Tag, <<"recursive-decisive">>)]].
+
 %% Constraint order задан emitter'ом, а не внутренним порядком map. Golden
 %% фиксирует наблюдаемый порядок всех одновременно провалившихся assertions.
 error_order_test_() ->
@@ -332,6 +341,16 @@ assert_detailed(Dialect, Expected, Schema, Instance) ->
 
 assert_verbose(Dialect, Expected, Schema, Instance) ->
     assert_structured(verbose, Dialect, Expected, Schema, Instance).
+
+assert_recursive_output(Format, Dialect, Id) ->
+    Schema = schema(Dialect, Id,
+                    #{<<"anyOf">> => [true, #{<<"$ref">> => <<"#">>}]}),
+    {ok, Artifact} =
+        valid_json_compile:compile(valid_json_store:new([]), Schema,
+                                   [{default_dialect, Dialect}]),
+    {ok, #{<<"valid">> := true} = Actual} =
+        valid_json:validate(Artifact, 1, [{output, Format}]),
+    assert_output_schema(Dialect, Actual).
 
 assert_structured(Format, Dialect, {ok, Expected}, Schema, Instance) ->
     {ok, Artifact} =

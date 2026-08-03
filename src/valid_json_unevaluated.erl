@@ -48,14 +48,15 @@ pick(Indexes, [_Element | Elements], Index) ->
 -spec properties([application()], addr(), #eval_context{}) -> #eval_result{}.
 properties(Applications, Addr, Context) ->
     Keyword = <<"unevaluatedProperties">>,
-    {Valid, Applied, Units} = apply_all(Applications, Addr, Keyword, Context, true, [], []),
-    Detail = case Valid of
-                 true  -> {annotation, Applied};
-                 false -> {error, message(Keyword)}
-             end,
-    #eval_result{valid     = Valid,
-                 evaluated = coverage(Valid, valid_json_evaluated:properties(Applied)),
-                 units     = own(Keyword, Valid, Detail, Units, Context)}.
+    {AppliedResult, Applied} = apply_all(
+                                 Applications, Addr, Keyword, Context,
+                                 #eval_result{
+                                   valid = true,
+                                   evaluated = valid_json_evaluated:neutral(),
+                                   units = []}, []),
+    keyword_result(Keyword, AppliedResult,
+                   valid_json_evaluated:properties(Applied),
+                   {annotation, Applied}, Context).
 
 %% Аннотация `unevaluatedItems` — всегда `true`: применившись хоть куда-то, он
 %% покрыл весь остаток массива (core.txt:2601). Не применявшийся keyword
@@ -63,14 +64,30 @@ properties(Applications, Addr, Context) ->
 -spec items([application()], addr(), #eval_context{}) -> #eval_result{}.
 items(Applications, Addr, Context) ->
     Keyword = <<"unevaluatedItems">>,
-    {Valid, Applied, Units} = apply_all(Applications, Addr, Keyword, Context, true, [], []),
-    Detail = case {Valid, Applied} of
-                 {false, _}  -> {error, message(Keyword)};
-                 {true, []}  -> none;
-                 {true, _}   -> {annotation, true}
+    {AppliedResult, Applied} = apply_all(
+                                 Applications, Addr, Keyword, Context,
+                                 #eval_result{
+                                   valid = true,
+                                   evaluated = valid_json_evaluated:neutral(),
+                                   units = []}, []),
+    SuccessDetail = case Applied of
+                        [] -> none;
+                        _  -> {annotation, true}
+                    end,
+    keyword_result(Keyword, AppliedResult, valid_json_evaluated:items(all),
+                   SuccessDetail, Context).
+
+keyword_result(_Keyword, #eval_result{valid = undefined} = Error,
+               _Evaluated, _SuccessDetail, _Context) ->
+    Error#eval_result{evaluated = valid_json_evaluated:neutral(), units = []};
+keyword_result(Keyword, #eval_result{valid = Valid, units = Units},
+               Evaluated, SuccessDetail, Context) ->
+    Detail = case Valid of
+                 true  -> SuccessDetail;
+                 false -> {error, message(Keyword)}
              end,
     #eval_result{valid     = Valid,
-                 evaluated = coverage(Valid, valid_json_evaluated:items(all)),
+                 evaluated = coverage(Valid, Evaluated),
                  units     = own(Keyword, Valid, Detail, Units, Context)}.
 
 %% Провалившийся keyword аннотации не производит и потому покрытия не вносит.
@@ -80,20 +97,18 @@ coverage(false, _Evaluated) -> valid_json_evaluated:neutral().
 
 %% Покрытие дочерней schema принадлежит ей самой и наверх не идёт: родитель
 %% покрывает само свойство или индекс, а не то, что нашлось внутри значения.
--spec apply_all([application()], addr(), binary(), #eval_context{}, boolean(),
-                [binary()], [#output_unit{}]) ->
-          {boolean(), [binary()], [#output_unit{}]}.
-apply_all([], _Addr, _Keyword, _Context, Valid, Applied, Units) ->
-    {Valid, lists:reverse(Applied), lists:reverse(Units)};
-apply_all([{Segment, Value} | Rest], Addr, Keyword, Context, Valid, Applied, Units) ->
-    #eval_result{valid = ValidOne, units = UnitsOne} =
-        branch(Addr, Keyword, Segment, Value, Context),
-    Accumulated = Valid andalso ValidOne,
-    Collected = lists:reverse(UnitsOne, Units),
-    case Accumulated =:= false andalso Context#eval_context.mode =:= flag of
-        true  -> {false, lists:reverse([Segment | Applied]), lists:reverse(Collected)};
-        false -> apply_all(Rest, Addr, Keyword, Context, Accumulated,
-                           [Segment | Applied], Collected)
+-spec apply_all([application()], addr(), binary(), #eval_context{}, #eval_result{},
+                [binary()]) -> {#eval_result{}, [binary()]}.
+apply_all([], _Addr, _Keyword, _Context, Result, Applied) ->
+    {Result, lists:reverse(Applied)};
+apply_all([{Segment, Value} | Rest], Addr, Keyword, Context, Result, Applied) ->
+    Merged = valid_json_eval:conjoin(
+               Result, branch(Addr, Keyword, Segment, Value, Context)),
+    case Merged#eval_result.valid =:= false andalso
+         Context#eval_context.mode =:= flag of
+        true  -> {Merged, lists:reverse([Segment | Applied])};
+        false -> apply_all(Rest, Addr, Keyword, Context, Merged,
+                           [Segment | Applied])
     end.
 
 %% Локация keyword следует схеме, локация инстанса — значению. Своего сегмента у

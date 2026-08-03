@@ -89,46 +89,51 @@ evaluate(Written, Length, Context) ->
     evaluate(Written, Length, Context,
              #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []}).
 
-evaluate([], _Length, _Context, #eval_result{units = Units} = Result) ->
-    Result#eval_result{units = lists:reverse(Units)};
+evaluate([], _Length, _Context, Result) ->
+    Result;
 evaluate([{_Keyword, _Role, undefined} | Rest], Length, Context, Result) ->
     evaluate(Rest, Length, Context, Result);
-evaluate([{Keyword, Role, Applications} | Rest], Length, Context,
-         #eval_result{valid = Valid, evaluated = Evaluated, units = Units}) ->
-    #eval_result{valid = ValidOne, evaluated = EvaluatedOne, units = UnitsOne} =
-        keyword(Keyword, Role, Applications, Length, Context),
-    Merged = #eval_result{valid     = Valid andalso ValidOne,
-                          evaluated = valid_json_evaluated:merge(Evaluated, EvaluatedOne),
-                          units     = lists:reverse(UnitsOne, Units)},
+evaluate([{Keyword, Role, Applications} | Rest], Length, Context, Result) ->
+    Merged = valid_json_eval:conjoin(
+               Result, keyword(Keyword, Role, Applications, Length, Context)),
     case Merged#eval_result.valid =:= false andalso Context#eval_context.mode =:= flag of
-        true  -> Merged#eval_result{units = lists:reverse(Merged#eval_result.units)};
+        true  -> Merged;
         false -> evaluate(Rest, Length, Context, Merged)
     end.
 
 -spec keyword(binary(), role(), [application()], non_neg_integer(), #eval_context{}) ->
           #eval_result{}.
 keyword(Keyword, Role, Applications, Length, Context) ->
-    {Valid, Applied, Units} = apply_all(Applications, Context, true, 0, []),
-    #eval_result{valid     = Valid,
-                 evaluated = coverage(Role, Valid, Applied, Length),
-                 units     = own(Keyword, Valid,
-                                 detail(Role, Keyword, Valid, Applied, Length),
-                                 Units, Context)}.
+    {AppliedResult, Applied} =
+        apply_all(Applications, Context,
+                  #eval_result{valid = true,
+                               evaluated = valid_json_evaluated:neutral(),
+                               units = []}, 0),
+    case AppliedResult of
+        #eval_result{valid = undefined} = Error ->
+            Error#eval_result{evaluated = valid_json_evaluated:neutral(), units = []};
+        #eval_result{valid = Valid, units = Units} ->
+            #eval_result{valid     = Valid,
+                         evaluated = coverage(Role, Valid, Applied, Length),
+                         units     = own(
+                                       Keyword, Valid,
+                                       detail(Role, Keyword, Valid, Applied, Length),
+                                       Units, Context)}
+    end.
 
 %% Покрытие дочерней schema принадлежит ей самой и наверх не идёт: родитель
 %% покрывает индекс элемента, а не то, что нашлось внутри значения.
--spec apply_all([application()], #eval_context{}, boolean(), non_neg_integer(),
-                [#output_unit{}]) -> {boolean(), non_neg_integer(), [#output_unit{}]}.
-apply_all([], _Context, Valid, Applied, Units) ->
-    {Valid, Applied, lists:reverse(Units)};
-apply_all([{Tail, Index, Element, Addr} | Rest], Context, Valid, Applied, Units) ->
-    #eval_result{valid = ValidOne, units = UnitsOne} =
-        branch(Addr, Tail, Index, Element, Context),
-    Accumulated = Valid andalso ValidOne,
-    Collected = lists:reverse(UnitsOne, Units),
-    case Accumulated =:= false andalso Context#eval_context.mode =:= flag of
-        true  -> {false, Applied + 1, lists:reverse(Collected)};
-        false -> apply_all(Rest, Context, Accumulated, Applied + 1, Collected)
+-spec apply_all([application()], #eval_context{}, #eval_result{}, non_neg_integer()) ->
+          {#eval_result{}, non_neg_integer()}.
+apply_all([], _Context, Result, Applied) ->
+    {Result, Applied};
+apply_all([{Tail, Index, Element, Addr} | Rest], Context, Result, Applied) ->
+    Merged = valid_json_eval:conjoin(
+               Result, branch(Addr, Tail, Index, Element, Context)),
+    case Merged#eval_result.valid =:= false andalso
+         Context#eval_context.mode =:= flag of
+        true  -> {Merged, Applied + 1};
+        false -> apply_all(Rest, Context, Merged, Applied + 1)
     end.
 
 %% Keyword остатка покрывает весь остаток массива, keyword префикса — префикс
@@ -171,7 +176,17 @@ detail(prefix, _Keyword, true, Applied, _Length) ->
 -spec contains(addr(), bound(), bound(), boolean(), [json()], #eval_context{}) ->
           #eval_result{}.
 contains(Addr, Min, Max, Marks, Instance, Context) ->
-    {Matched, Units} = scan(Addr, Instance, 0, Context, [], []),
+    {Matched, ErrorCount, Error, Units} =
+        scan(Addr, Instance, 0, Context, [], 0, undefined, []),
+    case Error of
+        undefined ->
+            contains_complete(Min, Max, Marks, Instance, Matched, Units, Context);
+        _ ->
+            contains_incomplete(Min, Max, Marks, length(Matched), ErrorCount,
+                                Error, Context)
+    end.
+
+contains_complete(Min, Max, Marks, Instance, Matched, Units, Context) ->
     Length = length(Instance),
     Count  = length(Matched),
     Found  = Count > 0 orelse Min =:= 0,
@@ -185,16 +200,55 @@ contains(Addr, Min, Max, Marks, Instance, Context) ->
                  units     = lists:append([own(Keyword, Valid, Detail, Nested, Context)
                                            || {Keyword, Valid, Detail, Nested} <- Written])}.
 
+%% При no-progress часть элементов имеет неизвестный результат. Если весь
+%% диапазон возможного числа совпадений лежит по одну сторону границ, boolean
+%% уже определён; иначе ошибка существенна. Неизвестная contains-аннотация
+%% остаётся существенной и при известном boolean, когда её ждёт unevaluated*.
+contains_incomplete(Min, Max, Marks, Known, Unknown, Error, Context) ->
+    Lower = effective_min(Min),
+    Least = Known,
+    Most = Known + Unknown,
+    if
+        Most < Lower ->
+            incomplete_decided(false);
+        Max =/= undefined, Least > Max ->
+            incomplete_decided(false);
+        Least >= Lower,
+        (Max =:= undefined orelse Most =< Max),
+        not (Marks andalso Context#eval_context.coverage) ->
+            incomplete_decided(true);
+        true ->
+            valid_json_eval:error_result(Error)
+    end.
+
+effective_min(undefined) -> 1;
+effective_min(Min) -> Min.
+
+incomplete_decided(Valid) ->
+    #eval_result{valid = Valid,
+                 evaluated = valid_json_evaluated:neutral(),
+                 units = []}.
+
 -spec scan(addr(), [json()], non_neg_integer(), #eval_context{},
-           [non_neg_integer()], [#output_unit{}]) ->
-          {[non_neg_integer()], [#output_unit{}]}.
-scan(_Addr, [], _Index, _Context, Matched, Units) ->
-    {lists:reverse(Matched), lists:reverse(Units)};
-scan(Addr, [Element | Rest], Index, Context, Matched, Units) ->
-    #eval_result{valid = Valid, units = UnitsOne} =
-        branch(Addr, [<<"contains">>], Index, Element, Context),
-    scan(Addr, Rest, Index + 1, Context, matched(Valid, Index, Matched),
-         lists:reverse(UnitsOne, Units)).
+           [non_neg_integer()], non_neg_integer(), eval_error() | undefined,
+           [#output_unit{}]) ->
+          {[non_neg_integer()], non_neg_integer(), eval_error() | undefined,
+           [#output_unit{}]}.
+scan(_Addr, [], _Index, _Context, Matched, ErrorCount, Error, Units) ->
+    {lists:reverse(Matched), ErrorCount, Error, lists:reverse(Units)};
+scan(Addr, [Element | Rest], Index, Context, Matched, ErrorCount, Error, Units) ->
+    case branch(Addr, [<<"contains">>], Index, Element, Context) of
+        #eval_result{valid = undefined, error = ErrorOne} ->
+            scan(Addr, Rest, Index + 1, Context, Matched, ErrorCount + 1,
+                 first_error(Error, ErrorOne), Units);
+        #eval_result{valid = Valid, units = UnitsOne} ->
+            scan(Addr, Rest, Index + 1, Context,
+                 matched(Valid, Index, Matched), ErrorCount, Error,
+                 lists:reverse(UnitsOne, Units))
+    end.
+
+first_error(undefined, Error) -> Error;
+first_error(Error, _Later) -> Error.
 
 matched(true, Index, Matched)   -> [Index | Matched];
 matched(false, _Index, Matched) -> Matched.

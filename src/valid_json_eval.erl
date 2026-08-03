@@ -4,7 +4,7 @@
 
 -include("valid_json_core.hrl").
 
--export([run/3, eval/3, resolve/2]).
+-export([run/3, eval/3, resolve/2, conjoin/2, error_result/1]).
 
 %% Единственный вход в вычисление. Cycle guard — единственная причина отказа.
 -spec run(compiled(), json(), format()) -> {ok, #eval_result{}} | {error, eval_error()}.
@@ -17,10 +17,9 @@ run(#{root := Root} = Compiled, Instance, Format) ->
                             guard             = sets:new([{version, 2}]),
                             mode              = Format,
                             coverage          = false},
-    try eval({Root, <<>>}, Instance, Context) of
-        Result -> {ok, Result}
-    catch
-        throw:{no_progress, _} = Error -> {error, Error}
+    case eval({Root, <<>>}, Instance, Context) of
+        #eval_result{valid = undefined, error = Error} -> {error, Error};
+        #eval_result{} = Result -> {ok, Result}
     end.
 
 %% Разрешение адреса в готовом артефакте тотально.
@@ -36,11 +35,49 @@ resolve({Rid, Pointer}, #{resources := Resources}) ->
 eval(Addr, Instance, #eval_context{guard = Guard} = Context) ->
     Frame = {Addr, Context#eval_context.instance_location},
     case sets:is_element(Frame, Guard) of
-        true  -> throw({no_progress, Addr});
-        false -> ok
-    end,
-    Entered = enter_node(Addr, Context#eval_context{guard = sets:add_element(Frame, Guard)}),
-    eval_node(resolve(Addr, Context#eval_context.schema), Instance, Entered).
+        true ->
+            error_result({no_progress, Addr});
+        false ->
+            Entered = enter_node(
+                        Addr,
+                        Context#eval_context{guard = sets:add_element(Frame, Guard)}),
+            eval_node(resolve(Addr, Context#eval_context.schema), Instance, Entered)
+    end.
+
+%% Ошибка ветви остаётся обычным значением до ближайшей boolean-операции.
+-spec error_result(eval_error()) -> #eval_result{}.
+error_result(Error) ->
+    #eval_result{valid = undefined,
+                 evaluated = valid_json_evaluated:neutral(),
+                 units = [],
+                 error = Error}.
+
+%% Конъюнкция используется schema object и container applicators. `false`
+%% окончательно определяет результат и потому поглощает no-progress другой
+%% ветви; без провала первая ошибка сохраняется в статическом порядке обхода.
+-spec conjoin(#eval_result{}, #eval_result{}) -> #eval_result{}.
+conjoin(Left, Right) ->
+    Valid = conjunction(Left#eval_result.valid, Right#eval_result.valid),
+    Error = case Valid of
+                undefined -> first_error(Left#eval_result.error,
+                                         Right#eval_result.error);
+                _ -> undefined
+            end,
+    #eval_result{valid = Valid,
+                 evaluated = valid_json_evaluated:merge(
+                               Left#eval_result.evaluated,
+                               Right#eval_result.evaluated),
+                 units = Left#eval_result.units ++ Right#eval_result.units,
+                 error = Error}.
+
+conjunction(false, _Right) -> false;
+conjunction(_Left, false) -> false;
+conjunction(undefined, _Right) -> undefined;
+conjunction(_Left, undefined) -> undefined;
+conjunction(true, true) -> true.
+
+first_error(undefined, Error) -> Error;
+first_error(Error, _Later) -> Error.
 
 %% Граница ресурса определяется целевым rid, а не видом перехода: это первая
 %% половина адреса, и сравнивается именно она.
@@ -61,9 +98,14 @@ eval_node(false, _Instance, Context) ->
     #eval_result{valid = false, evaluated = valid_json_evaluated:neutral(),
                  units = node_units(false, {error, <<"schema is false">>}, [], Context)};
 eval_node(#node{constraints = Constraints, unevaluated = Unevaluated}, Instance, Context) ->
-    #eval_result{valid = Valid, units = Units} = Result =
-        discard_coverage(eval_all(Constraints, Unevaluated, Instance, Context)),
-    Result#eval_result{units = node_units(Valid, none, Units, Context)}.
+    case discard_coverage(eval_all(Constraints, Unevaluated, Instance, Context)) of
+        #eval_result{valid = undefined} = Error ->
+            %% Частично построенный node не является результатом вычисления и
+            %% не должен попадать в diagnostic tree поглотившего его родителя.
+            Error#eval_result{evaluated = valid_json_evaluated:neutral(), units = []};
+        #eval_result{valid = Valid, units = Units} = Result ->
+            Result#eval_result{units = node_units(Valid, none, Units, Context)}
+    end.
 
 %% Обычные constraints выполняются первыми, и `unevaluated*` читают их общее
 %% покрытие: своего порядка между собой у них нет, потому что каждый применяется
@@ -76,20 +118,20 @@ eval_all(Constraints, [], Instance, #eval_context{coverage = Coverage} = Context
     eval_constraints(Constraints, Instance, Context, not Coverage);
 eval_all(Constraints, Unevaluated, Instance, Context) ->
     Awaited = Context#eval_context{coverage = true},
-    #eval_result{evaluated = Evaluated} = Result =
-        eval_constraints(Constraints, Instance, Awaited, false),
-    Step = fun(Constraint, Acc) ->
-                   both(Acc, valid_json_unevaluated:check(Constraint, Instance,
-                                                          Evaluated, Context))
-           end,
-    lists:foldl(Step, Result, Unevaluated).
-
--spec both(#eval_result{}, #eval_result{}) -> #eval_result{}.
-both(#eval_result{valid = Valid, evaluated = Evaluated, units = Units},
-     #eval_result{valid = ValidOne, evaluated = EvaluatedOne, units = UnitsOne}) ->
-    #eval_result{valid     = Valid andalso ValidOne,
-                 evaluated = valid_json_evaluated:merge(Evaluated, EvaluatedOne),
-                 units     = Units ++ UnitsOne}.
+    case eval_constraints(Constraints, Instance, Awaited, false) of
+        #eval_result{valid = undefined} = Error ->
+            %% Без полной маски нельзя определить, к чему применять
+            %% unevaluated*. В отличие от обычной конъюнкции здесь нет ветви,
+            %% которую можно безопасно выполнить после ошибки покрытия.
+            Error;
+        #eval_result{evaluated = Evaluated} = Result ->
+            Step = fun(Constraint, Acc) ->
+                           conjoin(Acc,
+                                   valid_json_unevaluated:check(
+                                     Constraint, Instance, Evaluated, Context))
+                   end,
+            lists:foldl(Step, Result, Unevaluated)
+    end.
 
 %% Собственный unit node стоит над units своих constraints и ни сообщения, ни
 %% аннотации не несёт: причину провала называют его дети
@@ -108,22 +150,21 @@ node_units(Valid, Detail, Nested, Context) ->
           #eval_result{}.
 eval_constraints(Constraints, Instance, Context, Short) ->
     eval_constraints(Constraints, Instance, Context, Short,
-                     true, valid_json_evaluated:neutral(), []).
+                     #eval_result{valid = true,
+                                  evaluated = valid_json_evaluated:neutral(),
+                                  units = []}).
 
-eval_constraints([], _Instance, _Context, _Short, Valid, Evaluated, Units) ->
-    #eval_result{valid = Valid, evaluated = Evaluated, units = lists:reverse(Units)};
-eval_constraints([Constraint | Rest], Instance, Context, Short, Valid, Evaluated, Units) ->
-    #eval_result{valid = ValidOne, evaluated = EvaluatedOne, units = UnitsOne} =
-        dispatch(Constraint, Instance, Context),
-    Merged   = valid_json_evaluated:merge(Evaluated, EvaluatedOne),
-    Collected = lists:reverse(UnitsOne, Units),
-    case Valid andalso ValidOne of
+eval_constraints([], _Instance, _Context, _Short, Result) ->
+    Result;
+eval_constraints([Constraint | Rest], Instance, Context, Short, Result) ->
+    Merged = conjoin(Result, dispatch(Constraint, Instance, Context)),
+    case Merged#eval_result.valid of
         false when Short, Context#eval_context.mode =:= flag ->
-            #eval_result{valid = false, evaluated = Merged,
-                         units = lists:reverse(Collected)};
-        Accumulated ->
-            eval_constraints(Rest, Instance, Context, Short, Accumulated, Merged,
-                             Collected)
+            Merged;
+        _ ->
+            %% После no_progress обход продолжается: более поздний false
+            %% constraint окончательно определит конъюнкцию как invalid.
+            eval_constraints(Rest, Instance, Context, Short, Merged)
     end.
 
 %% Диспетчер разводит constraints по обработчикам: assertion отвечает на вопрос
@@ -192,13 +233,18 @@ marker(Keyword, Context) ->
 reference(Keyword, Addr, Instance,
           #eval_context{keyword_location = Location, mode = Mode} = Context) ->
     Target = Context#eval_context{keyword_location = [Keyword | Location]},
-    #eval_result{valid = Valid, units = Units} = Result = eval(Addr, Instance, Target),
-    case Mode of
-        flag ->
-            Result;
-        _ ->
-            Unit = valid_json_unit:reference(Keyword, Addr, Valid, Units, Context),
-            Result#eval_result{units = [Unit]}
+    case eval(Addr, Instance, Target) of
+        #eval_result{valid = undefined} = Error ->
+            Error;
+        #eval_result{valid = Valid, units = Units} = Result ->
+            case Mode of
+                flag ->
+                    Result;
+                _ ->
+                    Unit = valid_json_unit:reference(
+                             Keyword, Addr, Valid, Units, Context),
+                    Result#eval_result{units = [Unit]}
+            end
     end.
 
 %% Цель `$dynamicRef` — самый внешний resource dynamic scope, объявивший это имя
@@ -250,6 +296,8 @@ recursive_target([Rid | Outer], Resources, Found) ->
 %% диагностические units сохраняет.
 -spec discard_coverage(#eval_result{}) -> #eval_result{}.
 discard_coverage(#eval_result{valid = false} = Result) ->
+    Result#eval_result{evaluated = valid_json_evaluated:neutral()};
+discard_coverage(#eval_result{valid = undefined} = Result) ->
     Result#eval_result{evaluated = valid_json_evaluated:neutral()};
 discard_coverage(#eval_result{} = Result) ->
     Result.

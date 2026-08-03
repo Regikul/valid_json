@@ -103,9 +103,13 @@
 }).
 
 -record(eval_result, {
-    valid     :: boolean(),
+    %% `undefined` существует только внутри evaluator: ветвь упёрлась в
+    %% no-progress cycle, а её родитель ещё не решил, поглощает ли собственная
+    %% boolean-операция эту ошибку. Публичный run/3 такой результат не выпускает.
+    valid     :: boolean() | undefined,
     evaluated :: evaluated(),
-    units     :: [#output_unit{}]
+    units     :: [#output_unit{}],
+    error = undefined :: eval_error() | undefined
 }).
 
 -type frame() :: {addr(), [binary()]}.

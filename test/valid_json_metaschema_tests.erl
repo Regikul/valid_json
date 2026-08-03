@@ -138,6 +138,36 @@ custom_metaschema_is_an_ordinary_store_document_test() ->
     %% пользовательский artifact как обычный `$ref`.
     ?assertEqual([anonymous], maps:keys(maps:get(resources, Compiled))).
 
+%% Meta-schema gate использует тот же evaluator contract, что публичная
+%% валидация: полный basic-обход может увидеть рекурсивную ветвь, но она не
+%% меняет уже определённый успех `anyOf`. Если успешной ветви нет, no_progress
+%% остаётся ошибкой вычисления метасхемы, а не превращается в schema_invalid.
+custom_metaschema_no_progress_outcome_test() ->
+    Accepting = <<"https://example.com/meta/accepting-cycle">>,
+    Unknown = <<"https://example.com/meta/unknown-cycle">>,
+    Documents = [{Accepting, recursive_metaschema(Accepting, true)},
+                 {Unknown, recursive_metaschema(Unknown, false)}],
+    {ok, [Accepting, Unknown], Store} =
+        valid_json_store:add(valid_json_store:new([]), Documents),
+    ?assertMatch(
+       {ok, #{root := anonymous}},
+       valid_json_compile:compile(Store, #{<<"$schema">> => Accepting}, [])),
+    ?assertEqual(
+       {error,
+        #schema_error{
+          reason = {metaschema_evaluation_failed, Unknown,
+                    {no_progress, {Unknown, <<>>}}},
+          location = {anonymous, <<>>}}},
+       valid_json_compile:compile(Store, #{<<"$schema">> => Unknown}, [])).
+
+recursive_metaschema(Id, DecisiveBranch) ->
+    #{<<"$id">> => Id,
+      <<"$schema">> => ?DRAFT_2020_12,
+      <<"$vocabulary">> =>
+          #{<<"https://json-schema.org/draft/2020-12/vocab/core">> => true,
+            <<"https://json-schema.org/draft/2020-12/vocab/applicator">> => true},
+      <<"anyOf">> => [DecisiveBranch, #{<<"$ref">> => <<"#">>}]}.
+
 assert_schema_invalid(Schema, Draft, InstancePointer, AbsoluteUri) ->
     {error, #schema_error{
               reason = {schema_invalid,

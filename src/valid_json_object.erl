@@ -40,24 +40,30 @@ check({property_names, Addr}, _Instance, Context) ->
 %% `unevaluatedProperties` имя остаётся непокрытым.
 -spec names([binary()], addr(), #eval_context{}) -> #eval_result{}.
 names(Names, Addr, Context) ->
-    {Valid, Units} = scan(Names, Addr, Context, true, []),
-    #eval_result{valid     = Valid,
-                 evaluated = valid_json_evaluated:neutral(),
-                 units     = own(<<"propertyNames">>, Valid, name_detail(Valid),
-                                 Units, Context)}.
+    case scan(Names, Addr, Context,
+              #eval_result{valid = true,
+                           evaluated = valid_json_evaluated:neutral(),
+                           units = []}) of
+        #eval_result{valid = undefined} = Error ->
+            Error#eval_result{evaluated = valid_json_evaluated:neutral(), units = []};
+        #eval_result{valid = Valid, units = Units} ->
+            #eval_result{valid     = Valid,
+                         evaluated = valid_json_evaluated:neutral(),
+                         units     = own(<<"propertyNames">>, Valid,
+                                         name_detail(Valid), Units, Context)}
+    end.
 
--spec scan([binary()], addr(), #eval_context{}, boolean(), [#output_unit{}]) ->
-          {boolean(), [#output_unit{}]}.
-scan([], _Addr, _Context, Valid, Units) ->
-    {Valid, lists:reverse(Units)};
-scan([Name | Rest], Addr, Context, Valid, Units) ->
-    #eval_result{valid = ValidOne, units = UnitsOne} =
-        branch(Addr, [<<"propertyNames">>], Name, Name, Context),
-    Accumulated = Valid andalso ValidOne,
-    Collected = lists:reverse(UnitsOne, Units),
-    case Accumulated =:= false andalso Context#eval_context.mode =:= flag of
-        true  -> {false, lists:reverse(Collected)};
-        false -> scan(Rest, Addr, Context, Accumulated, Collected)
+-spec scan([binary()], addr(), #eval_context{}, #eval_result{}) -> #eval_result{}.
+scan([], _Addr, _Context, Result) ->
+    Result;
+scan([Name | Rest], Addr, Context, Result) ->
+    Merged = valid_json_eval:conjoin(
+               Result,
+               branch(Addr, [<<"propertyNames">>], Name, Name, Context)),
+    case Merged#eval_result.valid =:= false andalso
+         Context#eval_context.mode =:= flag of
+        true  -> Merged;
+        false -> scan(Rest, Addr, Context, Merged)
     end.
 
 %% Аннотации у keyword нет, поэтому у успешного unit деталей тоже нет.
@@ -114,19 +120,15 @@ evaluate(Written, Instance, Context) ->
     evaluate(Written, Instance, Context,
              #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []}).
 
-evaluate([], _Instance, _Context, #eval_result{units = Units} = Result) ->
-    Result#eval_result{units = lists:reverse(Units)};
+evaluate([], _Instance, _Context, Result) ->
+    Result;
 evaluate([{_Keyword, undefined} | Rest], Instance, Context, Result) ->
     evaluate(Rest, Instance, Context, Result);
-evaluate([{Keyword, Applications} | Rest], Instance, Context,
-         #eval_result{valid = Valid, evaluated = Evaluated, units = Units}) ->
-    #eval_result{valid = ValidOne, evaluated = EvaluatedOne, units = UnitsOne} =
-        keyword(Keyword, Applications, Instance, Context),
-    Merged = #eval_result{valid     = Valid andalso ValidOne,
-                          evaluated = valid_json_evaluated:merge(Evaluated, EvaluatedOne),
-                          units     = lists:reverse(UnitsOne, Units)},
+evaluate([{Keyword, Applications} | Rest], Instance, Context, Result) ->
+    Merged = valid_json_eval:conjoin(
+               Result, keyword(Keyword, Applications, Instance, Context)),
     case Merged#eval_result.valid =:= false andalso Context#eval_context.mode =:= flag of
-        true  -> Merged#eval_result{units = lists:reverse(Merged#eval_result.units)};
+        true  -> Merged;
         false -> evaluate(Rest, Instance, Context, Merged)
     end.
 
@@ -134,12 +136,22 @@ evaluate([{Keyword, Applications} | Rest], Instance, Context,
 %% аннотации не производит, поэтому и покрытия не вносит.
 -spec keyword(binary(), [application()], json(), #eval_context{}) -> #eval_result{}.
 keyword(Keyword, Applications, Instance, Context) ->
-    {Valid, Names, Units} = apply_all(Applications, Instance, Context, true, [], []),
-    Applied = lists:usort(Names),
-    #eval_result{valid     = Valid,
-                 evaluated = coverage(Valid, Applied),
-                 units     = own(Keyword, Valid, detail(Keyword, Valid, Applied),
-                                 Units, Context)}.
+    {AppliedResult, Names} =
+        apply_all(Applications, Instance, Context,
+                  #eval_result{valid = true,
+                               evaluated = valid_json_evaluated:neutral(),
+                               units = []}, []),
+    case AppliedResult of
+        #eval_result{valid = undefined} = Error ->
+            Error#eval_result{evaluated = valid_json_evaluated:neutral(), units = []};
+        #eval_result{valid = Valid, units = Units} ->
+            Applied = lists:usort(Names),
+            #eval_result{valid     = Valid,
+                         evaluated = coverage(Valid, Applied),
+                         units     = own(Keyword, Valid,
+                                         detail(Keyword, Valid, Applied),
+                                         Units, Context)}
+    end.
 
 -spec coverage(boolean(), [binary()]) -> evaluated().
 coverage(true, Applied) -> valid_json_evaluated:properties(Applied);
@@ -147,18 +159,18 @@ coverage(false, _Applied) -> valid_json_evaluated:neutral().
 
 %% Покрытие дочерней schema принадлежит ей самой и наверх не идёт: родитель
 %% покрывает имя свойства, а не то, что нашлось внутри значения.
--spec apply_all([application()], json(), #eval_context{}, boolean(), [binary()],
-                [#output_unit{}]) -> {boolean(), [binary()], [#output_unit{}]}.
-apply_all([], _Instance, _Context, Valid, Names, Units) ->
-    {Valid, Names, lists:reverse(Units)};
-apply_all([{Tail, Name, Addr} | Rest], Instance, Context, Valid, Names, Units) ->
-    #eval_result{valid = ValidOne, units = UnitsOne} =
-        branch(Addr, Tail, Name, maps:get(Name, Instance), Context),
-    Accumulated = Valid andalso ValidOne,
-    Collected = lists:reverse(UnitsOne, Units),
-    case Accumulated =:= false andalso Context#eval_context.mode =:= flag of
-        true  -> {false, [Name | Names], lists:reverse(Collected)};
-        false -> apply_all(Rest, Instance, Context, Accumulated, [Name | Names], Collected)
+-spec apply_all([application()], json(), #eval_context{}, #eval_result{},
+                [binary()]) -> {#eval_result{}, [binary()]}.
+apply_all([], _Instance, _Context, Result, Names) ->
+    {Result, lists:reverse(Names)};
+apply_all([{Tail, Name, Addr} | Rest], Instance, Context, Result, Names) ->
+    Merged = valid_json_eval:conjoin(
+               Result,
+               branch(Addr, Tail, Name, maps:get(Name, Instance), Context)),
+    case Merged#eval_result.valid =:= false andalso
+         Context#eval_context.mode =:= flag of
+        true  -> {Merged, lists:reverse([Name | Names])};
+        false -> apply_all(Rest, Instance, Context, Merged, [Name | Names])
     end.
 
 %% Локация keyword следует схеме, локация инстанса — значению: имя свойства
