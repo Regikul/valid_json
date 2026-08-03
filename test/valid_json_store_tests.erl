@@ -206,20 +206,45 @@ remove_test() ->
     {ok, Canonical, Store0} =
         valid_json_store:add(valid_json_store:new([]), Retrieval,
                              #{<<"$id">> => Canonical}),
-    %% Удалить можно по любому из двух внешних имён.
-    {ok, Store1} = valid_json_store:remove(Store0, [Canonical]),
+    %% Удалить можно по любому из двух внешних имён, а снятый документ назван
+    %% парой: написанием вызывающего и своим каноническим именем.
+    {ok, Removed, Store1} = valid_json_store:remove(Store0, [Canonical]),
+    ?assertEqual([{Canonical, Canonical}], Removed),
     ?assertEqual(undefined, valid_json_store:fetch(Retrieval, Store1)),
     ?assertEqual(undefined, valid_json_store:fetch(Canonical, Store1)),
-    %% Неизвестное и встроенное имя операция не видит.
-    ?assertEqual({ok, Store1},
+    %% Неизвестное и встроенное имя операция не видит: пары они не дают и
+    %% ошибкой не считаются.
+    ?assertEqual({ok, [], Store1},
                  valid_json_store:remove(
                    Store1, [<<"https://example.com/missing">>, ?BUILTIN])).
+
+%% Удаление по адресу загрузки называет в паре каноническое имя: по нему же
+%% лежит артефакт.
+remove_by_retrieval_test() ->
+    Retrieval = <<"https://example.com/retrieval">>,
+    Canonical = <<"https://example.com/canonical">>,
+    {ok, Canonical, Store0} =
+        valid_json_store:add(valid_json_store:new([]), Retrieval,
+                             #{<<"$id">> => Canonical}),
+    {ok, Removed, Store1} = valid_json_store:remove(Store0, [Retrieval]),
+    ?assertEqual([{Retrieval, Canonical}], Removed),
+    ?assertEqual(undefined, valid_json_store:fetch(Canonical, Store1)).
 
 remove_relative_test() ->
     Store0 = valid_json_store:new([{base_uri, ?BASE}]),
     {ok, Canonical, Store1} = valid_json_store:add(Store0, <<"a">>, true),
-    {ok, Store2} = valid_json_store:remove(Store1, [<<"a">>]),
+    {ok, Removed, Store2} = valid_json_store:remove(Store1, [<<"a">>]),
+    ?assertEqual([{<<"a">>, Canonical}], Removed),
     ?assertEqual(undefined, valid_json_store:fetch(Canonical, Store2)).
+
+%% Имена разбираются независимо, поэтому ошибки собираются все и называются
+%% написанием записи — как при регистрации.
+remove_name_errors_test() ->
+    Store = valid_json_store:new([]),
+    ?assertEqual({error, [entry_error(<<"a">>, relative_uri_without_base),
+                          entry_error(<<"b">>, relative_uri_without_base)]},
+                 valid_json_store:remove(
+                   Store, [<<"a">>, <<"https://example.com/schema">>, <<"b">>])).
 
 builtin_test() ->
     Empty = valid_json_store:new([]),

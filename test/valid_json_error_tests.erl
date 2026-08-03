@@ -34,7 +34,10 @@ store_reason_test_() ->
                                <<"https://example.com/dialect">>}, undefined),
                        <<"https://example.com/dialect">>)),
      ?_assert(contains(format({name_taken, <<"https://example.com/schema">>}, undefined),
-                       <<"https://example.com/schema">>))].
+                       <<"https://example.com/schema">>)),
+     ?_assert(contains(format({referenced_by, <<"https://example.com/leaf">>,
+                               [<<"https://example.com/root">>]}, undefined),
+                       <<"https://example.com/root">>))].
 
 reference_reason_test_() ->
     Target = {<<"https://example.com/schema">>, <<"/$defs/value">>},

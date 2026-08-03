@@ -50,12 +50,20 @@ add(#store{} = Store, Entries) when is_list(Entries) ->
 add(Store, Entries) ->
     erlang:error(badarg, [Store, Entries]).
 
--spec remove(store(), [uri()]) -> {ok, store()} | {error, #schema_error{}}.
+%% Снятый документ называется парой: написанием вызывающего и своим каноническим
+%% именем. Первое нужно тому, кто станет называть им ошибку, второе — тому, кто
+%% держит артефакты. Запись, не нашедшая документа, пары не даёт и ошибкой не
+%% считается: удалять нечего. Ошибки разрешения имён собираются все, как в
+%% `add/2`, и по той же причине.
+-spec remove(store(), [uri()]) ->
+          {ok, [{uri(), uri()}], store()} | {error, [{uri(), #schema_error{}}]}.
 remove(#store{} = Store, Uris) when is_list(Uris) ->
-    case names(Uris, Store#store.base, []) of
-        {ok, Names} -> {ok, Store#store{documents = remove_names(Names,
-                                                                  Store#store.documents)}};
-        {error, _} = Error -> Error
+    case names(Uris, Store#store.base) of
+        {ok, Names} ->
+            {Removed, Documents} = remove_names(Names, Store#store.documents),
+            {ok, Removed, Store#store{documents = Documents}};
+        {error, _} = Error ->
+            Error
     end;
 remove(Store, Uris) ->
     erlang:error(badarg, [Store, Uris]).
@@ -157,16 +165,22 @@ canonical(#{<<"$id">> := Id}, _Retrieval) ->
 canonical(_Json, Retrieval) ->
     {ok, Retrieval}.
 
--spec names([term()], rid(), [uri()]) ->
-          {ok, [uri()]} | {error, #schema_error{}}.
-names([], _Base, Acc) ->
-    {ok, lists:reverse(Acc)};
-names([Uri | Rest], Base, Acc) when is_binary(Uri) ->
+-spec names([term()], rid()) ->
+          {ok, [{uri(), uri()}]} | {error, [{uri(), #schema_error{}}]}.
+names(Uris, Base) ->
+    case lists:foldl(fun(Uri, Acc) -> name(Uri, Base, Acc) end, {[], []}, Uris) of
+        {Names, []} -> {ok, lists:reverse(Names)};
+        {_Names, Errors} -> {error, lists:reverse(Errors)}
+    end.
+
+-spec name(term(), rid(), {[{uri(), uri()}], [{uri(), #schema_error{}}]}) ->
+          {[{uri(), uri()}], [{uri(), #schema_error{}}]}.
+name(Uri, Base, {Names, Errors}) when is_binary(Uri) ->
     case registration_name(Uri, Base) of
-        {ok, Name}       -> names(Rest, Base, [Name | Acc]);
-        {error, _} = Error -> Error
+        {ok, Name}     -> {[{Uri, Name} | Names], Errors};
+        {error, Error} -> {Names, [{Uri, Error} | Errors]}
     end;
-names(_Uris, _Base, _Acc) ->
+name(_Uri, _Base, _Acc) ->
     erlang:error(badarg).
 
 -spec insert_all([{uri(), #document{}}], store()) ->
@@ -222,18 +236,25 @@ free_names([Name | Rest], Documents) ->
         false -> free_names(Rest, Documents)
     end.
 
--spec remove_names([uri()], #{uri() => #document{}}) ->
-          #{uri() => #document{}}.
+%% Встроенные документы отсюда не видны: они лежат мимо реестра, и `maps:get`
+%% их не находит. Тем самым снять встроенное имя нельзя, и отдельного запрета
+%% на это не нужно.
+-spec remove_names([{uri(), uri()}], #{uri() => #document{}}) ->
+          {[{uri(), uri()}], #{uri() => #document{}}}.
 remove_names(Names, Documents) ->
-    lists:foldl(
-      fun(Name, Acc) ->
-              case maps:get(Name, Acc, undefined) of
-                  #document{} = Document -> remove_document(Document, Acc);
-                  undefined              -> Acc
-              end
-      end,
-      Documents,
-      Names).
+    {Removed, Rest} = lists:foldl(fun remove_name/2, {[], Documents}, Names),
+    {lists:reverse(Removed), Rest}.
+
+-spec remove_name({uri(), uri()},
+                  {[{uri(), uri()}], #{uri() => #document{}}}) ->
+          {[{uri(), uri()}], #{uri() => #document{}}}.
+remove_name({Entry, Name}, {Removed, Documents}) ->
+    case maps:get(Name, Documents, undefined) of
+        #document{canonical = Canonical} = Document ->
+            {[{Entry, Canonical} | Removed], remove_document(Document, Documents)};
+        undefined ->
+            {Removed, Documents}
+    end.
 
 -spec remove_document(#document{}, #{uri() => #document{}}) ->
           #{uri() => #document{}}.

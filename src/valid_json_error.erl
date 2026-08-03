@@ -42,6 +42,9 @@ reason(core_vocabulary_missing) ->
     "meta-schema does not require the Core vocabulary";
 reason({name_taken, Uri}) ->
     ["URI is already used by another document: ", Uri];
+reason({referenced_by, Uri, Refs}) ->
+    ["document ", Uri, " cannot be removed, it is referenced by: ",
+     lists:join(", ", Refs)];
 reason(schema_invalid) ->
     "schema does not conform to its meta-schema";
 reason({metaschema_evaluation_failed, Uri, EvalError}) ->

@@ -126,6 +126,85 @@ name_taken_test() ->
                      valid_json_store_manager:lookup(Store, Other))
     end).
 
+%% Удаление снимает и документ, и его артефакт.
+remove_test() ->
+    with_store([], fun(Store) ->
+        Uri = <<"https://example.com/integer">>,
+        {ok, [Uri]} = valid_json_store_manager:add(
+                        Store, [{Uri, #{<<"type">> => <<"integer">>}}]),
+        ?assertEqual(ok, valid_json_store_manager:remove(Store, [Uri])),
+        ?assertEqual({error, not_found},
+                     valid_json_store_manager:lookup(Store, Uri)),
+        %% Реестр освободился вместе с таблицей: имя снова свободно.
+        ?assertEqual({ok, [Uri]},
+                     valid_json_store_manager:add(
+                       Store, [{Uri, #{<<"type">> => <<"integer">>}}]))
+    end).
+
+%% Неизвестное имя удалять нечего, и это не ошибка.
+remove_unknown_test() ->
+    with_store([], fun(Store) ->
+        ?assertEqual(ok, valid_json_store_manager:remove(
+                           Store, [<<"https://example.com/missing">>]))
+    end).
+
+%% Документ, на который ссылаются, снять нельзя: ошибка называет ссылающихся, а
+%% ни таблица, ни реестр не меняются.
+remove_referenced_test() ->
+    with_store([], fun(Store) ->
+        Leaf = <<"https://example.com/leaf">>,
+        Root = <<"https://example.com/root">>,
+        {ok, [Leaf]} = valid_json_store_manager:add(
+                         Store, [{Leaf, #{<<"type">> => <<"integer">>}}]),
+        {ok, [Root]} = valid_json_store_manager:add(
+                         Store, [{Root, #{<<"$ref">> => Leaf}}]),
+        ?assertEqual({error, [{Leaf, #schema_error{reason = {referenced_by, Leaf,
+                                                             [Root]},
+                                                   location = undefined}}]},
+                     valid_json_store_manager:remove(Store, [Leaf])),
+        ?assertEqual(true, valid(Store, Leaf, 1)),
+        ?assertEqual(false, valid(Store, Root, <<"a">>)),
+        %% Весь конус одним вызовом снимается: ссылающийся уходит вместе с целью.
+        ?assertEqual(ok, valid_json_store_manager:remove(Store, [Leaf, Root])),
+        ?assertEqual({error, not_found},
+                     valid_json_store_manager:lookup(Store, Leaf)),
+        ?assertEqual({error, not_found},
+                     valid_json_store_manager:lookup(Store, Root))
+    end).
+
+%% Ключ ошибки — написание вызывающего, а имя внутри причины — каноническое: по
+%% нему лежит артефакт, и это разные строки.
+remove_by_retrieval_test() ->
+    with_store([], fun(Store) ->
+        Retrieval = <<"https://example.com/retrieval">>,
+        Canonical = <<"https://example.com/canonical">>,
+        Root = <<"https://example.com/root">>,
+        {ok, [Canonical]} = valid_json_store_manager:add(
+                              Store, [{Retrieval, #{<<"$id">> => Canonical,
+                                                    <<"type">> => <<"integer">>}}]),
+        {ok, [Root]} = valid_json_store_manager:add(
+                         Store, [{Root, #{<<"$ref">> => Canonical}}]),
+        ?assertEqual({error, [{Retrieval,
+                               #schema_error{reason = {referenced_by, Canonical,
+                                                       [Root]},
+                                             location = undefined}}]},
+                     valid_json_store_manager:remove(Store, [Retrieval])),
+        ok = valid_json_store_manager:remove(Store, [Root]),
+        ?assertEqual(ok, valid_json_store_manager:remove(Store, [Retrieval])),
+        ?assertEqual({error, not_found},
+                     valid_json_store_manager:lookup(Store, Canonical))
+    end).
+
+%% Неразрешимое имя — ошибка того же списка: тега у удаления нет, потому что
+%% фаза одна.
+remove_bad_name_test() ->
+    with_store([], fun(Store) ->
+        ?assertEqual({error, [{<<"a">>,
+                               #schema_error{reason = relative_uri_without_base,
+                                             location = undefined}}]},
+                     valid_json_store_manager:remove(Store, [<<"a">>]))
+    end).
+
 %% Опция хранилища доходит до реестра: короткое имя разрешается от базы.
 base_uri_test() ->
     with_store([{base_uri, ?BASE}], fun(Store) ->

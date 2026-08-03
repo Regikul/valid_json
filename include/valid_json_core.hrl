@@ -161,6 +161,7 @@
                 | core_vocabulary_missing
                 | {misplaced_keyword, binary()}
                 | {name_taken, uri()}
+                | {referenced_by, uri(), [uri()]}
                 | schema_invalid
                 | {metaschema_evaluation_failed, uri(), eval_error()}
                 | {bad_keyword_value, json()}

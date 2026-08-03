@@ -18,7 +18,7 @@
 
 -include("valid_json_resources.hrl").
 
--export([start_link/2, manager_name/1, add/2, lookup/2]).
+-export([start_link/2, manager_name/1, add/2, remove/2, lookup/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 -export_type([store_option/0]).
 
@@ -57,6 +57,12 @@ manager_name(Store) ->
 add(Store, Entries) when is_list(Entries) ->
     gen_server:call(manager_name(Store), {add, Entries}).
 
+%% У удаления фаза одна, поэтому и тега у ошибки нет: и неразрешимое имя, и
+%% `referenced_by` названы написанием записи, и различать тут нечего.
+-spec remove(atom(), [uri()]) -> ok | {error, [{uri(), #schema_error{}}]}.
+remove(Store, Uris) when is_list(Uris) ->
+    gen_server:call(manager_name(Store), {remove, Uris}).
+
 -spec lookup(atom(), uri()) -> {ok, compiled()} | {error, not_found}.
 lookup(Store, Uri) ->
     case ets:lookup(Store, Uri) of
@@ -80,6 +86,9 @@ init({Store, Options}) ->
 
 handle_call({add, Entries}, _From, State) ->
     {Reply, Next} = add_entries(Entries, State),
+    {reply, Reply, Next};
+handle_call({remove, Uris}, _From, State) ->
+    {Reply, Next} = remove_entries(Uris, State),
     {reply, Reply, Next}.
 
 handle_cast(_Message, State) ->
@@ -117,6 +126,61 @@ add_entries(Entries, #state{table = Table, store = Store0,
                 {error, Errors} ->
                     {{error, {compilation, Errors}}, State}
             end
+    end.
+
+%% Фазы компиляции у удаления нет: снятие, прошедшее проверку ссылок, не может
+%% сломать ни одного оставшегося артефакта — тот, кто ссылался бы на снятое имя,
+%% отвергнут раньше. Снятие из таблицы тоже не подводит: `ets:delete/2` доволен
+%% и отсутствующим ключом, а упасть может только на потерянном владении, где
+%% падать и следует.
+-spec remove_entries([uri()], #state{}) ->
+          {ok | {error, [{uri(), #schema_error{}}]}, #state{}}.
+remove_entries(Uris, #state{table = Table, store = Store0} = State) ->
+    case valid_json_store:remove(Store0, Uris) of
+        {error, Errors} ->
+            {{error, Errors}, State};
+        {ok, Removed, Store1} ->
+            Gone = ordsets:from_list([Name || {_Entry, Name} <- Removed]),
+            Survivors = valid_json_store:canonical_names(Store1),
+            case referenced(Table, Survivors, Removed, Gone) of
+                [] ->
+                    lists:foreach(fun(Name) -> true = ets:delete(Table, Name) end,
+                                  Gone),
+                    {ok, State#state{store = Store1}};
+                Errors ->
+                    {{error, Errors}, State}
+            end
+    end.
+
+%% Ссылающихся ищут по `sources` выживших артефактов, и обратный индекс здесь
+%% не нужен ровно как при добавлении. Одна ссылка отвергает вызов целиком:
+%% удалить документ можно только вместе со всем конусом зависимых от него.
+-spec referenced(atom(), [uri()], [{uri(), uri()}], [uri()]) ->
+          [{uri(), #schema_error{}}].
+referenced(Table, Survivors, Removed, Gone) ->
+    Refs = lists:foldl(fun(Name, Acc) -> refers(Table, Name, Gone, Acc) end,
+                       #{}, Survivors),
+    [{Entry, #schema_error{reason = {referenced_by, Name, maps:get(Name, Refs)},
+                           location = undefined}}
+     || {Entry, Name} <- Removed, maps:is_key(Name, Refs)].
+
+%% Имя реестра без артефакта здесь недостижимо: после успешного `add` артефакт
+%% есть у каждого имени, а перезапуск оставляет реестр пустым. Считать такое имя
+%% ссылающимся не на что, а если ссылка всё же была, ближайший `add` пересоберёт
+%% этот артефакт и честно упадёт на `unknown_document`.
+-spec refers(atom(), uri(), [uri()], #{uri() => [uri()]}) -> #{uri() => [uri()]}.
+refers(Table, Name, Gone, Refs) ->
+    case lookup(Table, Name) of
+        {ok, #{sources := Sources}} ->
+            Hit = ordsets:intersection(ordsets:from_list(Sources), Gone),
+            lists:foldl(
+              fun(Source, Acc) ->
+                      maps:update_with(Source,
+                                       fun(Names) -> ordsets:add_element(Name, Names) end,
+                                       [Name], Acc)
+              end, Refs, Hit);
+        {error, not_found} ->
+            Refs
     end.
 
 %% Обратный индекс зависимостей не нужен: новый документ не может ни сломать, ни
