@@ -317,9 +317,11 @@
   fixtures на смену и наследование dialect встроенным resource, на dialect
   втянутого документа, на метасхему встроенного resource в `sources` и на
   `$schema` вне корня resource.
-- [x] Подключить к runner `uniqueItems.json` и `items.json` Draft 2019-09: обе
-  раскладки опирались на array-form `items` и `additionalItems`, и теперь оба
-  файла идут общим списком для обоих dialects.
+- [x] Подключить к runner `uniqueItems.json`, `items.json` и
+  `additionalItems.json` Draft 2019-09: все три опирались на array-form `items`
+  и `additionalItems`. Первые два идут теперь общим списком для обоих dialects,
+  а третий — списком своего dialect, потому что в Draft 2020-12 такого файла
+  нет вовсе.
 - [x] Подключить к runner `unevaluatedItems.json` Draft 2019-09 целиком и
   группу `unevaluatedProperties with $recursiveRef`: обе подключены и проходят.
   Отложенных групп в runner не осталось вовсе.
