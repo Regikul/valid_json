@@ -3,3 +3,4 @@
 * [Open Knowledge Format (OKF) v0.2](open-knowledge-format-0.2.md) - Official OKF 0.2 specification mirrored from Google Cloud.
 * [JSON Schema specifications](json-schema/) - Draft 2020-12 and Draft 2019-09, with local Core and Validation documents, plus the Relative JSON Pointers draft.
 * [IETF RFCs](rfc/) - Nine documents, normative for URI resolution, JSON Pointer and format attributes.
+* [ECMA-262](ecma-262/) - Regular expression sections of the 11th edition, the dialect behind `pattern` and `patternProperties`.

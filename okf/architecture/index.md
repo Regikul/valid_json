@@ -12,6 +12,6 @@
 
 Эти документы сохраняют измерения и развёрнутые примеры, но не являются обязательным чтением для реализации.
 
-* [ECMA-262 to PCRE adaptation](ecma-to-pcre-adaptation.md) - Расхождения `re` с диалектом ECMA-262, замер на снапшоте сьюта и две ступени переписывания паттерна.
+* [ECMA-262 to PCRE adaptation](ecma-to-pcre-adaptation.md) - Расхождения `re` с диалектом ECMA-262, замеры и доводы, по которым ни перевод, ни переписывание паттернов не делаются.
 * [Validator value model notes](validator-value-model-notes.md) - Измерения OTP, Unicode-примеры и доказательство границ `multipleOf`.
 * [Validator compiled examples](validator-compiled-examples.md) - Полные Erlang-термы и fixture evidence для ресурсов, ссылок и dialect inheritance.

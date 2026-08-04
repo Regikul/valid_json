@@ -79,7 +79,7 @@ re:compile(Pattern, [unicode, dollar_endonly]).
 
 Паттерн не оборачивается якорями, опции `anchored`, `multiline` и `ucp` не передаются: неявное якорение запрещено MUST ([core.txt:709](../references/json-schema/draft-2020-12/core.txt)). Исходный binary хранится рядом с `re:mp()` для диагностики. Ошибка `re:compile/2` завершает компиляцию схемы согласно политике реализации; спецификация задаёт ECMA-262 как SHOULD, не MUST ([core.txt:679](../references/json-schema/draft-2020-12/core.txt)).
 
-Расхождения PCRE, воспроизводимый замер и необязательные две ступени rewrite описаны в [ECMA-262 to PCRE adaptation](ecma-to-pcre-adaptation.md). Rewrite локален в подготовке паттерна и не меняет IR или evaluator.
+Расхождения PCRE, замеры и решение принимать диалект `re` как есть описаны в [ECMA-262 to PCRE adaptation](ecma-to-pcre-adaptation.md). Переписывания паттерна перед компиляцией нет и не планируется; там же названо, чего оно стоило бы и при каком условии к вопросу стоит вернуться.
 
 # Скомпилированная схема
 
