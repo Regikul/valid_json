@@ -142,7 +142,7 @@ standard_store_loader_test() ->
     try
         {ok, _Ref} = valid_json:wait(5000),
         ?assertEqual({ok, #{<<"valid">> => true}},
-                     valid_json:validate_uri(<<"weight.json">>, 5,
+                     valid_json:validate(<<"weight.json">>, 5,
                                              [{output, flag}]))
     after
         ok = application:stop(valid_json),
@@ -241,7 +241,7 @@ unavailable_while_loading_test() ->
         ?assertEqual({error, unavailable},
                      valid_json_store_manager:lookup(Store, ?BASE)),
         ?assertEqual({error, unavailable},
-                     valid_json:store_validate_uri(Store, ?BASE, 1, [])),
+                     valid_json:store_validate(Store, ?BASE, 1, [])),
         Manager ! release,
         {ok, _Ref} = valid_json_store_manager:wait(Store, 5000),
         ?assertMatch({ok, _}, valid_json_store_manager:lookup(Store, ?BASE)),
@@ -394,7 +394,7 @@ wait_restart(Name, Old, Attempts) ->
 
 valid(Store, Uri, Instance) ->
     {ok, #{<<"valid">> := Valid}} =
-        valid_json:store_validate_uri(Store, Uri, Instance, [{output, flag}]),
+        valid_json:store_validate(Store, Uri, Instance, [{output, flag}]),
     Valid.
 
 fixtures() ->

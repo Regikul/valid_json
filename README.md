@@ -1,47 +1,156 @@
 # valid_json
 
-`valid_json` — OTP-библиотека для валидации JSON с помощью JSON Schema.
+`valid_json` is an Erlang/OTP library for validating JSON instances against
+[JSON Schema](https://json-schema.org/).
 
-## Область поддержки
+The implementation is under active development. See the
+[roadmap](ROADMAP.md) for the current conformance and feature status.
 
-Проект сосредоточен на:
+## Supported features
 
-- JSON Schema Draft 2020-12;
-- JSON Schema Draft 2019-09;
-- cross-draft ссылках между этими диалектами;
-- форматах результата валидации `flag`, `basic`, `detailed` и `verbose`.
+- JSON Schema Draft 2020-12 and Draft 2019-09.
+- Cross-draft schema resources and references.
+- Schema compilation from inline documents or a pre-populated document store.
+- URI resolution and schema resources using `$id`, `$anchor`, `$defs`, and
+  `$ref`, including references to other registered documents.
+- Draft 2020-12 dynamic references (`$dynamicAnchor` and `$dynamicRef`) and
+  Draft 2019-09 recursive references (`$recursiveAnchor` and `$recursiveRef`).
+- Assertions and applicators for scalar, array, and object values, including
+  conditionals, dependent schemas, `contains`, and `unevaluated*` keywords.
+- `$vocabulary`, built-in metaschemas, and user-provided metaschemas from the
+  document store.
+- Standard validation output formats: `flag`, `basic`, `detailed`, and
+  `verbose`.
 
-Валидатор находится на этапе реализации. Нормативные документы, runtime-схемы и официальный набор conformance-тестов уже закреплены в репозитории. Текущее состояние работ и порядок фаз — в [roadmap](ROADMAP.md).
+The registry is deliberately offline: documents reachable through `$ref` must
+be registered before compilation or validation. No network requests are made
+at runtime.
 
-На сегодня закрыты фазы P0–P7; следующая — P8. Оба диалекта поддержаны в части assertion keywords, applicators, составных constraints, annotation-only keywords, resources и обычных ссылок (`$id`, `$anchor`, `$defs`, `$ref` на локальные и удалённые документы), а также `unevaluatedProperties` и `unevaluatedItems`. Работает `$vocabulary`: набор активных keywords берётся из метасхемы dialect, включая пользовательские метасхемы из реестра. В Draft 2020-12 поддержаны динамические ссылки — `$dynamicAnchor` вместе с `$dynamicRef`; в Draft 2019-09 — recursive keywords `$recursiveAnchor` и `$recursiveRef` вместе с array-form `items` и `additionalItems`. Работают cross-draft переходы между этими dialects, а каждый schema resource перед emission проверяется отдельно собственной метасхемой. Два встроенных замыкания метасхем публикуются через `persistent_term`. `format` пока собирается как аннотация и ничего не проверяет. Схемы компилируются из реестра документов, который ничего не загружает по сети: всё, до чего дотягиваются ссылки, должно быть зарегистрировано заранее. Результат подтверждён обязательными файлами официального сьюта и выбранными optional groups в формате `flag`, а плоский формат `basic` — всеми восемью официальными output cases. Все четыре стандартных формата результата реализованы; `detailed` и `verbose` подтверждены end-to-end golden tests обоих dialects и соответствующими output schemas. Следующими остаются assertion-ветвь `format` и content keywords.
+`format` is collected as an annotation by default. Opt-in format assertions are
+available for the implemented built-in formats; IDN and IRI formats remain
+annotations. `contentEncoding`, `contentMediaType`, and `contentSchema` are
+annotations and do not decode or validate string content.
 
-## Сборка
+## Requirements
+
+- Erlang/OTP
+- [rebar3](https://rebar3.org/)
+
+## Build and test
+
+Compile the project with:
 
 ```shell
 rebar3 compile
 ```
 
-## Проверка схемы при компиляции
+Run the EUnit and conformance test suite with:
 
-`valid_json_compile:compile/3` и `compile_uri/3` принимают опцию
-`{schema_validation, Mode}`. Доступны режимы `flag`, `basic`, `detailed` и
-`verbose`; они одновременно задают глубину обхода метасхемы и формат
-диагностики. По умолчанию используется `basic`.
-
-```erlang
-valid_json_compile:compile(
-  Store, Schema, [{schema_validation, flag}]).
+```shell
+rebar3 eunit
 ```
 
-Если схема не соответствует метасхеме, компилятор возвращает
-`#schema_error{reason = schema_invalid, validation_output = Output}`. Повторного
-запуска в другом режиме нет: `Output` сразу имеет выбранный формат.
+Start an interactive Erlang shell with the application loaded:
 
-Режим `trusted` предназначен для заранее проверенных статических схем и
-пропускает только их применение к метасхеме. Разрешение dialect и vocabulary,
-загрузка пользовательской метасхемы, проверка ссылок и построение артефакта
-по-прежнему выполняются.
+```shell
+rebar3 shell
+```
 
-## База знаний
+## Usage
 
-Архитектура, правила conformance-тестирования, процедуры обновления и локальные копии спецификаций собраны в [OKF bundle](okf/).
+### Validate an inline schema with the standard store
+
+Register an inline schema under a URI, then validate instances against it:
+
+```erlang
+{ok, _} = application:ensure_all_started(valid_json),
+
+Uri = <<"https://example.com/schemas/user">>,
+Schema = #{
+    <<"type">> => <<"object">>,
+    <<"properties">> => #{
+        <<"name">> => #{<<"type">> => <<"string">>}
+    },
+    <<"required">> => [<<"name">>]
+},
+{ok, [Uri]} = valid_json:add(Uri, Schema),
+
+{ok, #{<<"valid">> := true}} =
+    valid_json:validate(
+        Uri,
+        #{<<"name">> => <<"Ada">>},
+        [{output, flag}]).
+```
+
+The default output format is `flag`. Select `basic`, `detailed`, or `verbose`
+with the same `[{output, Format}]` option:
+
+```erlang
+{ok, Result} = valid_json:validate(
+    Uri,
+    #{<<"name">> => 42},
+    [{output, detailed}]).
+```
+
+### Load schemas from a directory
+
+The built-in directory loader recursively reads `.json` files into the standard
+store when the application starts. For example, create
+`priv/schemas/weight.json`:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "integer",
+  "minimum": 0
+}
+```
+
+Configure the loader in `config/sys.config`:
+
+```erlang
+[
+    {valid_json, [
+        {loader, {valid_json_loader_dir, [
+            {root, "priv/schemas"}
+        ]}}
+    ]}
+].
+```
+
+The `root` path is resolved relative to the current working directory, so the
+relative path above works when `rebar3 shell` is started from the project root.
+Use an absolute path if the application can be started from another directory.
+
+Then start the shell from the project root and wait for the initial load to
+finish:
+
+```shell
+rebar3 shell
+```
+
+```erlang
+{ok, _} = valid_json:wait(5000),
+{ok, #{<<"valid">> := true}} =
+    valid_json:validate(<<"weight.json">>, 5, [{output, flag}]).
+```
+
+The loader derives a `file://` base URI from the directory. File names are
+therefore available as relative document names, and `.json` is the default
+extension.
+
+### References and custom stores
+
+For schemas with `$ref` links, register every document needed by the reference
+closure before registering the root schema. The store is pre-populated only;
+it never fetches referenced documents over the network.
+
+For a custom store, use `valid_json_store` together with
+`valid_json_compile:compile/3` or `valid_json_compile:compile_uri/3`.
+Compilation validates each schema resource against its applicable metaschema.
+The `schema_validation` option controls the diagnostic format:
+`flag`, `basic`, `detailed`, or `verbose`.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE.md).
