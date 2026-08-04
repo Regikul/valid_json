@@ -1,5 +1,7 @@
 # valid_json
 
+[![CI](https://github.com/Regikul/valid_json/actions/workflows/ci.yml/badge.svg)](https://github.com/Regikul/valid_json/actions/workflows/ci.yml)
+
 `valid_json` is an Erlang/OTP library for validating JSON instances against
 [JSON Schema](https://json-schema.org/).
 
@@ -33,7 +35,8 @@ annotations and do not decode or validate string content.
 
 ## Requirements
 
-- Erlang/OTP
+- Erlang/OTP 27 or later — the library decodes JSON with the `json` module
+  from stdlib, which first appeared in OTP 27.
 - [rebar3](https://rebar3.org/)
 
 ## Build and test
@@ -48,6 +51,13 @@ Run the EUnit and conformance test suite with:
 
 ```shell
 rebar3 eunit
+```
+
+Run the conformance profiles alone — the JSON Schema Test Suite and the
+official output tests, without the remaining unit tests:
+
+```shell
+rebar3 conformance
 ```
 
 Start an interactive Erlang shell with the application loaded:

@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    name: OTP ${{ matrix.otp }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ['27', '28']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          rebar3-version: '3.27.0'
+
+      - name: Compile
+        run: rebar3 as ci compile
+
+      # Conformance runs first: it is the suite that answers whether the
+      # library implements the specification, so it should report early.
+      - name: Conformance profiles
+        run: rebar3 as ci conformance
+
+      - name: Full EUnit suite
+        run: rebar3 as ci eunit

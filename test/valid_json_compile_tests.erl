@@ -66,13 +66,25 @@ bad_multiple_of_test_() ->
      ?_assertEqual(schema_error({bad_keyword_value, true}, <<"/minimum">>),
                    compile(#{<<"minimum">> => true}))].
 
-%% Скомпилированный re:mp() попадает прямо в IR, поэтому точное равенство
-%% артефактов должно сохраниться: одинаковый исходный текст даёт равные термы.
+%% Скомпилированный re:mp() попадает прямо в IR, но сравнивается не он, а
+%% лежащий рядом исходный текст: с OTP 28 равных термов из одного текста больше
+%% не получить, и сам re:mp() стирает `scrub/1`. Опции компиляции проверяются
+%% отдельно, по поведению, в pattern_options_test_/0.
 pattern_test_() ->
     [?_assertEqual({ok, artifact(schema_node([{pattern, regex(<<"^a+$">>)}]))},
                    compile(#{<<"pattern">> => <<"^a+$">>})),
      ?_assertEqual({ok, artifact(schema_node([{pattern, regex(<<"[0-9]">>)}]))},
                    compile(#{<<"pattern">> => <<"[0-9]">>}))].
+
+%% Пока re:mp() входил в сравниваемый терм, точное равенство заодно закрепляло
+%% и опции его компиляции. Стёртый scrub'ом терм их больше не показывает,
+%% поэтому опции проверяются по наблюдаемому поведению паттерна из IR:
+%% `dollar_endonly` не пускает `$` перед завершающим переводом строки, а
+%% `unicode` читает и паттерн, и субъект как UTF-8, а не как байты.
+pattern_options_test_() ->
+    [?_assertNot(compiled_matches(<<"^a$">>, <<"a\n">>)),
+     ?_assert(compiled_matches(<<"^a$">>, <<"a">>)),
+     ?_assert(compiled_matches(<<"^.$">>, <<"ф"/utf8>>))].
 
 %% Некомпилируемое выражение останавливает компиляцию схемы. Причина от re
 %% проверяется по форме: её текст принадлежит библиотеке и может меняться.
@@ -1488,7 +1500,17 @@ not_a_schema_test_() ->
                    compile(#{<<"not">> => <<"x">>}))].
 
 compile(Schema) ->
-    valid_json_compile:compile_unchecked(Schema, ?DIALECT).
+    scrub(valid_json_compile:compile_unchecked(Schema, ?DIALECT)).
+
+%% Компилирует одиночный `pattern` и отвечает, совпал ли субъект. Идёт мимо
+%% compile/1: нужен как раз тот re:mp(), который scrub/1 стирает.
+compiled_matches(Source, Subject) ->
+    {ok, #{resources := Resources}} =
+        valid_json_compile:compile_unchecked(#{<<"pattern">> => Source},
+                                             ?DIALECT),
+    #{anonymous := #resource{nodes = #{<<>> := Node}}} = Resources,
+    #node{constraints = [{pattern, {Source, Compiled}}]} = Node,
+    re:run(Subject, Compiled, [{capture, none}]) =:= match.
 
 %% Эти fixtures проверяют closure, dialect/vocabulary и форму публичного
 %% артефакта. Корректность самих статических schemas покрыта meta-schema suite.
@@ -1552,9 +1574,25 @@ root_constraints(Schema) ->
     Constraints.
 
 %% Опции повторяют validator-core.md: без них терм не совпал бы с компиляторным.
+%% Ожидаемая сторона несёт вместо re:mp() ту же метку, что оставляет scrub/1.
 regex(Source) ->
-    {ok, Compiled} = re:compile(Source, [unicode, dollar_endonly]),
-    {Source, Compiled}.
+    {Source, mp}.
+
+%% С OTP 28 re:compile/2 возвращает ссылку на ресурс, и два вызова над одним
+%% текстом равными термами уже не будут. Точное сравнение артефактов идёт
+%% поэтому по исходному тексту паттерна, а сам re:mp() с обеих сторон
+%% заменяется меткой: скомпилированный терм — функция текста и опций, и текст
+%% лежит в IR рядом с ним.
+scrub(Term) when is_tuple(Term), element(1, Term) =:= re_pattern ->
+    mp;
+scrub(Term) when is_tuple(Term) ->
+    list_to_tuple(scrub(tuple_to_list(Term)));
+scrub(Term) when is_list(Term) ->
+    [scrub(Item) || Item <- Term];
+scrub(Term) when is_map(Term) ->
+    maps:fold(fun(Key, Value, Acc) -> Acc#{Key => scrub(Value)} end, #{}, Term);
+scrub(Term) ->
+    Term.
 
 %% Схема без подсхем даёт единственный node в корне resource, поэтому один node
 %% принимается вместо готовой map.

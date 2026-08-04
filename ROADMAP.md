@@ -543,7 +543,16 @@ Runtime не входит в conformance-фазы и развивается от
   `no_progress`, иначе ошибка распространяется; неизвестное покрытие для
   `unevaluated*` поглощать нельзя. Контракт подтверждён cross-format,
   output-schema и meta-schema gate regression tests.
-- [ ] Добавить CI-команды для compile, EUnit и выбранных conformance profiles.
+- [x] Добавить CI-команды для compile, EUnit и выбранных conformance profiles:
+  workflow GitHub Actions выполняет `rebar3 as ci compile`,
+  `rebar3 as ci conformance` и `rebar3 as ci eunit` на OTP 27 и OTP 28.
+  Профиль `ci` считает предупреждение компилятора отказом, алиас `conformance`
+  запускает conformance-профили отдельно от прочих тестов. Поддержка OTP 28
+  потребовала правки compiler fixtures: там `re:compile/2` возвращает ссылку на
+  ресурс, одинаковый текст паттерна равных термов больше не даёт, и точное
+  сравнение артефакта идёт теперь по исходному тексту. Опции компиляции
+  паттерна перестали попадать в сравниваемый терм и проверяются отдельным
+  тестом по поведению.
 - [ ] Публиковать количество запущенных групп и cases по каждому dialect/file.
 - [ ] Поддерживать отдельные точные fixtures на границах compiler, resolver,
   evaluator и output builder.

@@ -164,7 +164,7 @@ Boolean schema хранится значением `true` или `false` и не
     | {unevaluated_items, addr()}.
 ```
 
-Тег есть данные; имён модулей и closures в IR нет. Единственная непрозрачная часть — сравнимый `re:mp()`. Различия dialect разрешаются компилятором: разные раскладки получают разные tags, отличающееся поведение — явное поле (`MarksEvaluated`, `Assert`). Evaluator не читает `#resource.dialect`. `{marker, Keyword}` сохраняет compile-time container `$defs` либо совместимый `definitions` только ради silent результата в `verbose`; validity и coverage он не меняет.
+Тег есть данные; имён модулей и closures в IR нет. Единственная непрозрачная часть — `re:mp()`. Различия dialect разрешаются компилятором: разные раскладки получают разные tags, отличающееся поведение — явное поле (`MarksEvaluated`, `Assert`). Evaluator не читает `#resource.dialect`. `{marker, Keyword}` сохраняет compile-time container `$defs` либо совместимый `definitions` только ради silent результата в `verbose`; validity и coverage он не меняет.
 
 ## Составные constraints
 
@@ -241,7 +241,7 @@ Compiler и evaluator проверяются раздельно, не через
 | evaluator | вручную собранный `compiled()` + instance | `#eval_result{}` и units до JSON projection |
 | output builder | дерево units | golden JSON каждого формата |
 
-Эталон regex constraint создаёт `re:mp()` тем же `re:compile/2`, затем сравнивает весь терм; разбирать внутренний bytecode нельзя. Все остальные элементы IR — обычные Erlang data и должны быть печатаемы и сравнимы без элизий.
+Эталон regex constraint несёт вместо `re:mp()` исходный текст паттерна, и фактический `compiled()` перед сравнением тот же терм стирает: `re:mp()` — непрозрачный тип, равенство двух его значений не определено, и опираться на него fixture не может. Разбирать внутренний bytecode тем более нельзя, поэтому опции компиляции закрепляет отдельный тест по наблюдаемому поведению паттерна. Все остальные элементы IR — обычные Erlang data и должны быть печатаемы и сравнимы без элизий.
 
 Так core развивается без registry и URI parser, а resources compiler — без необходимости доказывать свою корректность только итоговым boolean. End-to-end conformance остаётся отдельной приёмкой фаз.
 
