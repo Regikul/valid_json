@@ -145,11 +145,9 @@ For schemas with `$ref` links, register every document needed by the reference
 closure before registering the root schema. The store is pre-populated only;
 it never fetches referenced documents over the network.
 
-For a custom store, use `valid_json_store` together with
-`valid_json_compile:compile/3` or `valid_json_compile:compile_uri/3`.
-Compilation validates each schema resource against its applicable metaschema.
-The `schema_validation` option controls the diagnostic format:
-`flag`, `basic`, `detailed`, or `verbose`.
+For a custom store, add `valid_json_store_sup:child_spec/2` to your
+application's supervision tree, then use the `valid_json` facade's `store_*`
+functions, such as `valid_json:store_add/2` and `valid_json:store_validate/4`.
 
 ## License
 
