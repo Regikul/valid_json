@@ -115,7 +115,11 @@
     error = undefined :: eval_error() | undefined
 }).
 
--type frame() :: {addr(), [binary()]}.
+%% Локация инстанса несёт свою глубину рядом с сегментами: кадр cycle guard
+%% называет позицию глубиной, а не списком. Разными полями их держать опаснее —
+%% разойдясь, они сделали бы guard неверным, и заметить это было бы нечем.
+-type instance_location() :: {Depth :: non_neg_integer(), [binary()]}.
+-type frame() :: {addr(), Depth :: non_neg_integer()}.
 
 %% node — адрес вычисляемого сейчас node. Отдельного поля под текущий resource
 %% нет: это первая половина адреса, а вторая задаёт абсолютную локацию units.
@@ -126,7 +130,7 @@
     schema            :: compiled(),
     node              :: addr(),
     keyword_location  :: [binary()],
-    instance_location :: [binary()],
+    instance_location :: instance_location(),
     dynamic_scope     :: [rid()],
     guard             :: sets:set(frame()),
     format            :: format(),
@@ -146,9 +150,7 @@
 }).
 
 %% Каталог причин задан в дизайне и растёт вместе с фазами; здесь перечислено
-%% то, что компилятор умеет производить сейчас. `not_implemented` в каталог не
-%% входит: это временная причина, которая исчезнет вместе с последним
-%% нереализованным keyword.
+%% то, что компилятор умеет производить сейчас.
 -type reason() :: invalid_uri
                 | invalid_percent_encoding
                 | relative_uri_without_base
@@ -165,8 +167,7 @@
                 | schema_invalid
                 | {metaschema_evaluation_failed, uri(), eval_error()}
                 | {bad_keyword_value, json()}
-                | {bad_pattern, term()}
-                | {not_implemented, binary()}.
+                | {bad_pattern, term()}.
 
 -type format()     :: flag | basic | detailed | verbose.
 -type option()     :: {output, format()}.

@@ -105,7 +105,14 @@ unique_test_() ->
      ?_assertNot(valid_json_value:is_unique([#{<<"a">> => [1]}, #{<<"a">> => [1.0]}])),
      ?_assertNot(valid_json_value:is_unique([[0], [0.0]])),
      ?_assert(valid_json_value:is_unique([0, false])),
-     ?_assert(valid_json_value:is_unique([null, <<"null">>]))].
+     ?_assert(valid_json_value:is_unique([null, <<"null">>])),
+     ?_assert(valid_json_value:is_unique([42])),
+     %% Совпадение в начале: обрыва обхода больше нет, ответ прежний.
+     ?_assertNot(valid_json_value:is_unique([1, 1, 2, 3])),
+     %% Порядок элементов массива значим, порядок ключей объекта — нет.
+     ?_assert(valid_json_value:is_unique([[1, 2], [2, 1]])),
+     ?_assertNot(valid_json_value:is_unique([#{<<"a">> => 1, <<"b">> => 2},
+                                             #{<<"b">> => 2, <<"a">> => 1}]))].
 
 matching_types(Value) ->
     [Type || Type <- ?TYPES, valid_json_value:is_type(Type, Value)].

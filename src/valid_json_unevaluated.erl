@@ -115,9 +115,10 @@ apply_all([{Segment, Value} | Rest], Addr, Keyword, Context, Result, Applied) ->
 %% ветви нет: она стоит на самом keyword.
 -spec branch(addr(), binary(), binary(), json(), #eval_context{}) -> #eval_result{}.
 branch(Addr, Keyword, Segment, Value, Context) ->
-    #eval_context{keyword_location = Keywords, instance_location = Instance} = Context,
+    #eval_context{keyword_location = Keywords,
+                  instance_location = {Depth, Instance}} = Context,
     Nested = Context#eval_context{keyword_location  = [Keyword | Keywords],
-                                  instance_location = [Segment | Instance],
+                                  instance_location = {Depth + 1, [Segment | Instance]},
                                   coverage          = false},
     valid_json_eval:eval(Addr, Value, Nested).
 

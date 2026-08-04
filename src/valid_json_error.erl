@@ -40,6 +40,8 @@ reason({unrecognized_vocabulary, Uri}) ->
     ["meta-schema requires an unknown vocabulary: ", Uri];
 reason(core_vocabulary_missing) ->
     "meta-schema does not require the Core vocabulary";
+reason({misplaced_keyword, Keyword}) ->
+    ["keyword is not allowed at this position: ", Keyword];
 reason({name_taken, Uri}) ->
     ["URI is already used by another document: ", Uri];
 reason({referenced_by, Uri, Refs}) ->
@@ -55,9 +57,7 @@ reason({bad_keyword_value, Value}) ->
 %% Причина от re принадлежит библиотеке и структуры не имеет, поэтому печатается
 %% как есть.
 reason({bad_pattern, Reason}) ->
-    ["pattern does not compile: ", io_lib:format("~p", [Reason])];
-reason({not_implemented, Keyword}) ->
-    ["keyword is not implemented: ", Keyword].
+    ["pattern does not compile: ", io_lib:format("~p", [Reason])].
 
 -spec target(addr()) -> unicode:chardata().
 target({anonymous, Pointer}) -> ["#", Pointer];

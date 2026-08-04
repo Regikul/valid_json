@@ -116,6 +116,25 @@ with the same `[{output, Format}]` option:
     [{output, detailed}]).
 ```
 
+### Report a rejected schema
+
+`add/2` and `remove/1` report failures as pairs of a document name and a schema
+error. The error is a machine-readable record; `format_error/1` turns one into
+human-readable text:
+
+```erlang
+case valid_json:add(Uri, Schema) of
+    {ok, Names} ->
+        Names;
+    {error, {compilation, Errors}} ->
+        [io:format("~ts: ~ts~n", [Name, valid_json:format_error(Error)])
+         || {Name, Error} <- Errors]
+end.
+```
+
+The wording is an implementation detail and may change; the record's `reason`
+and `location` are the stable contract.
+
 ### Load schemas from a directory
 
 The built-in directory loader recursively reads `.json` files into the standard

@@ -7,7 +7,7 @@
 
 -export([add/1, add/2, remove/1, wait/1, validate/3,
          store_add/2, store_add/3, store_remove/2, store_wait/2,
-         store_validate/4]).
+         store_validate/4, format_error/1]).
 
 -spec add(uri(), json()) ->
           {ok, [uri()]} | {error, valid_json_store_manager:add_error()}.
@@ -68,3 +68,7 @@ store_validate(Store, Uri, Instance, Options) ->
         {ok, Compiled}       -> valid_json_core:validate(Compiled, Instance, Options);
         {error, _Reason} = E -> E
     end.
+
+-spec format_error(#schema_error{}) -> unicode:chardata().
+format_error(Error) ->
+    valid_json_error:format_error(Error).

@@ -179,9 +179,10 @@ apply_all([{Tail, Name, Addr} | Rest], Instance, Context, Result, Names) ->
 %% ей самой, и обрывать её обход ради чужих аннотаций незачем.
 -spec branch(addr(), [binary()], binary(), json(), #eval_context{}) -> #eval_result{}.
 branch(Addr, Tail, Name, Value, Context) ->
-    #eval_context{keyword_location = Keywords, instance_location = Instance} = Context,
+    #eval_context{keyword_location = Keywords,
+                  instance_location = {Depth, Instance}} = Context,
     Nested = Context#eval_context{keyword_location  = Tail ++ Keywords,
-                                  instance_location = [Name | Instance],
+                                  instance_location = {Depth + 1, [Name | Instance]},
                                   coverage          = false},
     valid_json_eval:eval(Addr, Value, Nested).
 

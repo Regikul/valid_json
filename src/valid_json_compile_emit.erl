@@ -62,16 +62,6 @@
                    <<"definitions">>, <<"$vocabulary">>,
                    <<"$comment">>, <<"$dynamicAnchor">>]).
 
-%% Стандартные keywords следующих фаз нельзя смешивать с неизвестными
-%% расширениями: иначе схема начнёт молча компилироваться до появления их
-%% семантики. Общие отложены для обоих dialects, остальные принадлежат только
-%% указанному dialect и в другом считаются обычными unknown keywords.
-%% Отложенных keywords сейчас не осталось: списки пусты, но сохранены, потому
-%% что следующие фазы снова их наполнят.
--define(DEFERRED_COMMON, []).
--define(DEFERRED_2020_12, []).
--define(DEFERRED_2019_09, []).
-
 %% Активность keyword решают vocabularies профиля; на сам draft emitter смотрит
 %% только там, где спецификации расходятся при одинаковом наборе vocabularies:
 %% раскладка array applicators и покрытие `contains`.
@@ -152,19 +142,15 @@ compile_node(Schema, Position, State) when is_boolean(Schema) ->
     {ok, place(Position, Schema, State)};
 compile_node(Schema, Position, #state{profile = Profile} = State)
   when is_map(Schema) ->
-    case extra_constraints(Schema, Profile, Position) of
-        {ok, ExtraConstraints} ->
-            case definition_containers(Schema, Position, State) of
-                {ok, WithDefinitions} ->
-                    case node_constraints(Schema, Position, WithDefinitions) of
-                        {ok, Constraints, Unevaluated, Built} ->
-                            Markers = output_markers(Schema),
-                            Node = #node{constraints = Markers ++ Constraints ++ ExtraConstraints,
-                                         unevaluated = Unevaluated},
-                            {ok, place(Position, Node, Built)};
-                        {error, _} = Error ->
-                            Error
-                    end;
+    case definition_containers(Schema, Position, State) of
+        {ok, WithDefinitions} ->
+            case node_constraints(Schema, Position, WithDefinitions) of
+                {ok, Constraints, Unevaluated, Built} ->
+                    Markers = output_markers(Schema),
+                    Extras = extra_constraints(Schema, Profile),
+                    Node = #node{constraints = Markers ++ Constraints ++ Extras,
+                                 unevaluated = Unevaluated},
+                    {ok, place(Position, Node, Built)};
                 {error, _} = Error ->
                     Error
             end;
@@ -187,30 +173,15 @@ output_markers(Schema) ->
 
 %% Значения unknown keywords не являются schema positions: discovery их уже не
 %% посещал, а emitter лишь сохраняет исходное JSON value как annotation в
-%% 2020-12. В 2019-09 неизвестные keywords не дают IR. Сортировка делает и
-%% annotation order, и выбор первой ошибки независимыми от устройства map.
--spec extra_constraints(#{binary() => json()}, profile(), position()) ->
-          {ok, [constraint()]} | {error, #schema_error{}}.
-extra_constraints(Schema, #profile{draft = Draft} = Profile, Position) ->
+%% 2020-12. В 2019-09 неизвестные keywords не дают IR. Сортировка делает
+%% annotation order независимым от устройства map.
+-spec extra_constraints(#{binary() => json()}, profile()) -> [constraint()].
+extra_constraints(Schema, #profile{draft = Draft} = Profile) ->
     Active = lists:append([active_keywords(Group, Profile) || Group <- ?ORDER]) ++
         [Keyword || Keyword <- ?UNEVALUATED,
                     valid_json_vocabulary:active(Keyword, Profile)],
     Extras = lists:sort(maps:keys(Schema) -- (Active ++ ?CONSUMED)),
-    case [Keyword || Keyword <- Extras, deferred(Keyword, Draft)] of
-        [Keyword | _] ->
-            {error, schema_error({not_implemented, Keyword},
-                                 below(Keyword, Position))};
-        [] ->
-            {ok, unknown_constraints(Extras, Schema, Draft)}
-    end.
-
--spec deferred(binary(), dialect()) -> boolean().
-deferred(Keyword, ?DRAFT_2020_12) ->
-    lists:member(Keyword, ?DEFERRED_COMMON) orelse
-        lists:member(Keyword, ?DEFERRED_2020_12);
-deferred(Keyword, ?DRAFT_2019_09) ->
-    lists:member(Keyword, ?DEFERRED_COMMON) orelse
-        lists:member(Keyword, ?DEFERRED_2019_09).
+    unknown_constraints(Extras, Schema, Draft).
 
 -spec unknown_constraints([binary()], #{binary() => json()}, dialect()) ->
           [constraint()].
@@ -353,7 +324,7 @@ keywords(Keyword) when is_binary(Keyword) -> [Keyword];
 keywords(Group)                           -> Group.
 
 %% Keyword выключенной vocabulary не собирает constraint и не влияет на соседей
-%% по составному: он неизвестен и уходит в extra_constraints/3. Так `prefixItems`
+%% по составному: он неизвестен и уходит в extra_constraints/2. Так `prefixItems`
 %% не влияет на `items` в Draft 2019-09, `$dynamicRef` не работает там вовсе, а
 %% recursive keywords не работают в Draft 2020-12 — их нет в vocabularies этих
 %% draft. По той же причине `format` остаётся активным в обоих: аннотация

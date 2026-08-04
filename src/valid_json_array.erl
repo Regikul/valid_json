@@ -301,9 +301,11 @@ marks(true, true, Matched, _Count, _Length) ->
 -spec branch(addr(), [binary()], non_neg_integer(), json(), #eval_context{}) ->
           #eval_result{}.
 branch(Addr, Tail, Index, Element, Context) ->
-    #eval_context{keyword_location = Keywords, instance_location = Instance} = Context,
+    #eval_context{keyword_location = Keywords,
+                  instance_location = {Depth, Instance}} = Context,
     Nested = Context#eval_context{keyword_location  = Tail ++ Keywords,
-                                  instance_location = [integer_to_binary(Index) | Instance],
+                                  instance_location = {Depth + 1,
+                                                       [integer_to_binary(Index) | Instance]},
                                   coverage          = false},
     valid_json_eval:eval(Addr, Element, Nested).
 

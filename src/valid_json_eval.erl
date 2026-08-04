@@ -12,7 +12,7 @@ run(#{root := Root} = Compiled, Instance, Format) ->
     Context = #eval_context{schema            = Compiled,
                             node              = {Root, <<>>},
                             keyword_location  = [],
-                            instance_location = [],
+                            instance_location = {0, []},
                             dynamic_scope     = [Root],
                             guard             = sets:new([{version, 2}]),
                             format            = Format,
@@ -31,9 +31,17 @@ resolve({Rid, Pointer}, #{resources := Resources}) ->
 %% Общий вход: guard, resource scope, затем сам node. Кадр живёт только в
 %% контексте потомков, поэтому снимается на выходе без отдельного шага.
 %% Applicators входят сюда же: своей точки входа у них нет.
+%%
+%% Позицию инстанса кадр называет глубиной, а не списком сегментов. Guard
+%% заводится один раз в `run/3`, пополняется только при спуске и между ветвями
+%% не сливается, поэтому все его кадры лежат на одном пути обхода, а на одном
+%% пути глубина задаёт позицию однозначно. Список стоил бы дороже впустую: его
+%% пришлось бы хешировать целиком на каждом уровне, и стоимость вычисления
+%% росла бы квадратом глубины инстанса.
 -spec eval(addr(), json(), #eval_context{}) -> #eval_result{}.
 eval(Addr, Instance, #eval_context{guard = Guard} = Context) ->
-    Frame = {Addr, Context#eval_context.instance_location},
+    {Depth, _Segments} = Context#eval_context.instance_location,
+    Frame = {Addr, Depth},
     case sets:is_element(Frame, Guard) of
         true ->
             error_result({no_progress, Addr});
