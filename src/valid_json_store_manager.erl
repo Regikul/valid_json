@@ -18,6 +18,14 @@
 %% нужна затем, чтобы пережить перезапуск. Оттого и порядок: значение меняется
 %% первым и принимается только вместе с артефактами, а в таблицы уходит уже
 %% принятое.
+%%
+%% Стартовый набор документов приходит от загрузчика, если он задан опцией.
+%% Читается он в `handle_continue`, то есть до первого обслуженного сообщения, и
+%% ровно один раз: на холодном старте и после потери реестра. Отслеживают это две
+%% служебные строки, и каждая лежит в той таблице, чью полноту описывает:
+%% `loaded` в реестре говорит, что загрузчик прочитан, `ready` в артефактах — что
+%% набор артефактов полон. Снимать их не нужно, каждая исчезает вместе со своей
+%% таблицей.
 -module(valid_json_store_manager).
 
 -behaviour(gen_server).
@@ -25,7 +33,7 @@
 -include("valid_json_resources.hrl").
 
 -export([start_link/2, manager_name/1, artifacts_table/1, registry_table/1,
-         table_options/1, add/2, remove/2, lookup/2]).
+         table_options/1, add/2, remove/2, lookup/2, wait/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, handle_continue/2]).
 -export_type([add_error/0, store_option/0]).
 
@@ -33,13 +41,19 @@
                    | {compilation, [{uri(), #schema_error{}}]}.
 -type store_option() :: {base_uri, uri()}
                       | {default_dialect, dialect()}
-                      | {assert_format, boolean()}.
+                      | {assert_format, boolean()}
+                      | {loader, valid_json_loader:loader()}.
+
+%% Промежуток между попытками в `wait`: имя управляющего в перезапуске бывает не
+%% зарегистрировано, и ждать его можно только повторной попыткой.
+-define(RETRY, 50).
 
 -record(state, {
     table    :: atom(),
     registry :: atom(),
     store    :: store(),
-    options  :: [valid_json_compile:compile_option()]
+    options  :: [valid_json_compile:compile_option()],
+    loader   :: valid_json_loader:loader() | undefined
 }).
 
 -spec start_link(atom(), [store_option()]) -> {ok, pid()}.
@@ -96,13 +110,29 @@ remove(Store, Uris) when is_list(Uris) ->
 %% одним чтением. Разрешение от базы стоит второго чтения и достаётся только
 %% промаху, то есть короткому имени. База читается из таблицы реестра: состояние
 %% управляющего читателю не видно, а будить его на горячем пути незачем.
--spec lookup(atom(), uri()) -> {ok, compiled()} | {error, not_found}.
+-spec lookup(atom(), uri()) ->
+          {ok, compiled()} | {error, not_found} | {error, unavailable}.
 lookup(Store, Uri) ->
-    case artifact(artifacts_table(Store), Uri) of
-        {ok, _Compiled} = Found -> Found;
-        {error, not_found}      -> lookup_resolved(Store, Uri)
+    case read(artifacts_table(Store), Uri) of
+        {ok, _Compiled} = Found  -> Found;
+        {error, not_found}       -> lookup_resolved(Store, Uri);
+        {error, unavailable} = E -> E
     end.
 
+%% Таблицы может не быть вовсе: её хранитель перезапускается, и попасть в это
+%% окно читатель может в любой момент. Падать здесь нельзя — чтение исполняется
+%% в его собственном процессе.
+-spec read(atom(), term()) -> {ok, term()} | {error, not_found | unavailable}.
+read(Table, Key) ->
+    try ets:lookup(Table, Key) of
+        [{Key, Value}] -> {ok, Value};
+        []             -> {error, not_found}
+    catch
+        error:badarg -> {error, unavailable}
+    end.
+
+%% Внутреннее чтение управляющего: он владеет таблицей, поэтому её отсутствие
+%% для него не окно, а потеря владения, и падать на ней следует.
 -spec artifact(atom(), uri()) -> {ok, compiled()} | {error, not_found}.
 artifact(Table, Name) ->
     case ets:lookup(Table, Name) of
@@ -110,23 +140,33 @@ artifact(Table, Name) ->
         []                 -> {error, not_found}
     end.
 
-%% Таблицы реестра может не быть вовсе: её хранитель перезапускается, и в этот
-%% промежуток читатель обязан получить обычный промах, а не badarg.
--spec lookup_resolved(atom(), uri()) -> {ok, compiled()} | {error, not_found}.
+%% Промах разбирается до всякого разрешения имени: пока отметки готовности нет,
+%% набор артефактов неполон, и «имени нет» сказать не о чем. Отметка живёт в
+%% таблице артефактов, потому что описывает полноту именно её содержимого:
+%% смерть управляющего таблицу не трогает и окна не открывает, а перезапуск
+%% любого из хранителей уносит отметку вместе с таблицей.
+-spec lookup_resolved(atom(), uri()) ->
+          {ok, compiled()} | {error, not_found} | {error, unavailable}.
 lookup_resolved(Store, Uri) ->
-    Registry = registry_table(Store),
-    case ets:whereis(Registry) of
-        undefined ->
-            {error, not_found};
-        _Tid ->
-            case ets:lookup(Registry, base) of
-                [{base, Base}] -> lookup_from(Store, Uri, Base);
-                []             -> {error, not_found}
-            end
+    case read(artifacts_table(Store), ready) of
+        {ok, true} -> lookup_short(Store, Uri);
+        _Other     -> {error, unavailable}
+    end.
+
+%% База читается из таблицы реестра, потому что состояние управляющего читателю
+%% не видно, а будить его на горячем пути незачем. Её отсутствие оставляет
+%% промах промахом: хранилище о своей готовности уже сказало, а разрешить
+%% короткое имя не от чего.
+-spec lookup_short(atom(), uri()) ->
+          {ok, compiled()} | {error, not_found} | {error, unavailable}.
+lookup_short(Store, Uri) ->
+    case read(registry_table(Store), base) of
+        {ok, Base} -> lookup_from(Store, Uri, Base);
+        _Other     -> {error, not_found}
     end.
 
 -spec lookup_from(atom(), uri(), uri() | anonymous) ->
-          {ok, compiled()} | {error, not_found}.
+          {ok, compiled()} | {error, not_found} | {error, unavailable}.
 lookup_from(Store, Uri, Base) ->
     case valid_json_store:resolve_name(Uri, Base) of
         {ok, Uri} ->
@@ -134,60 +174,135 @@ lookup_from(Store, Uri, Base) ->
             %% промах, с какого мы сюда и пришли.
             {error, not_found};
         {ok, Name} ->
-            artifact(artifacts_table(Store), Name);
+            read_artifact(artifacts_table(Store), Name);
         {error, _Reason} ->
             {error, not_found}
     end.
+
+-spec read_artifact(atom(), uri()) ->
+          {ok, compiled()} | {error, not_found} | {error, unavailable}.
+read_artifact(Table, Name) ->
+    case read(Table, Name) of
+        {ok, _Compiled} = Found  -> Found;
+        {error, not_found}       -> {error, not_found};
+        {error, unavailable} = E -> E
+    end.
+
+%% Монитор ставится до подтверждения готовности, иначе между «готово» и
+%% `erlang:monitor` вызывающего помещалась бы смерть управляющего, о которой он
+%% уже не узнал бы. Обратный порядок безвреден: `DOWN` о прежнем управляющем
+%% заставит вызывающего переспросить, только и всего.
+-spec wait(atom(), timeout()) -> {ok, reference()} | {error, timeout}.
+wait(Store, Timeout) ->
+    wait_ready(manager_name(Store), deadline(Timeout)).
+
+%% Монитор ставится на pid, а не на имя: так `DOWN` называет процесс обычным
+%% образом, а подтверждает готовность ровно тот, за кем вызывающий и следит —
+%% вызов уходит на тот же pid.
+-spec wait_ready(atom(), integer() | infinity) ->
+          {ok, reference()} | {error, timeout}.
+wait_ready(Name, Deadline) ->
+    case whereis(Name) of
+        undefined -> retry(Name, Deadline);
+        Pid       -> confirm(Pid, Name, Deadline)
+    end.
+
+-spec confirm(pid(), atom(), integer() | infinity) ->
+          {ok, reference()} | {error, timeout}.
+confirm(Pid, Name, Deadline) ->
+    Ref = erlang:monitor(process, Pid),
+    case left(Deadline) of
+        0 ->
+            give_up(Ref);
+        Left ->
+            try gen_server:call(Pid, ready, Left) of
+                ok -> {ok, Ref}
+            catch
+                %% Свой таймаут вызывающего исчерпан; всё остальное означает,
+                %% что управляющего сейчас нет, и его стоит подождать.
+                exit:{timeout, _Call} ->
+                    give_up(Ref);
+                exit:{_Reason, _Call} ->
+                    true = demonitor(Ref, [flush]),
+                    retry(Name, Deadline)
+            end
+    end.
+
+%% Имя в промежутке перезапуска бывает не зарегистрировано, и ждать его можно
+%% только повторной попыткой: вызывающий написал бы тот же цикл.
+-spec retry(atom(), integer() | infinity) ->
+          {ok, reference()} | {error, timeout}.
+retry(Name, Deadline) ->
+    case left(Deadline) of
+        0        -> {error, timeout};
+        infinity -> timer:sleep(?RETRY), wait_ready(Name, Deadline);
+        Left     -> timer:sleep(min(?RETRY, Left)), wait_ready(Name, Deadline)
+    end.
+
+-spec give_up(reference()) -> {error, timeout}.
+give_up(Ref) ->
+    true = demonitor(Ref, [flush]),
+    {error, timeout}.
+
+-spec deadline(timeout()) -> integer() | infinity.
+deadline(infinity) ->
+    infinity;
+deadline(Timeout) when is_integer(Timeout), Timeout >= 0 ->
+    erlang:monotonic_time(millisecond) + Timeout.
+
+-spec left(integer() | infinity) -> timeout().
+left(infinity) ->
+    infinity;
+left(Deadline) ->
+    max(0, Deadline - erlang:monotonic_time(millisecond)).
 
 %% Владение переходит в самом ets:give_away/3, поэтому ждать 'ETS-TRANSFER'
 %% незачем: после ответа хранителя таблица уже наша. Отказ означает, что ею
 %% владеет кто-то третий, а без владения писать всё равно нельзя.
 %%
-%% Реестр поднимается из своей таблицы, а база берётся из опции: опция приходит
-%% через `start_link`, и супервизор перезапускает управляющего с той же самой,
-%% поэтому сравнивать её с пережившей нечего. В таблицу база уходит односторонне,
-%% для читателей.
+%% Реестр поднимается из своей таблицы, а база берётся из опции либо от
+%% загрузчика, но не из пережившей таблицы: и опция, и загрузчик приходят через
+%% `start_link`, и супервизор перезапускает управляющего с теми же самыми,
+%% поэтому сравнивать базу с пережившей нечего. В таблицу база уходит
+%% односторонне, для читателей.
 init({Store, Options}) ->
     ok = check_options(Options),
+    Loader = option(loader, Options, undefined),
     Artifacts = artifacts_table(Store),
     Registry = registry_table(Store),
     case claim([Registry, Artifacts]) of
         ok ->
             Registered = valid_json_store:from_documents(
-                           documents(Registry), registry_options(Options)),
+                           documents(Registry), registry_options(Options, Loader)),
             true = ets:insert(Registry, {base, valid_json_store:base(Registered)}),
             {ok, #state{table = Artifacts, registry = Registry,
-                        store = Registered, options = compile_options(Options)},
-             {continue, repair}};
+                        store = Registered, options = compile_options(Options),
+                        loader = Loader},
+             {continue, start}};
         {error, not_owner} ->
             {stop, {claim_failed, not_owner}}
     end.
 
-%% Пересобирается то, у чего документ есть, а артефакта нет: так выглядит
-%% хранилище после перезапуска хранителя артефактов. Обратного расхождения не
-%% бывает — таблица артефактов переживает только те отказы, при которых
-%% переживает и таблица реестра.
-%%
-%% Отказ компиляции здесь означает не ошибку вызывающего, а расхождение внутри
-%% хранилища: эти документы уже компилировались с теми же опциями. Поэтому
-%% падаем и отдаём решение супервизору.
-handle_continue(repair, #state{table = Table, store = Store,
-                               options = Options} = State) ->
-    case missing(Table, valid_json_store:canonical_names(Store)) of
-        [] ->
-            {noreply, State};
-        Names ->
-            {ok, Artifacts} = compile_all(Names, Store, Options),
-            commit(State, Artifacts, [], []),
-            {noreply, State}
-    end.
+%% Старт договаривается здесь, до первого обслуженного сообщения: сначала
+%% читается загрузчик, если ему есть что сказать, затем досоздаются артефакты, у
+%% которых документ есть, а артефакта нет, и только потом хранилище объявляет
+%% себя готовым.
+handle_continue(start, State0) ->
+    State = load(State0),
+    ok = repair(State),
+    true = ets:insert(State#state.table, {ready, true}),
+    {noreply, State}.
 
 handle_call({add, Entries}, _From, State) ->
     {Reply, Next} = add_entries(Entries, State),
     {reply, Reply, Next};
 handle_call({remove, Uris}, _From, State) ->
     {Reply, Next} = remove_entries(Uris, State),
-    {reply, Reply, Next}.
+    {reply, Reply, Next};
+%% Ответить на это сообщение управляющий может только договорив `handle_continue`,
+%% и в этом весь ответ: другого состояния готовности у него нет.
+handle_call(ready, _From, State) ->
+    {reply, ok, State}.
 
 handle_cast(_Message, State) ->
     {noreply, State}.
@@ -201,6 +316,60 @@ handle_info({'ETS-TRANSFER', Registry, _From, _Gift},
     {noreply, State};
 handle_info(_Message, State) ->
     {noreply, State}.
+
+%% Загрузчик читается один раз: на холодном старте и после потери реестра.
+%% Отметка лежит в таблице реестра и потому переживает ровно те отказы, при
+%% которых переживает и набор документов. Пустота реестра признаком не годится:
+%% приложение вправе снять все документы, и возвращать их ему не за чем.
+-spec load(#state{}) -> #state{}.
+load(#state{loader = undefined} = State) ->
+    State;
+load(#state{registry = Registry} = State) ->
+    case ets:member(Registry, loaded) of
+        true  -> State;
+        false -> load_documents(State)
+    end.
+
+%% Отказ загрузчика означает не ошибку вызывающего, а расхождение конфигурации:
+%% нет каталога, испорчен файл, не сошлись ссылки. Поэтому падаем и отдаём
+%% решение супервизору, вместо того чтобы поднять хранилище с дырой в наборе.
+-spec load_documents(#state{}) -> #state{}.
+load_documents(#state{loader = {Module, Args}} = State) ->
+    case Module:load(Args) of
+        {ok, Entries} ->
+            case add_entries(Entries, State) of
+                {{ok, _Names}, Loaded}    -> mark_loaded(Loaded);
+                {{error, Reason}, _State} -> erlang:error({loader_failed, Reason})
+            end;
+        {error, Reason} ->
+            erlang:error({loader_failed, Reason})
+    end.
+
+%% Отметка идёт следом за документами, а не тем же коммитом, и разрыв между ними
+%% безвреден: смерть в этом промежутке приведёт к повторному чтению загрузчика, а
+%% оно заменит те же документы теми же.
+-spec mark_loaded(#state{}) -> #state{}.
+mark_loaded(#state{registry = Registry} = State) ->
+    true = ets:insert(Registry, {loaded, true}),
+    State.
+
+%% Пересобирается то, у чего документ есть, а артефакта нет: так выглядит
+%% хранилище после перезапуска хранителя артефактов. Обратного расхождения не
+%% бывает — таблица артефактов переживает только те отказы, при которых
+%% переживает и таблица реестра.
+%%
+%% Отказ компиляции здесь означает не ошибку вызывающего, а расхождение внутри
+%% хранилища: эти документы уже компилировались с теми же опциями. Поэтому
+%% падаем и отдаём решение супервизору.
+-spec repair(#state{}) -> ok.
+repair(#state{table = Table, store = Store, options = Options} = State) ->
+    case missing(Table, valid_json_store:canonical_names(Store)) of
+        [] ->
+            ok;
+        Names ->
+            {ok, Artifacts} = compile_all(Names, Store, Options),
+            commit(State, Artifacts, [], [])
+    end.
 
 -spec claim([atom()]) -> ok | {error, not_owner}.
 claim([]) ->
@@ -355,6 +524,8 @@ commit(#state{table = Table, registry = Registry}, Artifacts, Documents, Gone) -
 -spec check_options([term()]) -> ok.
 check_options([]) ->
     ok;
+check_options([{loader, {Module, _Args}} | Rest]) when is_atom(Module) ->
+    check_options(Rest);
 check_options([{Key, _Value} | Rest])
   when Key =:= base_uri; Key =:= default_dialect; Key =:= assert_format ->
     check_options(Rest);
@@ -363,11 +534,35 @@ check_options(Options) ->
 
 %% Негодное значение base_uri отвергнет сам реестр: правило допустимой базы
 %% принадлежит ему.
--spec registry_options([store_option()]) -> [valid_json_store:registry_option()].
-registry_options(Options) ->
-    case option(base_uri, Options, undefined) of
+-spec registry_options([store_option()], valid_json_loader:loader() | undefined) ->
+          [valid_json_store:registry_option()].
+registry_options(Options, Loader) ->
+    case base_uri(Options, Loader) of
         undefined -> [];
         Uri       -> [{base_uri, Uri}]
+    end.
+
+%% Приоритет базы: явная опция, затем база загрузчика, затем app env. Явная
+%% опция загрузчик не перебивает: вызывающий мог сознательно захотеть другую
+%% базу, и относительные имена набора лягут под неё.
+-spec base_uri([store_option()], valid_json_loader:loader() | undefined) ->
+          uri() | undefined.
+base_uri(Options, Loader) ->
+    case lists:keyfind(base_uri, 1, Options) of
+        {base_uri, Uri} ->
+            Uri;
+        false ->
+            loader_or_env_base(Loader)
+    end.
+
+-spec loader_or_env_base(valid_json_loader:loader() | undefined) ->
+          uri() | undefined.
+loader_or_env_base(undefined) ->
+    option(base_uri, [], undefined);
+loader_or_env_base({Module, Args}) ->
+    case Module:base_uri(Args) of
+        {ok, Uri} -> Uri;
+        undefined -> option(base_uri, [], undefined)
     end.
 
 -spec compile_options([store_option()]) -> [valid_json_compile:compile_option()].

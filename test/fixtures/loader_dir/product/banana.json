@@ -1,0 +1,7 @@
+{
+    "type": "object",
+    "properties": {
+        "weight": { "$ref": "../weight.json" }
+    },
+    "required": ["weight"]
+}

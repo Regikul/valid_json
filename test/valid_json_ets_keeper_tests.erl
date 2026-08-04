@@ -131,6 +131,11 @@ keeper(Store, Keepers) ->
 
 %% Владение забирается один раз на процесс: пока проверки идут в одном
 %% процессе, повторный claim ему не нужен.
+%%
+%% Отметка готовности ставится вручную, потому что управляющего здесь нет вовсе:
+%% таблица собрана руками и изображает хранилище, договорившее свой старт. Без
+%% неё промах отвечал бы `unavailable`, и это правильно — набор артефактов в
+%% таком хранилище неполон по определению.
 own(Store, Keepers) ->
     Keeper = keeper(Store, Keepers),
     case ets:info(Store, owner) of
@@ -138,6 +143,7 @@ own(Store, Keepers) ->
         Keeper                    -> ok = valid_json_ets_keeper:claim(Store)
     end,
     true = ets:delete_all_objects(Store),
+    true = ets:insert(Store, {ready, true}),
     Store.
 
 in_process(Fun) ->
