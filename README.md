@@ -33,6 +33,20 @@ available for the implemented built-in formats; IDN and IRI formats remain
 annotations. `contentEncoding`, `contentMediaType`, and `contentSchema` are
 annotations and do not decode or validate string content.
 
+## Not supported
+
+Every mandatory file of the JSON Schema Test Suite is run for both dialects.
+The list below is what both Draft 2020-12 and Draft 2019-09 ask for and the
+library does not do.
+
+| Area | What is not supported |
+| --- | --- |
+| Regular expression dialect | `pattern`, `patternProperties`, and `format: regex` are compiled with the `re` module, which is PCRE rather than ECMA-262. A pattern outside the subset shared by both dialects — `\p{Letter}`, for example — fails to compile and the whole schema is rejected |
+| Format-Assertion vocabulary | Not all format names of the specification are checked, so a metaschema that requires this vocabulary is rejected. Format assertions are enabled with the `assert_format` compile option instead |
+| `idn-email`, `idn-hostname`, `iri`, `iri-reference` | Always annotations, even with assertions enabled: the string itself is not checked |
+| `hostname` | An `xn--…` label is treated as an ordinary label: A-labels are not decoded and IDNA2008 rules are not applied to their contents |
+| Numeric precision | `multipleOf` and numeric comparisons are computed on doubles, so a decimal fraction with no exact binary representation can disagree with decimal arithmetic |
+
 ## Requirements
 
 - Erlang/OTP 27 or later — the library decodes JSON with the `json` module
