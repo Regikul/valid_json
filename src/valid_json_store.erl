@@ -6,7 +6,8 @@
 
 -include("valid_json_resources.hrl").
 
--export([new/1, add/2, add/3, remove/2, fetch/2, canonical_names/1]).
+-export([new/1, add/2, add/3, remove/2, fetch/2, canonical_names/1,
+         base/1, resolve_name/2, from_documents/2]).
 -export_type([store/0, registry_option/0]).
 
 %% `new/1` не имеет error-ветви по публичному контракту. Ошибочная опция —
@@ -84,6 +85,35 @@ canonical_names(#store{documents = Documents}) ->
     ordsets:from_list([Canonical
                        || #document{canonical = Canonical}
                               <- maps:values(Documents)]).
+
+%% База нужна снаружи одному читателю артефактов: он разрешает от неё короткое
+%% имя тем же правилом, каким разрешается регистрируемое. Отдаётся она уже
+%% нормализованной, то есть ровно такой, какой пользуется сам реестр.
+-spec base(store()) -> uri() | anonymous.
+base(#store{base = Base}) ->
+    Base.
+
+%% Правило разрешения имени публично затем, чтобы регистрация и валидация не
+%% разошлись: обе зовут одно и то же.
+-spec resolve_name(uri(), rid()) -> {ok, uri()} | {error, #schema_error{}}.
+resolve_name(Uri, Base) ->
+    registration_name(Uri, Base).
+
+%% Обратная сборка реестра из документов: двухключевое устройство остаётся
+%% внутри модуля, а снаружи документ переносится как одно целое. Оба ключа
+%% восстанавливаются из полей самого документа, поэтому список повторов не
+%% содержит.
+-spec from_documents([#document{}], [registry_option()]) -> store().
+from_documents(Documents, Options) when is_list(Documents) ->
+    Store = new(Options),
+    Store#store{documents = index(Documents)}.
+
+-spec index([#document{}]) -> #{uri() => #document{}}.
+index(Documents) ->
+    lists:foldl(fun(#document{retrieval = Retrieval,
+                              canonical = Canonical} = Document, Acc) ->
+                        Acc#{Retrieval => Document, Canonical => Document}
+                end, #{}, Documents).
 
 -spec base_option([term()]) -> {ok, rid()} | error.
 base_option([]) ->

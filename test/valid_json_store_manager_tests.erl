@@ -253,29 +253,87 @@ unknown_option_test() ->
     ?assertMatch({error, _}, valid_json_store_sup:start_link(?STORE, [{oops, 1}])),
     process_flag(trap_exit, false).
 
-%% Таблица переживает смерть управляющего по heir: читатели ничего не замечают,
-%% новый управляющий забирает её по claim и снова пишет. Реестр при этом
-%% начинается пустым, поэтому прежний артефакт остаётся в таблице сиротой — это
-%% принятая цена схемы, а не случайность.
-restart_test() ->
+%% Короткое имя разрешается и на чтении: артефакт лежит под каноническим именем,
+%% а вызывающий вправе называть документ так же, как называл при регистрации.
+short_name_lookup_test() ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
+        Canonical = <<"https://example.com/schemas/product/banana">>,
+        {ok, [Canonical]} = valid_json_store_manager:add(
+                              Store, [{<<"product/banana">>,
+                                       #{<<"type">> => <<"integer">>}}]),
+        ?assertMatch({ok, _},
+                     valid_json_store_manager:lookup(Store, <<"product/banana">>)),
+        ?assertEqual(valid_json_store_manager:lookup(Store, Canonical),
+                     valid_json_store_manager:lookup(Store, <<"product/banana">>)),
+        ?assertEqual({error, not_found},
+                     valid_json_store_manager:lookup(Store, <<"product/missing">>))
+    end).
+
+%% Обе таблицы переживают смерть управляющего по heir: читатели ничего не
+%% замечают, новый управляющий забирает их по claim, поднимает реестр из его
+%% таблицы и снова пишет. Сирот при этом не остаётся — прежний документ реестру
+%% известен, и снять его можно как обычно.
+restart_manager_test() ->
     with_store([], fun(Store) ->
         Old = <<"https://example.com/old">>,
-        New = <<"https://example.com/new">>,
         {ok, [Old]} = valid_json_store_manager:add(
                         Store, [{Old, #{<<"type">> => <<"integer">>}}]),
-        Name = valid_json_store_manager:manager_name(Store),
-        Manager = whereis(Name),
-        Ref = monitor(process, Manager),
-        exit(Manager, kill),
-        receive {'DOWN', Ref, process, Manager, killed} -> ok
-        after 1000 -> erlang:error(manager_alive) end,
-        Restarted = wait_restart(Name, Manager),
+        Tables = tables(Store),
+        Restarted = restart(Store, manager(Store)),
+        %% Обе таблицы те же самые: не пересозданы, а переданы по heir.
+        ?assertEqual(Tables, tables(Store)),
         ?assertEqual(Restarted, ets:info(Store, owner)),
         ?assertEqual(true, valid(Store, Old, 1)),
-        ?assertEqual({ok, [New]},
+        %% Реестр помнит прежнее имя: повторная регистрация видит его занятым
+        %% тем же документом, а снятие проходит и убирает артефакт.
+        ?assertEqual(ok, valid_json_store_manager:remove(Store, [Old])),
+        ?assertEqual({error, not_found},
+                     valid_json_store_manager:lookup(Store, Old))
+    end).
+
+%% Смерть хранителя артефактов уносит его таблицу вместе с управляющим, а
+%% таблица реестра переживает: документы известны, и артефакты пересобираются
+%% при старте.
+restart_artifacts_keeper_test() ->
+    with_store([], fun(Store) ->
+        Leaf = <<"https://example.com/leaf">>,
+        Root = <<"https://example.com/root">>,
+        {ok, [Leaf]} = valid_json_store_manager:add(
+                         Store, [{Leaf, #{<<"type">> => <<"integer">>}}]),
+        {ok, [Root]} = valid_json_store_manager:add(
+                         Store, [{Root, #{<<"$ref">> => Leaf}}]),
+        {Artifacts, Registry} = tables(Store),
+        _Restarted = restart(Store, keeper(artifacts_table(Store))),
+        %% Таблица артефактов именно пересоздана, поэтому всё, что в ней сейчас
+        %% лежит, положила пересборка. Таблица реестра при этом та же.
+        ?assertNotEqual(Artifacts, element(1, tables(Store))),
+        ?assertEqual(Registry, element(2, tables(Store))),
+        ?assertEqual(true, valid(Store, Root, 1)),
+        ?assertEqual(false, valid(Store, Root, <<"a">>)),
+        %% Ссылки пересобранных артефактов на месте: снять цель по-прежнему
+        %% нельзя, а весь конус — можно.
+        ?assertMatch({error, [{Leaf, _}]},
+                     valid_json_store_manager:remove(Store, [Leaf])),
+        ?assertEqual(ok, valid_json_store_manager:remove(Store, [Leaf, Root]))
+    end).
+
+%% Смерть хранителя реестра уносит обе таблицы: восстанавливать не из чего, и
+%% хранилище начинается пустым. Имя после этого снова свободно.
+restart_registry_keeper_test() ->
+    with_store([], fun(Store) ->
+        Uri = <<"https://example.com/integer">>,
+        {ok, [Uri]} = valid_json_store_manager:add(
+                        Store, [{Uri, #{<<"type">> => <<"integer">>}}]),
+        {Artifacts, Registry} = tables(Store),
+        _Restarted = restart(Store, keeper(registry_table(Store))),
+        %% Пересозданы обе: реестр уносит с собой и артефакты.
+        ?assertNotEqual(Artifacts, element(1, tables(Store))),
+        ?assertNotEqual(Registry, element(2, tables(Store))),
+        ?assertEqual({error, not_found},
+                     valid_json_store_manager:lookup(Store, Uri)),
+        ?assertEqual({ok, [Uri]},
                      valid_json_store_manager:add(
-                       Store, [{New, #{<<"type">> => <<"integer">>}}])),
-        ?assertEqual(true, valid(Store, Old, 1))
+                       Store, [{Uri, #{<<"type">> => <<"integer">>}}]))
     end).
 
 with_store(Options, Fun) ->
@@ -293,6 +351,38 @@ stop_store(Sup) ->
     exit(Sup, shutdown),
     receive {'DOWN', Ref, process, Sup, _Reason} -> ok
     after 5000 -> erlang:error(store_alive) end.
+
+manager(Store) ->
+    whereis(valid_json_store_manager:manager_name(Store)).
+
+%% Имя таблицы переживает пересоздание, а идентификатор — нет, поэтому
+%% пересозданную от переданной по heir отличают именно по нему.
+tables(Store) ->
+    {ets:whereis(artifacts_table(Store)), ets:whereis(registry_table(Store))}.
+
+keeper(Table) ->
+    whereis(valid_json_ets_keeper:keeper_name(Table)).
+
+artifacts_table(Store) ->
+    valid_json_store_manager:artifacts_table(Store).
+
+registry_table(Store) ->
+    valid_json_store_manager:registry_table(Store).
+
+%% Убитый процесс уносит с собой управляющего: оба хранителя стоят в rest_for_one
+%% перед ним. Поэтому ждём именно нового управляющего, а затем и того, чтобы он
+%% договорил свой старт: пересборка идёт в handle_continue, то есть до первого
+%% сообщения, и системный вызов встаёт в очередь за ней.
+restart(Store, Pid) ->
+    Name = valid_json_store_manager:manager_name(Store),
+    Manager = manager(Store),
+    Ref = monitor(process, Pid),
+    exit(Pid, kill),
+    receive {'DOWN', Ref, process, Pid, killed} -> ok
+    after 1000 -> erlang:error(process_alive) end,
+    Restarted = wait_restart(Name, Manager),
+    _State = sys:get_state(Restarted),
+    Restarted.
 
 wait_restart(Name, Old) ->
     wait_restart(Name, Old, 100).

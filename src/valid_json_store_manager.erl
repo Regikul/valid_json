@@ -1,25 +1,32 @@
 %% Управляющий одного хранилища. Он держит реестр документов и опции, владеет
-%% таблицей артефактов и остаётся единственным, кто в неё пишет. Здесь же
-%% собрано знание о том, что имя таблицы совпадает с именем хранилища.
+%% обеими таблицами хранилища и остаётся единственным, кто в них пишет. Здесь же
+%% собрано знание о том, как имя хранилища превращается в имена таблиц и какая
+%% раскладка у каждой из них.
 %%
 %% `lookup/2` — обычная функция, а не вызов: она исполняется в процессе
 %% вызывающего, читает таблицу напрямую и управляющего не будит. Сообщением
 %% идёт только запись, потому что путь холодный и сериализация на одном процессе
 %% здесь как раз и нужна.
 %%
-%% Таблица переживает смерть управляющего по `heir`, а реестр — нет. Поэтому
-%% после перезапуска читатели видят прежний набор артефактов, а реестр начинается
-%% пустым: имена, которые приложение больше не добавит, останутся в таблице
-%% сиротами. Чистить таблицу в `init` нельзя — ради переживания перезапуска вся
-%% схема с хранителем и построена.
+%% Таблицы переживают смерть управляющего по `heir`, и реестр вместе с ними:
+%% после перезапуска он поднимается из таблицы реестра, а не начинается пустым.
+%% Артефактов без документа поэтому не остаётся. Обратное расхождение —
+%% документы есть, артефактов нет — возникает при перезапуске хранителя
+%% артефактов и закрывается пересборкой в `handle_continue`.
+%%
+%% Истина по реестру — `#state.store`: таблица реестра ему проекция, которая
+%% нужна затем, чтобы пережить перезапуск. Оттого и порядок: значение меняется
+%% первым и принимается только вместе с артефактами, а в таблицы уходит уже
+%% принятое.
 -module(valid_json_store_manager).
 
 -behaviour(gen_server).
 
 -include("valid_json_resources.hrl").
 
--export([start_link/2, manager_name/1, add/2, remove/2, lookup/2]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
+-export([start_link/2, manager_name/1, artifacts_table/1, registry_table/1,
+         table_options/1, add/2, remove/2, lookup/2]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, handle_continue/2]).
 -export_type([add_error/0, store_option/0]).
 
 -type add_error() :: {registration, [{uri(), #schema_error{}}]}
@@ -29,9 +36,10 @@
                       | {assert_format, boolean()}.
 
 -record(state, {
-    table   :: atom(),
-    store   :: store(),
-    options :: [valid_json_compile:compile_option()]
+    table    :: atom(),
+    registry :: atom(),
+    store    :: store(),
+    options  :: [valid_json_compile:compile_option()]
 }).
 
 -spec start_link(atom(), [store_option()]) -> {ok, pid()}.
@@ -46,6 +54,28 @@ start_link(Store, Options) ->
 -spec manager_name(atom()) -> atom().
 manager_name(Store) ->
     list_to_atom(atom_to_list(Store) ++ "_manager").
+
+%% Таблица артефактов называется именем самого хранилища: под этим именем в неё
+%% ходят читатели, и менять его не за чем. Таблице реестра имя производится от
+%% него же, поэтому оба хранителя получают разные имена сами собой.
+-spec artifacts_table(atom()) -> atom().
+artifacts_table(Store) ->
+    Store.
+
+-spec registry_table(atom()) -> atom().
+registry_table(Store) ->
+    list_to_atom(atom_to_list(Store) ++ "_registry").
+
+%% Опции таблиц принадлежат тому, кто знает их содержимое, то есть этому модулю;
+%% хранитель принимает их готовыми. Обе `protected`: писать может только
+%% управляющий, а читать — любой процесс. Артефакты читаются на горячем пути
+%% всегда, реестр — только на промахе коротким именем, но `read_concurrency`
+%% дёшев и там.
+-spec table_options(artifacts | registry) -> [term()].
+table_options(artifacts) ->
+    [set, protected, {read_concurrency, true}];
+table_options(registry) ->
+    [set, protected, {read_concurrency, true}].
 
 %% Обе ветви ошибки списочные, а различает их тег, потому что имена в них значат
 %% разное. У `registration` ключ — имя записи в написании вызывающего: до
@@ -62,25 +92,94 @@ add(Store, Entries) when is_list(Entries) ->
 remove(Store, Uris) when is_list(Uris) ->
     gen_server:call(manager_name(Store), {remove, Uris}).
 
+%% Имя пробуется сперва как есть, и канонический вызов этим и заканчивается —
+%% одним чтением. Разрешение от базы стоит второго чтения и достаётся только
+%% промаху, то есть короткому имени. База читается из таблицы реестра: состояние
+%% управляющего читателю не видно, а будить его на горячем пути незачем.
 -spec lookup(atom(), uri()) -> {ok, compiled()} | {error, not_found}.
 lookup(Store, Uri) ->
-    case ets:lookup(Store, Uri) of
-        [{Uri, Compiled}] -> {ok, Compiled};
-        []                -> {error, not_found}
+    case artifact(artifacts_table(Store), Uri) of
+        {ok, _Compiled} = Found -> Found;
+        {error, not_found}      -> lookup_resolved(Store, Uri)
+    end.
+
+-spec artifact(atom(), uri()) -> {ok, compiled()} | {error, not_found}.
+artifact(Table, Name) ->
+    case ets:lookup(Table, Name) of
+        [{Name, Compiled}] -> {ok, Compiled};
+        []                 -> {error, not_found}
+    end.
+
+%% Таблицы реестра может не быть вовсе: её хранитель перезапускается, и в этот
+%% промежуток читатель обязан получить обычный промах, а не badarg.
+-spec lookup_resolved(atom(), uri()) -> {ok, compiled()} | {error, not_found}.
+lookup_resolved(Store, Uri) ->
+    Registry = registry_table(Store),
+    case ets:whereis(Registry) of
+        undefined ->
+            {error, not_found};
+        _Tid ->
+            case ets:lookup(Registry, base) of
+                [{base, Base}] -> lookup_from(Store, Uri, Base);
+                []             -> {error, not_found}
+            end
+    end.
+
+-spec lookup_from(atom(), uri(), uri() | anonymous) ->
+          {ok, compiled()} | {error, not_found}.
+lookup_from(Store, Uri, Base) ->
+    case valid_json_store:resolve_name(Uri, Base) of
+        {ok, Uri} ->
+            %% Разрешение ничего не изменило: повторное чтение дало бы тот же
+            %% промах, с какого мы сюда и пришли.
+            {error, not_found};
+        {ok, Name} ->
+            artifact(artifacts_table(Store), Name);
+        {error, _Reason} ->
+            {error, not_found}
     end.
 
 %% Владение переходит в самом ets:give_away/3, поэтому ждать 'ETS-TRANSFER'
 %% незачем: после ответа хранителя таблица уже наша. Отказ означает, что ею
 %% владеет кто-то третий, а без владения писать всё равно нельзя.
+%%
+%% Реестр поднимается из своей таблицы, а база берётся из опции: опция приходит
+%% через `start_link`, и супервизор перезапускает управляющего с той же самой,
+%% поэтому сравнивать её с пережившей нечего. В таблицу база уходит односторонне,
+%% для читателей.
 init({Store, Options}) ->
     ok = check_options(Options),
-    Registry = valid_json_store:new(registry_options(Options)),
-    Compile = compile_options(Options),
-    case valid_json_ets_keeper:claim(Store) of
+    Artifacts = artifacts_table(Store),
+    Registry = registry_table(Store),
+    case claim([Registry, Artifacts]) of
         ok ->
-            {ok, #state{table = Store, store = Registry, options = Compile}};
+            Registered = valid_json_store:from_documents(
+                           documents(Registry), registry_options(Options)),
+            true = ets:insert(Registry, {base, valid_json_store:base(Registered)}),
+            {ok, #state{table = Artifacts, registry = Registry,
+                        store = Registered, options = compile_options(Options)},
+             {continue, repair}};
         {error, not_owner} ->
             {stop, {claim_failed, not_owner}}
+    end.
+
+%% Пересобирается то, у чего документ есть, а артефакта нет: так выглядит
+%% хранилище после перезапуска хранителя артефактов. Обратного расхождения не
+%% бывает — таблица артефактов переживает только те отказы, при которых
+%% переживает и таблица реестра.
+%%
+%% Отказ компиляции здесь означает не ошибку вызывающего, а расхождение внутри
+%% хранилища: эти документы уже компилировались с теми же опциями. Поэтому
+%% падаем и отдаём решение супервизору.
+handle_continue(repair, #state{table = Table, store = Store,
+                               options = Options} = State) ->
+    case missing(Table, valid_json_store:canonical_names(Store)) of
+        [] ->
+            {noreply, State};
+        Names ->
+            {ok, Artifacts} = compile_all(Names, Store, Options),
+            commit(State, Artifacts, [], []),
+            {noreply, State}
     end.
 
 handle_call({add, Entries}, _From, State) ->
@@ -97,8 +196,29 @@ handle_cast(_Message, State) ->
 %% перешло раньше, в ответе хранителя на claim.
 handle_info({'ETS-TRANSFER', Table, _From, _Gift}, #state{table = Table} = State) ->
     {noreply, State};
+handle_info({'ETS-TRANSFER', Registry, _From, _Gift},
+            #state{registry = Registry} = State) ->
+    {noreply, State};
 handle_info(_Message, State) ->
     {noreply, State}.
+
+-spec claim([atom()]) -> ok | {error, not_owner}.
+claim([]) ->
+    ok;
+claim([Table | Rest]) ->
+    case valid_json_ets_keeper:claim(Table) of
+        ok                       -> claim(Rest);
+        {error, not_owner} = Err -> Err
+    end.
+
+-spec documents(atom()) -> [#document{}].
+documents(Registry) ->
+    [Document || {_Key, Document}
+                     <- ets:match_object(Registry, {{document, '_'}, '_'})].
+
+-spec missing(atom(), [uri()]) -> [uri()].
+missing(Table, Names) ->
+    [Name || Name <- Names, ets:member(Table, Name) =:= false].
 
 %% Реестр меняется первым, но принимается только вместе с артефактами: до
 %% успешной компиляции всего пересобираемого набора состояние остаётся прежним.
@@ -118,7 +238,7 @@ add_entries(Entries, #state{table = Table, store = Store0,
             Rebuild = ordsets:union(Names, affected(Table, New, Changed)),
             case compile_all(Rebuild, Store1, Options) of
                 {ok, Artifacts} ->
-                    commit(Table, Artifacts, Gone),
+                    commit(State, Artifacts, rows(Added, Store1), Gone),
                     {{ok, Added}, State#state{store = Store1}};
                 {error, Errors} ->
                     {{error, {compilation, Errors}}, State}
@@ -127,7 +247,7 @@ add_entries(Entries, #state{table = Table, store = Store0,
 
 %% Фазы компиляции у удаления нет: снятие, прошедшее проверку ссылок, не может
 %% сломать ни одного оставшегося артефакта — тот, кто ссылался бы на снятое имя,
-%% отвергнут раньше. Снятие из таблицы тоже не подводит: `ets:delete/2` доволен
+%% отвергнут раньше. Снятие из таблиц тоже не подводит: `ets:delete/2` доволен
 %% и отсутствующим ключом, а упасть может только на потерянном владении, где
 %% падать и следует.
 -spec remove_entries([uri()], #state{}) ->
@@ -141,8 +261,7 @@ remove_entries(Uris, #state{table = Table, store = Store0} = State) ->
             Survivors = valid_json_store:canonical_names(Store1),
             case referenced(Table, Survivors, Removed, Gone) of
                 [] ->
-                    lists:foreach(fun(Name) -> true = ets:delete(Table, Name) end,
-                                  Gone),
+                    commit(State, [], [], Gone),
                     {ok, State#state{store = Store1}};
                 Errors ->
                     {{error, Errors}, State}
@@ -161,13 +280,11 @@ referenced(Table, Survivors, Removed, Gone) ->
                            location = undefined}}
      || {Entry, Name} <- Removed, maps:is_key(Name, Refs)].
 
-%% Имя реестра без артефакта здесь недостижимо: после успешного `add` артефакт
-%% есть у каждого имени, а перезапуск оставляет реестр пустым. Считать такое имя
-%% ссылающимся не на что, а если ссылка всё же была, ближайший `add` пересоберёт
-%% этот артефакт и честно упадёт на `unknown_document`.
+%% Имя реестра без артефакта здесь недостижимо: пересборка в `handle_continue`
+%% закрывает это расхождение до первого вызова.
 -spec refers(atom(), uri(), [uri()], #{uri() => [uri()]}) -> #{uri() => [uri()]}.
 refers(Table, Name, Gone, Refs) ->
-    case lookup(Table, Name) of
+    case artifact(Table, Name) of
         {ok, #{sources := Sources}} ->
             Hit = ordsets:intersection(ordsets:from_list(Sources), Gone),
             lists:foldl(
@@ -188,11 +305,10 @@ affected(Table, Names, Changed) ->
 
 -spec stale(atom(), uri(), [uri()]) -> boolean().
 stale(Table, Name, Changed) ->
-    case lookup(Table, Name) of
+    case artifact(Table, Name) of
         {ok, #{sources := Sources}} ->
             ordsets:intersection(ordsets:from_list(Sources), Changed) =/= [];
-        %% Имя реестра без артефакта — то расхождение с таблицей, какое остаётся
-        %% после перезапуска управляющего. Пересборка его закрывает.
+        %% Имя реестра без артефакта пересобирается в любом случае.
         {error, not_found} ->
             true
     end.
@@ -213,13 +329,26 @@ compile_all(Names, Store, Options) ->
         {_Artifacts, Errors} -> {error, lists:reverse(Errors)}
     end.
 
+%% Документ лежит в таблице под своим каноническим именем и тегированным ключом:
+%% служебная строка с базой не попадает в перебор документов по устройству
+%% ключа, а не по договорённости. Адрес загрузки отдельным ключом не заводится —
+%% он есть полем документа, и обратно реестр собирает оба ключа сам.
+-spec rows([uri()], store()) -> [{{document, uri()}, #document{}}].
+rows(Names, Store) ->
+    [{{document, Name}, valid_json_store:fetch(Name, Store)} || Name <- Names].
+
 %% Порядок обязателен: список ets:insert/2 атомарен и изолирован для читателей,
 %% а удаление этой гарантией не закрыто. Так снятое имя отвечает ещё некоторое
 %% время после reload, но ложного not_found для живого имени не возникает.
--spec commit(atom(), [{uri(), compiled()}], [uri()]) -> ok.
-commit(Table, Artifacts, Gone) ->
+-spec commit(#state{}, [{uri(), compiled()}], [{{document, uri()}, #document{}}],
+             [uri()]) -> ok.
+commit(#state{table = Table, registry = Registry}, Artifacts, Documents, Gone) ->
     true = ets:insert(Table, Artifacts),
-    lists:foreach(fun(Name) -> true = ets:delete(Table, Name) end, Gone).
+    true = ets:insert(Registry, Documents),
+    lists:foreach(fun(Name) ->
+                          true = ets:delete(Table, Name),
+                          true = ets:delete(Registry, {document, Name})
+                  end, Gone).
 
 %% Незнакомая опция — ошибка конфигурации, а не пользовательского ввода, поэтому
 %% она завершается badarg и обваливает старт хранилища громко.

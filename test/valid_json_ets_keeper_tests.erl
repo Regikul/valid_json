@@ -6,6 +6,7 @@
 -define(DIALECT, <<"https://json-schema.org/draft/2020-12/schema">>).
 -define(FIRST, valid_json_test_store_one).
 -define(SECOND, valid_json_test_store_two).
+-define(OPTIONS, valid_json_store_manager:table_options(artifacts)).
 
 %% Таблицы именованные, поэтому eunit_wrapper_/1 с inparallel здесь не объявлен:
 %% проверки идут по одной, а содержимое между ними снимается
@@ -26,8 +27,8 @@ keeper_test_() ->
      end}.
 
 start_keepers() ->
-    {ok, First} = valid_json_ets_keeper:start_link(?FIRST),
-    {ok, Second} = valid_json_ets_keeper:start_link(?SECOND),
+    {ok, First} = valid_json_ets_keeper:start_link(?FIRST, ?OPTIONS),
+    {ok, Second} = valid_json_ets_keeper:start_link(?SECOND, ?OPTIONS),
     #{?FIRST => First, ?SECOND => Second}.
 
 stop_keepers(Keepers) ->
@@ -42,8 +43,12 @@ stop_keeper(Store) ->
     end.
 
 %% Проверка идёт до первого claim, поэтому владелец и heir здесь совпадают.
+%% Опции таблицы приходят параметром, а имя процесса выводится из имени таблицы:
+%% так два хранителя одного хранилища различаются сами собой.
 layout(Keepers) ->
     Keeper = keeper(?FIRST, Keepers),
+    ?assertEqual(valid_json_test_store_one_keeper,
+                 valid_json_ets_keeper:keeper_name(?FIRST)),
     ?assertEqual(set, ets:info(?FIRST, type)),
     ?assertEqual(protected, ets:info(?FIRST, protection)),
     ?assertEqual(true, ets:info(?FIRST, named_table)),

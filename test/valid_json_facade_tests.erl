@@ -6,6 +6,7 @@
 -include("valid_json_core.hrl").
 
 -define(STORE, valid_json_facade_test_store).
+-define(BASE, <<"https://example.com/schemas/">>).
 
 %% Таблица именована глобально, поэтому каждая проверка поднимает своё дерево и
 %% гасит его за собой.
@@ -16,11 +17,11 @@ store_add_and_validate_test() ->
         ?assertEqual({ok, [Uri]},
                      valid_json:store_add(Store, Uri, Schema)),
         ?assertEqual({ok, #{<<"valid">> => true}},
-                     valid_json:store_validate(
+                     valid_json:store_validate_uri(
                        Store, Uri, 1, [{output, flag}])),
         ?assertMatch(
           {ok, #{<<"valid">> := false, <<"errors">> := [_ | _]}},
-          valid_json:store_validate(
+          valid_json:store_validate_uri(
             Store, Uri, <<"not an integer">>, [{output, detailed}]))
     end).
 
@@ -33,7 +34,7 @@ store_add_mutual_refs_test() ->
         ?assertEqual({ok, [First, Second]},
                      valid_json:store_add(Store, Entries)),
         ?assertEqual({ok, #{<<"valid">> => true}},
-                     valid_json:store_validate(
+                     valid_json:store_validate_uri(
                        Store, First, #{<<"second">> => 1}, [{output, flag}]))
     end).
 
@@ -44,13 +45,13 @@ store_remove_test() ->
                         Store, Uri, #{<<"type">> => <<"integer">>}),
         ?assertEqual(ok, valid_json:store_remove(Store, [Uri])),
         ?assertEqual({error, not_found},
-                     valid_json:store_validate(Store, Uri, 1, []))
+                     valid_json:store_validate_uri(Store, Uri, 1, []))
     end).
 
 store_validate_unknown_test() ->
     with_store(fun(Store) ->
         ?assertEqual({error, not_found},
-                     valid_json:store_validate(
+                     valid_json:store_validate_uri(
                        Store, <<"https://example.com/missing">>,
                        bad_instance, [{output, invalid}]))
     end).
@@ -76,6 +77,33 @@ store_errors_are_unchanged_test() ->
           valid_json:store_remove(Store, [Leaf]))
     end).
 
+%% Короткое имя годится и для валидации: `add` вернул каноническое, но вызывающий
+%% вправе называть документ так же, как называл при регистрации.
+store_short_name_test() ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
+        Canonical = <<"https://example.com/schemas/allow">>,
+        ?assertEqual({ok, [Canonical]},
+                     valid_json:store_add(Store, <<"allow">>, true)),
+        ?assertEqual({ok, #{<<"valid">> => true}},
+                     valid_json:store_validate_uri(
+                       Store, <<"allow">>, #{}, [{output, flag}])),
+        ?assertEqual({ok, #{<<"valid">> => true}},
+                     valid_json:store_validate_uri(
+                       Store, Canonical, #{}, [{output, flag}])),
+        %% Неизвестное короткое имя остаётся промахом, а не ошибкой разрешения.
+        ?assertEqual({error, not_found},
+                     valid_json:store_validate_uri(
+                       Store, <<"missing">>, #{}, [{output, flag}]))
+    end).
+
+%% Без базы короткое имя разрешать не от чего, и промах остаётся промахом.
+store_short_name_without_base_test() ->
+    with_store(fun(Store) ->
+        ?assertEqual({error, not_found},
+                     valid_json:store_validate_uri(
+                       Store, <<"allow">>, #{}, [{output, flag}]))
+    end).
+
 standard_store_test() ->
     {ok, _Started} = application:ensure_all_started(valid_json),
     try
@@ -83,14 +111,33 @@ standard_store_test() ->
         ?assertEqual({ok, [Uri]},
                      valid_json:add(Uri, #{<<"type">> => <<"integer">>})),
         ?assertEqual({ok, #{<<"valid">> => true}},
-                     valid_json:validate(Uri, 1, [{output, flag}])),
+                     valid_json:validate_uri(Uri, 1, [{output, flag}])),
         ?assertEqual(ok, valid_json:remove([Uri]))
     after
         ok = application:stop(valid_json)
     end.
 
+%% Стандартное хранилище берёт базу из app env, поэтому короткое имя работает и
+%% в форме без имени хранилища.
+standard_store_short_name_test() ->
+    ok = application:set_env(valid_json, base_uri, ?BASE),
+    {ok, _Started} = application:ensure_all_started(valid_json),
+    try
+        Canonical = <<"https://example.com/schemas/allow">>,
+        ?assertEqual({ok, [Canonical]}, valid_json:add(<<"allow">>, true)),
+        ?assertEqual({ok, #{<<"valid">> => true}},
+                     valid_json:validate_uri(<<"allow">>, #{}, [{output, flag}])),
+        ?assertEqual(ok, valid_json:remove([<<"allow">>]))
+    after
+        ok = application:stop(valid_json),
+        ok = application:unset_env(valid_json, base_uri)
+    end.
+
 with_store(Fun) ->
-    {ok, Sup} = valid_json_store_sup:start_link(?STORE),
+    with_store([], Fun).
+
+with_store(Options, Fun) ->
+    {ok, Sup} = valid_json_store_sup:start_link(?STORE, Options),
     try Fun(?STORE)
     after
         stop_store(Sup)

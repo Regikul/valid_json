@@ -5,8 +5,8 @@
 -include("valid_json_core.hrl").
 -include("valid_json_resources.hrl").
 
--export([add/1, add/2, remove/1, validate/3,
-         store_add/2, store_add/3, store_remove/2, store_validate/4]).
+-export([add/1, add/2, remove/1, validate_uri/3,
+         store_add/2, store_add/3, store_remove/2, store_validate_uri/4]).
 
 -spec add(uri(), json()) ->
           {ok, [uri()]} | {error, valid_json_store_manager:add_error()}.
@@ -22,10 +22,13 @@ add(Entries) ->
 remove(Uris) ->
     store_remove(?STANDARD_STORE, Uris).
 
--spec validate(uri(), json(), [option()]) ->
+%% Названа парно к `compile_uri/3` и отличается от `validate/3` встроенного
+%% режима именем, а не формой первого аргумента: одна арность не должна значить
+%% двух разных вещей.
+-spec validate_uri(uri(), json(), [option()]) ->
           {ok, output()} | {error, not_found} | {error, eval_error()}.
-validate(Uri, Instance, Options) ->
-    store_validate(?STANDARD_STORE, Uri, Instance, Options).
+validate_uri(Uri, Instance, Options) ->
+    store_validate_uri(?STANDARD_STORE, Uri, Instance, Options).
 
 -spec store_add(atom(), uri(), json()) ->
           {ok, [uri()]} | {error, valid_json_store_manager:add_error()}.
@@ -42,9 +45,11 @@ store_add(Store, Entries) ->
 store_remove(Store, Uris) ->
     valid_json_store_manager:remove(Store, Uris).
 
--spec store_validate(atom(), uri(), json(), [option()]) ->
+%% Имя принимается и коротким: `lookup` разрешает его от базы хранилища тем же
+%% правилом, каким разрешается регистрируемое.
+-spec store_validate_uri(atom(), uri(), json(), [option()]) ->
           {ok, output()} | {error, not_found} | {error, eval_error()}.
-store_validate(Store, Uri, Instance, Options) ->
+store_validate_uri(Store, Uri, Instance, Options) ->
     case valid_json_store_manager:lookup(Store, Uri) of
         {ok, Compiled} -> valid_json_core:validate(Compiled, Instance, Options);
         {error, not_found} -> {error, not_found}

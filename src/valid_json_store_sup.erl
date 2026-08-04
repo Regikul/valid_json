@@ -1,8 +1,20 @@
 %% Дерево одного хранилища. Стратегия rest_for_one выбрана ради порядка
-%% «хранитель перед управляющим»: управляющий забирает таблицу у хранителя,
-%% поэтому переживать его смерть в одиночку не может. Обратное неверно —
-%% хранитель смерть управляющего переживает, и таблица возвращается к нему по
-%% `heir` вместе с содержимым.
+%% «хранители перед управляющим»: управляющий забирает у них таблицы, поэтому
+%% переживать их смерть в одиночку не может. Обратное неверно — хранители смерть
+%% управляющего переживают, и таблицы возвращаются к ним по `heir` вместе с
+%% содержимым.
+%%
+%% Это не только порядок старта. Смерть хранителя таблицу не убивает: ею владеет
+%% управляющий, и теряется лишь heir, а новый хранитель упал бы на `ets:new` под
+%% занятым именем. Спасает ровно rest_for_one: вместе с хранителем гасится и
+%% управляющий, при его остановке таблица уходит к мёртвому heir и уничтожается,
+%% и хранитель создаёт её заново.
+%%
+%% Отсюда и порядок между хранителями: первым стоит реестр. Его смерть
+%% пересобирает всё, а смерть хранителя артефактов оставляет реестр целым, и
+%% артефакты по нему восстанавливаются. Обратный порядок оставлял бы реестр
+%% пустым при живых артефактах, то есть ровно то расхождение, ради устранения
+%% которого реестр и переехал в таблицу.
 %%
 %% Приложение, которому нужно собственное хранилище, берёт отсюда child_spec/2 и
 %% ставит его в своё дерево. Стандартное хранилище библиотека поднимает сама, без
@@ -40,12 +52,12 @@ start_link(Store, Options) ->
     supervisor:start_link(?MODULE, {Store, Options}).
 
 init({Store, Options}) ->
-    Keeper = #{id => valid_json_ets_keeper,
-               start => {valid_json_ets_keeper, start_link, [Store]},
-               restart => permanent,
-               shutdown => 5000,
-               type => worker,
-               modules => [valid_json_ets_keeper]},
+    Registry = valid_json_ets_keeper:child_spec(
+                 valid_json_store_manager:registry_table(Store),
+                 valid_json_store_manager:table_options(registry)),
+    Artifacts = valid_json_ets_keeper:child_spec(
+                  valid_json_store_manager:artifacts_table(Store),
+                  valid_json_store_manager:table_options(artifacts)),
     Manager = #{id => valid_json_store_manager,
                 start => {valid_json_store_manager, start_link, [Store, Options]},
                 restart => permanent,
@@ -53,4 +65,4 @@ init({Store, Options}) ->
                 type => worker,
                 modules => [valid_json_store_manager]},
     {ok, {#{strategy => rest_for_one, intensity => 1, period => 5},
-          [Keeper, Manager]}}.
+          [Registry, Artifacts, Manager]}}.
