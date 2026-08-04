@@ -2,21 +2,32 @@
 %% документа из пути относительно корня. Нормативное описание —
 %% okf/architecture/validator-resources-runtime.md, раздел «Каталог».
 %%
-%% Аргумент — proplist: обязательный `root` и необязательное `extension`
-%% (по умолчанию `.json`). Негодный аргумент завершается badarg: это ошибка
-%% конфигурации разработчика, а не отказ чтения.
+%% Аргумент — proplist: корень каталога и необязательное `extension`
+%% (по умолчанию `.json`). Корень задаётся либо прямо, `{root, Path}`, либо
+%% путём внутри приватного каталога приложения, `{priv_dir, App, Path}`: в
+%% релизе рабочий каталог заранее не известен, а `priv` приложения известен
+%% всегда. Негодный аргумент завершается badarg: это ошибка конфигурации
+%% разработчика, а не отказ чтения.
+%%
+%% За пределы корня загрузчик не выходит: символьные ссылки он не обходит и не
+%% читает, а называет отказом.
 -module(valid_json_loader_dir).
 
 -behaviour(valid_json_loader).
+
+-include_lib("kernel/include/file.hrl").
 
 -include("valid_json_resources.hrl").
 
 -export([base_uri/1, load/1]).
 -export_type([dir_option/0, error/0]).
 
--type dir_option() :: {root, file:filename_all()} | {extension, binary()}.
+-type dir_option() :: {root, file:filename_all()}
+                    | {priv_dir, atom(), file:filename_all()}
+                    | {extension, binary()}.
 -type error() :: {list, file:filename_all(), file:posix()}
                | {read, file:filename_all(), file:posix()}
+               | {link, file:filename_all()}
                | {invalid_json, file:filename_all()}.
 
 %% Символы, которые в сегменте пути разрешены без экранирования: sub-delims,
@@ -67,15 +78,34 @@ entries(_Root, _Segments, _Extension, [], Acc) ->
 entries(Root, Segments, Extension, [Name | Rest], Acc) ->
     Nested = Segments ++ [unicode:characters_to_binary(Name)],
     Path = path(Root, Nested),
-    case filelib:is_dir(Path) of
-        true ->
+    case type(Path) of
+        {ok, directory} ->
             case collect(Root, Nested, Extension, Acc) of
                 {ok, Deeper}       -> entries(Root, Segments, Extension, Rest, Deeper);
                 {error, _} = Error -> Error
             end;
-        false ->
+        {ok, regular} ->
             entries(Root, Segments, Extension, Rest,
-                    keep(Nested, Extension, Acc))
+                    keep(Nested, Extension, Acc));
+        {ok, symlink} ->
+            {error, {link, Path}};
+        {ok, _Other} ->
+            %% Устройство или сокет схемой быть не могут, и читать их нечего.
+            entries(Root, Segments, Extension, Rest, Acc);
+        {error, Reason} ->
+            {error, {read, Path, Reason}}
+    end.
+
+%% Тип берётся `read_link_info/1`, которая по ссылке не идёт. Отсюда и граница
+%% области: обходятся только настоящие каталоги, читаются только настоящие
+%% файлы, а ссылка наружу или на собственный предок невозможна как таковая.
+%% Молча пропустить ссылку нельзя — с именем вроде `weight.json` она выглядит
+%% ровно как схема, и потерянный документ обошёлся бы дороже отказа.
+-spec type(file:filename_all()) -> {ok, atom()} | {error, file:posix()}.
+type(Path) ->
+    case file:read_link_info(Path) of
+        {ok, #file_info{type = Type}} -> {ok, Type};
+        {error, Reason}               -> {error, Reason}
     end.
 
 %% Файл без нужного расширения не ошибка: рядом со схемами обычно лежит и
@@ -154,11 +184,36 @@ path(Root, []) ->
 path(Root, Segments) ->
     filename:join([Root | Segments]).
 
+%% Корень задают две взаимоисключающие опции, и требовать ровно одну проще, чем
+%% объяснять, какая из двух победила.
 -spec root([dir_option()]) -> file:filename_all().
 root(Options) ->
-    case lists:keyfind(root, 1, Options) of
-        {root, Root} when is_binary(Root); is_list(Root) -> Root;
-        _Other -> erlang:error(badarg, [Options])
+    case {lists:keyfind(root, 1, Options), lists:keyfind(priv_dir, 1, Options)} of
+        {{root, Root}, false} when is_binary(Root); is_list(Root) ->
+            Root;
+        {false, {priv_dir, App, Path}} when is_atom(App), is_binary(Path);
+                                            is_atom(App), is_list(Path) ->
+            priv_root(App, Path, Options);
+        _Other ->
+            erlang:error(badarg, [Options])
+    end.
+
+%% Приложение без приватного каталога и путь, уводящий из него наружу, — та же
+%% ошибка конфигурации, что и корень не той формы: область объявляет
+%% разработчик, и объявить её мимо `priv` он не вправе. `safe_relative_path/2`
+%% отвергает и абсолютный путь, и `..`, и символьную ссылку наружу, а прочее
+%% приводит к нормальному виду.
+-spec priv_root(atom(), file:filename_all(), [dir_option()]) -> file:filename_all().
+priv_root(App, Path, Options) ->
+    case code:priv_dir(App) of
+        {error, bad_name} ->
+            erlang:error(badarg, [Options]);
+        Priv ->
+            case filelib:safe_relative_path(Path, Priv) of
+                unsafe -> erlang:error(badarg, [Options]);
+                Safe when Safe =:= []; Safe =:= <<>> -> Priv;
+                Safe -> filename:join(Priv, Safe)
+            end
     end.
 
 -spec extension([dir_option()]) -> binary().

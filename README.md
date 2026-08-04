@@ -122,18 +122,20 @@ Configure the loader in `config/sys.config`:
 [
     {valid_json, [
         {loader, {valid_json_loader_dir, [
-            {root, "priv/schemas"}
+            {priv_dir, valid_json, "schemas"}
         ]}}
     ]}
 ].
 ```
 
-The `root` path is resolved relative to the current working directory, so the
-relative path above works when `rebar3 shell` is started from the project root.
-Use an absolute path if the application can be started from another directory.
+The path is resolved inside the `priv` directory of the named application, which
+is where a release keeps it — unlike a path relative to the current working
+directory, it does not depend on where the node was started from. In your own
+application, name that application instead. The loader stays inside the
+directory it was given: it does not follow symbolic links but reports them as an
+error.
 
-Then start the shell from the project root and wait for the initial load to
-finish:
+Then start the shell and wait for the initial load to finish:
 
 ```shell
 rebar3 shell

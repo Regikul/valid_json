@@ -70,11 +70,53 @@ dir_errors_test() ->
         ?assertEqual(<<"broken.json">>, filename:basename(Path))
     end).
 
+%% Корень можно назвать и путём внутри `priv` приложения: в релизе рабочий
+%% каталог заранее не известен, а `priv` известен всегда. База при этом остаётся
+%% `file://` URI разрешённого каталога.
+dir_priv_dir_test() ->
+    Relative = "json_schema/draft-2020-12/output",
+    Options = [{priv_dir, valid_json, Relative}],
+    {ok, Entries} = valid_json_loader_dir:load(Options),
+    ?assertEqual([<<"schema.json">>], [Name || {Name, _Json} <- Entries]),
+    {ok, Base} = valid_json_loader_dir:base_uri(Options),
+    Root = filename:join(code:priv_dir(valid_json), Relative),
+    ?assertEqual(unicode:characters_to_binary(["file://", Root, "/"]), Base).
+
+%% Символьная ссылка — отказ, называющий путь: обходить её значило бы выйти за
+%% пределы объявленной области, а молча пропустить — потерять документ, который
+%% по имени от схемы не отличается.
+dir_symlink_test() ->
+    with_dir(fun(Dir) ->
+        Inside = filename:join(Dir, "inside"),
+        ok = filelib:ensure_path(Inside),
+        ok = file:write_file(filename:join(Inside, "weight.json"), <<"true">>),
+        %% Ссылка, не покидающая области, отвергается наравне с прочими:
+        %% положить схему в область дешевле, чем проверять цель ссылки.
+        Alias = filename:join(Dir, "alias"),
+        ok = file:make_symlink("inside", Alias),
+        ?assertMatch({error, {link, _Path}},
+                     valid_json_loader_dir:load([{root, Dir}])),
+        ok = file:delete(Alias),
+        ok = file:make_symlink("/etc/hosts", filename:join(Dir, "escape.json")),
+        {error, {link, Path}} = valid_json_loader_dir:load([{root, Dir}]),
+        ?assertEqual(<<"escape.json">>, filename:basename(Path))
+    end).
+
 %% Аргумент без корня — ошибка конфигурации разработчика, а не отказ чтения.
 dir_bad_argument_test() ->
     ?assertError(badarg, valid_json_loader_dir:load([])),
     ?assertError(badarg, valid_json_loader_dir:load([{root, fixtures()},
-                                                     {extension, oops}])).
+                                                     {extension, oops}])),
+    %% Две опции корня сразу — не выбор из двух, а ошибка.
+    ?assertError(badarg,
+                 valid_json_loader_dir:load([{root, fixtures()},
+                                             {priv_dir, valid_json, "json_schema"}])),
+    %% Путь, уводящий из `priv` наружу, областью не объявляется: ни `..`, ни
+    %% абсолютный, ни путь приложения, которого нет в коде.
+    ?assertError(badarg, valid_json_loader_dir:load([{priv_dir, valid_json, "../.."}])),
+    ?assertError(badarg, valid_json_loader_dir:load([{priv_dir, valid_json, "/etc"}])),
+    ?assertError(badarg, valid_json_loader_dir:load([{priv_dir, no_such_app, "schemas"}])),
+    ?assertError(badarg, valid_json_loader_dir:base_uri([{priv_dir, valid_json, oops}])).
 
 %% -------------------------------------------------------------------
 %% Загрузчик в хранилище
