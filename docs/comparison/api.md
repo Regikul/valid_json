@@ -5,33 +5,54 @@ back. Revisions and dates are recorded in the [overview](index.md).
 
 ## valid_json
 
-Every schema goes through a store. Registering a document compiles it; a
-validation names the document by its URI.
+A schema used more than once goes through a store. Registering a document
+compiles it; a validation names the document by its URI.
 
 ```erlang
-{ok, [CanonicalUri]} = valid_json:add(Name, Schema),
+{ok, [CanonicalUri]} = valid_json:add(Schema),
 {ok, #{<<"valid">> := true}} = valid_json:validate(CanonicalUri, Instance, [{output, flag}]).
+```
+
+A schema used once does not need any of that. `run_schema/3` compiles it in the
+calling process and evaluates the instance right away, without a store and
+without a started application:
+
+```erlang
+{ok, #{<<"valid">> := true}} = valid_json:run_schema(Schema, Instance, [{output, flag}]).
 ```
 
 The facade is small:
 
 | Function | Purpose |
 | --- | --- |
-| `add/2`, `add/1` | register one document or a whole set in the standard store |
+| `run_schema/3` | compile a schema and validate against it in one call, keeping nothing |
+| `add/1` | register one document or a whole set in the standard store, each named by its own `$id` |
+| `add_at/1,2` | register documents under names that come from outside |
 | `remove/1` | drop documents, refusing to break documents that refer to them |
 | `wait/1` | wait for the initial load, and get a monitor for later changes |
 | `validate/3` | validate an instance against a registered document |
-| `store_add/2,3`, `store_remove/2`, `store_wait/2`, `store_validate/4` | the same operations against a named store |
+| `store_add/2`, `store_add_at/2,3`, `store_remove/2`, `store_wait/2`, `store_validate/4` | the same operations against a named store |
+| `store_child_spec/2` | the child specification for putting your own store into your supervision tree |
 | `format_error/1` | turn a schema error record into human-readable text |
 
 A set of documents that refer to one another must be registered in a single
 call, because a document whose references cannot be resolved is rejected.
+
+**Two doors, not one argument shape.** `add/1` takes schemas and reads each name
+off its `$id`; `add_at/1,2` takes name-and-schema pairs and is for the case
+where the name is known from outside, such as the path a file was read from.
+Which function you call is what decides where the name comes from — never the
+shape of the argument. A schema handed to `add/1` without an `$id` is rejected
+with `unnamed_schema`.
 
 **Options of a validation call.** Exactly one: `{output, flag | basic | detailed
 | verbose}`. The result is the standard output document of the specification,
 so `{ok, Output}` may well describe a failed validation — `valid` is a field in
 `Output`, not the shape of the return. `{error, Reason}` is reserved for not
 getting as far as evaluating: `not_found`, `unavailable`, or an evaluation error.
+`run_schema/3` takes the options of both layers in that one list: `output` is
+its own, everything else goes to the compiler, so `assert_format` and the choice
+of default dialect are available per call there.
 
 **Options of a store**, given to `valid_json:store_child_spec/2`:
 `base_uri`, `default_dialect`, `assert_format`, and `loader`; the last three
@@ -49,7 +70,13 @@ loader's business; what they are called is the store's.
 **Errors of registration** are records: a reason, the location of the offending
 keyword or schema position, and, when a schema failed its meta-schema, the
 standard output of that check. `format_error/1` renders one; the record itself
-is the stable contract.
+is the stable contract. A failed registration names the stage it failed at and
+pairs every error with the document it belongs to. `{registration, Errors}` is
+the earlier stage, before there are artifacts: the key is the name in the
+caller's own spelling, and a schema that was supposed to name itself and did not
+is listed as `anonymous`, because there is nothing else to call it.
+`{compilation, Errors}` is the later stage, keyed by the canonical name — the
+one the document would be looked up by.
 
 ## jesse
 
@@ -121,12 +148,17 @@ Errors are built lazily, and there are no standard output formats.
 
 ## Where the three differ most
 
-**Validating a schema you have not registered.** jesse has
-`validate_with_schema/2,3`. jsonschex hands you the compiled struct, so this is
-the normal case rather than a special one. `valid_json` has no such path: a
-schema must be registered in a store before anything can be validated against
-it. If your schemas arrive with the request rather than with the release, this
-is the difference that will decide the matter.
+**Validating a schema you have not registered.** All three can do it, and what
+differs is what it costs. jesse walks the raw schema in
+`validate_with_schema/2,3` and keeps nothing either way, so this is no different
+from its stored path. jsonschex hands you the compiled struct, so this is its
+normal case, and you decide how long the struct lives. `valid_json`, in
+`run_schema/3`, compiles the schema anew on every call — discovery, the
+meta-schema check, pattern compilation, and emission — and throws the artifact
+away afterwards. Its registry is temporary too, so such a schema must stand on
+its own: `$ref` sees only the schema itself and the built-in
+meta-schemas, the documents of a store are invisible to it, and a relative `$id`
+has no base to resolve against.
 
 **Entering a fragment.** `compile_fragment/2` and `bundle_fragment/2` let
 jsonschex take an OpenAPI document and treat one subschema of it as the root.

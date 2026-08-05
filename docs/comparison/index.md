@@ -14,12 +14,14 @@ listed here.
 
 | Library | Version | Commit | Commit date |
 | --- | --- | --- | --- |
-| `valid_json` | 0.1.0, not published on hex | `7e43e11` | 2026-08-05 |
+| `valid_json` | 0.2.0, not published on hex | `5bcad01` | 2026-08-06 |
 | jesse | 1.8.2 (the tag points at `master`) | `d06868f` | 2025-09-28 |
 | jsonschex | 0.9.0 (the release commit) | `3572664` | 2026-07-23 |
 
-Checked on 2026-08-05. Later releases of either project may have moved on; the
-version and commit are recorded so that you can tell how stale this page is.
+Checked on 2026-08-06, and on that date only the `valid_json` column was read
+again: jesse and jsonschex are still described from the revisions listed above.
+Later releases of either project may have moved on; the version and commit are
+recorded so that you can tell how stale this page is.
 
 ## The three libraries in a sentence each
 
@@ -37,7 +39,9 @@ a struct-shaped API with it.
 across the two, and reports results in the four output formats of the
 specification. It is built as an OTP application: schemas are compiled once when
 they are registered, artifacts live in ETS under supervision, and the registry
-never touches the network.
+never touches the network. A schema needed just once does not have to be
+registered at all — `run_schema/3` compiles and evaluates it in the calling
+process.
 
 ## Checklist
 
@@ -50,7 +54,8 @@ never touches the network.
 | Result of a validation | standard `flag`, `basic`, `detailed`, `verbose` output | own error tuples | own error structs |
 | Annotations | collected | not collected | not collected |
 | Where the schema lives | compiled into an ETS artifact when registered | raw in a global ETS table, walked on every validation | in a struct held by the caller |
-| Validating with an unregistered schema | not possible | `validate_with_schema/2,3` | the compiled struct is the normal case |
+| Validating with an unregistered schema | `run_schema/3`, compiling anew on every call; the schema has to stand on its own | `validate_with_schema/2,3` | the compiled struct is the normal case |
+| Naming a document | its own `$id` via `add/1`, or a name from outside via `add_at/1,2` | the key given to `add_schema/2` | the compiled struct has no name |
 | Network at runtime | never | possible: unknown `$ref` may be fetched over `http:` | whatever your loader does |
 | `unevaluatedProperties` / `unevaluatedItems` | yes | no | yes |
 | `$dynamicRef` / `$dynamicAnchor` | yes | no | yes |
@@ -77,7 +82,9 @@ fragment of a larger document such as an OpenAPI file.
 Take **valid_json** if you are writing Erlang and need Draft 2020-12 or Draft
 2019-09, if you want the standard output formats rather than a bespoke error
 shape, or if your schemas should be a supervised, offline part of a release
-rather than something fetched at validation time.
+rather than something fetched at validation time. A schema that arrives with the
+request is not shut out — `run_schema/3` takes it — but it pays for compilation
+every time, so the store is still where a schema used more than once belongs.
 
 ## The details
 

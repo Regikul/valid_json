@@ -26,6 +26,22 @@ store exactly as it was, and reports which document failed and why. `remove` is
 symmetrical: a document that other documents still refer to is not removed, and
 the refusal names the documents that hold the references.
 
+Registration is also where a document gets its name, and the name comes from one
+of two places. A schema names itself with `$id`, which is what `add` is for; a
+name that exists outside the schema — the path a file was read from, say — comes
+in through `add_at`, and is what the document answers to when it declares no
+`$id`. Relative names of either kind become addresses against the `base_uri` of
+the store, which is why the same set of files suits any store.
+
+Beside the store there is a one-shot path. `run_schema/3` compiles the schema in
+the calling process against a temporary registry and evaluates the instance
+straight away — no store, no started application, no artifact left behind. Every
+call repeats the whole of compilation, and the temporary registry holds nothing
+but the schema itself and the built-in meta-schemas, so such a schema cannot
+refer to a registered document or carry a relative `$id`. It is the door for a
+schema that arrives with the request; a schema used more than once is cheaper
+registered.
+
 Validation does not go through the manager. `validate/3` reads the compiled
 artifact from ETS in the caller's own process and evaluates it there, so
 validations run concurrently and no single process is on the hot path. The read
@@ -41,8 +57,10 @@ relative names; the `base_uri` of the store turns those names into addresses.
 
 **What follows from this.** Schemas are part of a release and are validated when
 the release starts, not when a request arrives. A bad schema is a startup or
-registration error, not a runtime surprise. There is no way to validate against
-a schema that has not been registered, and no way to fetch one that is missing.
+registration error, not a runtime surprise. A schema that never reaches the
+store can still be validated against, through `run_schema/3`, but it pays for
+compilation on every call and sees nothing but itself. Nothing is ever fetched:
+a reference to a document that is not registered is an error, not a request.
 
 ## jesse: a raw schema in a global table, walked each time
 
@@ -97,6 +115,7 @@ fastest of the three for static schemas. In exchange, there is no answer to
 | | valid_json | jesse | jsonschex |
 | --- | --- | --- | --- |
 | Compiled ahead of validation | yes, on registration | no | yes, on `compile/2` |
+| Validating without registering | `run_schema/3`, compiling anew each call | `validate_with_schema/2,3` | the struct is the normal case |
 | Where the schema lives | ETS tables under supervision | one global public ETS table | wherever the caller puts the struct |
 | Survives a process restart | yes, tables outlive the manager | no, the table dies with its owner | as designed by the caller |
 | Cost of the hot path | ETS read plus evaluation, in the caller | full walk of the raw schema | rule execution on the struct |
