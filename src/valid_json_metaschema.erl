@@ -102,7 +102,7 @@ load({Uri, Relative}) ->
     case file:read_file(Path) of
         {ok, Encoded} ->
             Json = json:decode(Encoded),
-            {Uri, #document{retrieval = Uri, canonical = Uri, json = Json}};
+            {Uri, #document{registered = Uri, canonical = Uri, json = Json}};
         {error, Reason} ->
             erlang:error({builtin_schema, Uri, Reason})
     end.

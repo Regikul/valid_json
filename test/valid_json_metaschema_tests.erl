@@ -46,7 +46,7 @@ builtin_documents_are_published_test() ->
                    <<"https://json-schema.org/draft/2020-12/output/schema">>)).
 
 builtin_metaschemas_compile_through_public_api_test_() ->
-    Store = valid_json_store:new([]),
+    Store = valid_json_store:temporary(),
     [?_assertMatch({ok, #{root := ?DRAFT_2020_12, sources := []}},
                    valid_json_compile:compile_uri(
                      Store, ?DRAFT_2020_12, [{schema_validation, flag}])),
@@ -85,7 +85,7 @@ inline_compile_entry_uses_metaschema_test() ->
        valid_json_compile:compile(#{<<"type">> => []}, ?DRAFT_2020_12)).
 
 schema_validation_modes_test_() ->
-    Store = valid_json_store:new([]),
+    Store = valid_json_store:temporary(),
     Schema = #{<<"type">> => []},
     Compile = fun(Options) ->
                       valid_json_compile:compile(Store, Schema, Options)
@@ -118,7 +118,7 @@ schema_validation_modes_test_() ->
                    Compile([{schema_validation, trusted}]))].
 
 invalid_schema_validation_mode_test_() ->
-    Store = valid_json_store:new([]),
+    Store = valid_json_store:temporary(),
     [?_assertError(badarg,
                    valid_json_compile:compile(
                      Store, true, [{schema_validation, unknown}])),
@@ -133,7 +133,7 @@ trusted_still_checks_references_test() ->
        {error, #schema_error{reason = {unknown_document, Missing},
                              location = {anonymous, <<"/$ref">>}}},
        valid_json_compile:compile(
-         valid_json_store:new([]), #{<<"$ref">> => Missing},
+         valid_json_store:temporary(), #{<<"$ref">> => Missing},
          [{schema_validation, trusted}])).
 
 non_schema_position_rejection_test_() ->
@@ -180,7 +180,7 @@ custom_metaschema_is_an_ordinary_store_document_test() ->
                   <<"properties">> =>
                       #{<<"x-extension">> => #{<<"type">> => <<"string">>}}},
     {ok, [Meta, Rules], Store} =
-        valid_json_store:add(valid_json_store:new([]),
+        valid_json_store:add(valid_json_store:temporary(),
                              [{Meta, MetaJson}, {Rules, RulesJson}]),
     Bad = #{<<"$schema">> => Meta, <<"x-extension">> => 1},
     {error, #schema_error{reason = schema_invalid,
@@ -204,7 +204,7 @@ custom_metaschema_no_progress_outcome_test() ->
     Documents = [{Accepting, recursive_metaschema(Accepting, true)},
                  {Unknown, recursive_metaschema(Unknown, false)}],
     {ok, [Accepting, Unknown], Store} =
-        valid_json_store:add(valid_json_store:new([]), Documents),
+        valid_json_store:add(valid_json_store:temporary(), Documents),
     ?assertMatch(
        {ok, #{root := anonymous}},
        valid_json_compile:compile(Store, #{<<"$schema">> => Accepting}, [])),
@@ -222,7 +222,7 @@ schema_validation_is_propagated_to_custom_metaschema_test() ->
                  <<"$schema">> => ?DRAFT_2020_12,
                  <<"type">> => []},
     {ok, Meta, Store} =
-        valid_json_store:add(valid_json_store:new([]), Meta, MetaJson),
+        valid_json_store:add(valid_json_store:temporary(), Meta, MetaJson),
     Schema = #{<<"$schema">> => Meta},
     ?assertEqual(
        {error, #schema_error{reason = schema_invalid,
@@ -269,6 +269,6 @@ absolute_uri(Fragment) ->
     Uri.
 
 checked_compile(Schema, Draft, Mode) ->
-    valid_json_compile:compile(valid_json_store:new([]), Schema,
+    valid_json_compile:compile(valid_json_store:temporary(), Schema,
                                [{default_dialect, Draft},
                                 {schema_validation, Mode}]).

@@ -42,7 +42,7 @@ output_store(Prefix) ->
     OutputSchema = read_json(filename:join(Prefix, "output-schema.json")),
     Uri = maps:get(<<"$id">>, OutputSchema),
     {ok, Uri, Store} =
-        valid_json_store:add(valid_json_store:new([]), Uri, OutputSchema),
+        valid_json_store:add(valid_json_store:temporary(), Uri, OutputSchema),
     Store.
 
 file_tests(Path, Dir, Dialect, Store, Cases0, Tests0) ->

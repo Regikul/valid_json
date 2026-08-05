@@ -163,6 +163,7 @@
                 | core_vocabulary_missing
                 | {misplaced_keyword, binary()}
                 | {name_taken, uri()}
+                | unnamed_schema
                 | {referenced_by, uri(), [uri()]}
                 | schema_invalid
                 | {metaschema_evaluation_failed, uri(), eval_error()}

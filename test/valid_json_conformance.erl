@@ -108,7 +108,7 @@ validation_test_() ->
 remotes_store() ->
     Files = filelib:wildcard(filename:join(remotes_dir(), "**/*.json")),
     Entries = [{remote_uri(File), read_json(File)} || File <- Files],
-    {ok, _Names, Store} = valid_json_store:add(valid_json_store:new([]), Entries),
+    {ok, _Names, Store} = valid_json_store:add(valid_json_store:temporary(), Entries),
     {length(Files), Store}.
 
 remotes_test(Loaded) ->

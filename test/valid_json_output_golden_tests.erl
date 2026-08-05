@@ -333,7 +333,7 @@ basic(Schema, Instance) ->
     Dialect = maps:get(<<"$schema">>, Schema),
     %% Golden fixtures статичны и проверяют только проекцию output.
     {ok, Artifact} =
-        valid_json_compile:compile(valid_json_store:new([]), Schema,
+        valid_json_compile:compile(valid_json_store:temporary(), Schema,
                                    [{default_dialect, Dialect},
                                     {schema_validation, trusted}]),
     valid_json_core:validate(Artifact, Instance, [{output, basic}]).
@@ -348,7 +348,7 @@ assert_recursive_output(Format, Dialect, Id) ->
     Schema = schema(Dialect, Id,
                     #{<<"anyOf">> => [true, #{<<"$ref">> => <<"#">>}]}),
     {ok, Artifact} =
-        valid_json_compile:compile(valid_json_store:new([]), Schema,
+        valid_json_compile:compile(valid_json_store:temporary(), Schema,
                                    [{default_dialect, Dialect},
                                     {schema_validation, trusted}]),
     {ok, #{<<"valid">> := true} = Actual} =
@@ -357,7 +357,7 @@ assert_recursive_output(Format, Dialect, Id) ->
 
 assert_structured(Format, Dialect, {ok, Expected}, Schema, Instance) ->
     {ok, Artifact} =
-        valid_json_compile:compile(valid_json_store:new([]), Schema,
+        valid_json_compile:compile(valid_json_store:temporary(), Schema,
                                    [{default_dialect, Dialect},
                                     {schema_validation, trusted}]),
     {ok, Actual} = valid_json_core:validate(Artifact, Instance, [{output, Format}]),
@@ -369,7 +369,7 @@ assert_output_schema(Dialect, Actual) ->
                                            "output-schema.json")),
     Uri = maps:get(<<"$id">>, OutputSchema),
     {ok, Uri, Store} =
-        valid_json_store:add(valid_json_store:new([]), Uri, OutputSchema),
+        valid_json_store:add(valid_json_store:temporary(), Uri, OutputSchema),
     Wrapper = #{<<"$schema">> => Dialect, <<"$ref">> => Uri},
     {ok, Verifier} =
         valid_json_compile:compile(Store, Wrapper,

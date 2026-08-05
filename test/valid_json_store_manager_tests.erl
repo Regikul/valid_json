@@ -12,10 +12,10 @@
 
 %% Добавленный документ публикуется под своим именем и годен к вычислению сразу.
 add_test() ->
-    with_store([], fun(Store) ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
         Uri = <<"https://example.com/integer">>,
         ?assertEqual({ok, [Uri]},
-                     valid_json_store_manager:add(
+                     valid_json_store_manager:add_at(
                        Store, [{Uri, #{<<"type">> => <<"integer">>}}])),
         ?assertEqual(true, valid(Store, Uri, 1)),
         ?assertEqual(false, valid(Store, Uri, <<"a">>))
@@ -24,27 +24,27 @@ add_test() ->
 %% Имя артефакта — каноническое имя документа. Адрес загрузки остаётся ключом
 %% реестра и в таблицу не попадает.
 canonical_name_test() ->
-    with_store([], fun(Store) ->
-        Retrieval = <<"https://example.com/retrieval">>,
+    with_store([{base_uri, ?BASE}], fun(Store) ->
+        Registered = <<"https://example.com/registered">>,
         Canonical = <<"https://example.com/canonical">>,
         Schema = #{<<"$id">> => Canonical, <<"type">> => <<"integer">>},
         ?assertEqual({ok, [Canonical]},
-                     valid_json_store_manager:add(Store, [{Retrieval, Schema}])),
+                     valid_json_store_manager:add_at(Store, [{Registered, Schema}])),
         ?assertMatch({ok, _}, valid_json_store_manager:lookup(Store, Canonical)),
         ?assertEqual({error, not_found},
-                     valid_json_store_manager:lookup(Store, Retrieval))
+                     valid_json_store_manager:lookup(Store, Registered))
     end).
 
 %% Резолв не ленивый, поэтому взаимно ссылающиеся документы обязаны прийти одним
 %% вызовом; артефакт заводится на каждый из них.
 mutual_refs_test() ->
-    with_store([], fun(Store) ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
         First = <<"https://example.com/first">>,
         Second = <<"https://example.com/second">>,
         Entries = [{First, ref_property(<<"second">>, Second)},
                    {Second, ref_property(<<"first">>, First)}],
         ?assertEqual({ok, [First, Second]},
-                     valid_json_store_manager:add(Store, Entries)),
+                     valid_json_store_manager:add_at(Store, Entries)),
         ?assertMatch({ok, _}, valid_json_store_manager:lookup(Store, First)),
         ?assertMatch({ok, _}, valid_json_store_manager:lookup(Store, Second))
     end).
@@ -52,16 +52,16 @@ mutual_refs_test() ->
 %% Замена документа пересобирает чужой артефакт, у которого изменённое имя стоит
 %% в sources. Обратного индекса для этого не нужно.
 invalidation_test() ->
-    with_store([], fun(Store) ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
         Leaf = <<"https://example.com/leaf">>,
         Root = <<"https://example.com/root">>,
-        {ok, [Leaf]} = valid_json_store_manager:add(
+        {ok, [Leaf]} = valid_json_store_manager:add_at(
                          Store, [{Leaf, #{<<"type">> => <<"integer">>}}]),
-        {ok, [Root]} = valid_json_store_manager:add(
+        {ok, [Root]} = valid_json_store_manager:add_at(
                          Store, [{Root, #{<<"$ref">> => Leaf}}]),
         ?assertEqual(true, valid(Store, Root, 1)),
         ?assertEqual(false, valid(Store, Root, <<"a">>)),
-        {ok, [Leaf]} = valid_json_store_manager:add(
+        {ok, [Leaf]} = valid_json_store_manager:add_at(
                          Store, [{Leaf, #{<<"type">> => <<"string">>}}]),
         ?assertEqual(false, valid(Store, Root, 1)),
         ?assertEqual(true, valid(Store, Root, <<"a">>))
@@ -70,14 +70,14 @@ invalidation_test() ->
 %% Замена по тому же адресу загрузки освобождает прежнее каноническое имя, и
 %% артефакт под ним снимается: множество ключей таблицы следует за реестром.
 replacement_test() ->
-    with_store([], fun(Store) ->
-        Retrieval = <<"https://example.com/document">>,
+    with_store([{base_uri, ?BASE}], fun(Store) ->
+        Registered = <<"https://example.com/document">>,
         First = <<"https://example.com/first">>,
         Second = <<"https://example.com/second">>,
-        {ok, [First]} = valid_json_store_manager:add(
-                          Store, [{Retrieval, #{<<"$id">> => First}}]),
-        {ok, [Second]} = valid_json_store_manager:add(
-                           Store, [{Retrieval, #{<<"$id">> => Second}}]),
+        {ok, [First]} = valid_json_store_manager:add_at(
+                          Store, [{Registered, #{<<"$id">> => First}}]),
+        {ok, [Second]} = valid_json_store_manager:add_at(
+                           Store, [{Registered, #{<<"$id">> => Second}}]),
         ?assertEqual({error, not_found},
                      valid_json_store_manager:lookup(Store, First)),
         ?assertMatch({ok, _}, valid_json_store_manager:lookup(Store, Second))
@@ -87,21 +87,21 @@ replacement_test() ->
 %% косвенно: если бы сломанный документ остался в реестре, следующий добавленный
 %% документ починил бы его и артефакт появился бы сам собой.
 rollback_test() ->
-    with_store([], fun(Store) ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
         Good = <<"https://example.com/good">>,
         Broken = <<"https://example.com/broken">>,
         Missing = <<"https://example.com/missing">>,
-        {ok, [Good]} = valid_json_store_manager:add(
+        {ok, [Good]} = valid_json_store_manager:add_at(
                          Store, [{Good, #{<<"type">> => <<"integer">>}}]),
         ?assertMatch({error,
                       {compilation,
                        [{Broken, #schema_error{reason = {unknown_document, Missing}}}]}},
-                     valid_json_store_manager:add(
+                     valid_json_store_manager:add_at(
                        Store, [{Broken, #{<<"$ref">> => Missing}}])),
         ?assertEqual({error, not_found},
                      valid_json_store_manager:lookup(Store, Broken)),
         ?assertEqual(true, valid(Store, Good, 1)),
-        {ok, [Missing]} = valid_json_store_manager:add(
+        {ok, [Missing]} = valid_json_store_manager:add_at(
                             Store, [{Missing, #{<<"type">> => <<"integer">>}}]),
         ?assertEqual({error, not_found},
                      valid_json_store_manager:lookup(Store, Broken))
@@ -109,17 +109,17 @@ rollback_test() ->
 
 %% Ошибка регистрации относится к вызову целиком и приходит одна, без списка.
 name_taken_test() ->
-    with_store([], fun(Store) ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
         Taken = <<"https://example.com/taken">>,
         Other = <<"https://example.com/other">>,
-        {ok, [Taken]} = valid_json_store_manager:add(
+        {ok, [Taken]} = valid_json_store_manager:add_at(
                           Store, [{Taken, #{<<"type">> => <<"integer">>}}]),
         %% Ключ ошибки регистрации — имя записи, а не занятое имя: их тут два
         %% разных, и путать их нельзя.
         ?assertEqual({error, {registration,
                               [{Other, #schema_error{reason = {name_taken, Taken},
                                                      location = undefined}}]}},
-                     valid_json_store_manager:add(
+                     valid_json_store_manager:add_at(
                        Store, [{Other, #{<<"$id">> => Taken}}])),
         ?assertEqual(true, valid(Store, Taken, 1)),
         ?assertEqual({error, not_found},
@@ -128,22 +128,22 @@ name_taken_test() ->
 
 %% Удаление снимает и документ, и его артефакт.
 remove_test() ->
-    with_store([], fun(Store) ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
         Uri = <<"https://example.com/integer">>,
-        {ok, [Uri]} = valid_json_store_manager:add(
+        {ok, [Uri]} = valid_json_store_manager:add_at(
                         Store, [{Uri, #{<<"type">> => <<"integer">>}}]),
         ?assertEqual(ok, valid_json_store_manager:remove(Store, [Uri])),
         ?assertEqual({error, not_found},
                      valid_json_store_manager:lookup(Store, Uri)),
         %% Реестр освободился вместе с таблицей: имя снова свободно.
         ?assertEqual({ok, [Uri]},
-                     valid_json_store_manager:add(
+                     valid_json_store_manager:add_at(
                        Store, [{Uri, #{<<"type">> => <<"integer">>}}]))
     end).
 
 %% Неизвестное имя удалять нечего, и это не ошибка.
 remove_unknown_test() ->
-    with_store([], fun(Store) ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
         ?assertEqual(ok, valid_json_store_manager:remove(
                            Store, [<<"https://example.com/missing">>]))
     end).
@@ -151,12 +151,12 @@ remove_unknown_test() ->
 %% Документ, на который ссылаются, снять нельзя: ошибка называет ссылающихся, а
 %% ни таблица, ни реестр не меняются.
 remove_referenced_test() ->
-    with_store([], fun(Store) ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
         Leaf = <<"https://example.com/leaf">>,
         Root = <<"https://example.com/root">>,
-        {ok, [Leaf]} = valid_json_store_manager:add(
+        {ok, [Leaf]} = valid_json_store_manager:add_at(
                          Store, [{Leaf, #{<<"type">> => <<"integer">>}}]),
-        {ok, [Root]} = valid_json_store_manager:add(
+        {ok, [Root]} = valid_json_store_manager:add_at(
                          Store, [{Root, #{<<"$ref">> => Leaf}}]),
         ?assertEqual({error, [{Leaf, #schema_error{reason = {referenced_by, Leaf,
                                                              [Root]},
@@ -174,43 +174,44 @@ remove_referenced_test() ->
 
 %% Ключ ошибки — написание вызывающего, а имя внутри причины — каноническое: по
 %% нему лежит артефакт, и это разные строки.
-remove_by_retrieval_test() ->
-    with_store([], fun(Store) ->
-        Retrieval = <<"https://example.com/retrieval">>,
+remove_by_registered_name_test() ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
+        Registered = <<"https://example.com/registered">>,
         Canonical = <<"https://example.com/canonical">>,
         Root = <<"https://example.com/root">>,
-        {ok, [Canonical]} = valid_json_store_manager:add(
-                              Store, [{Retrieval, #{<<"$id">> => Canonical,
+        {ok, [Canonical]} = valid_json_store_manager:add_at(
+                              Store, [{Registered, #{<<"$id">> => Canonical,
                                                     <<"type">> => <<"integer">>}}]),
-        {ok, [Root]} = valid_json_store_manager:add(
+        {ok, [Root]} = valid_json_store_manager:add_at(
                          Store, [{Root, #{<<"$ref">> => Canonical}}]),
-        ?assertEqual({error, [{Retrieval,
+        ?assertEqual({error, [{Registered,
                                #schema_error{reason = {referenced_by, Canonical,
                                                        [Root]},
                                              location = undefined}}]},
-                     valid_json_store_manager:remove(Store, [Retrieval])),
+                     valid_json_store_manager:remove(Store, [Registered])),
         ok = valid_json_store_manager:remove(Store, [Root]),
-        ?assertEqual(ok, valid_json_store_manager:remove(Store, [Retrieval])),
+        ?assertEqual(ok, valid_json_store_manager:remove(Store, [Registered])),
         ?assertEqual({error, not_found},
                      valid_json_store_manager:lookup(Store, Canonical))
     end).
 
 %% Неразрешимое имя — ошибка того же списка: тега у удаления нет, потому что
-%% фаза одна.
+%% фаза одна. Fragment в registry lookup не участвует, поэтому имя с ним именем
+%% документа не бывает.
 remove_bad_name_test() ->
-    with_store([], fun(Store) ->
-        ?assertEqual({error, [{<<"a">>,
-                               #schema_error{reason = relative_uri_without_base,
+    with_store([{base_uri, ?BASE}], fun(Store) ->
+        ?assertEqual({error, [{<<"a#leaf">>,
+                               #schema_error{reason = invalid_uri,
                                              location = undefined}}]},
-                     valid_json_store_manager:remove(Store, [<<"a">>]))
+                     valid_json_store_manager:remove(Store, [<<"a#leaf">>]))
     end).
 
-%% Опция хранилища доходит до реестра: короткое имя разрешается от базы.
+%% Опция хранилища доходит до реестра: короткое имя разрешается от `base_uri`.
 base_uri_test() ->
     with_store([{base_uri, ?BASE}], fun(Store) ->
         Canonical = <<"https://example.com/schemas/product/banana">>,
         ?assertEqual({ok, [Canonical]},
-                     valid_json_store_manager:add(
+                     valid_json_store_manager:add_at(
                        Store, [{<<"product/banana">>,
                                 #{<<"type">> => <<"integer">>}}])),
         ?assertEqual(true, valid(Store, Canonical, 1))
@@ -221,12 +222,12 @@ base_uri_test() ->
 assert_format_test() ->
     Uri = <<"https://example.com/address">>,
     Schema = #{<<"format">> => <<"ipv4">>},
-    with_store([{assert_format, true}], fun(Store) ->
-        {ok, [Uri]} = valid_json_store_manager:add(Store, [{Uri, Schema}]),
+    with_store([{base_uri, ?BASE}, {assert_format, true}], fun(Store) ->
+        {ok, [Uri]} = valid_json_store_manager:add_at(Store, [{Uri, Schema}]),
         ?assertEqual(false, valid(Store, Uri, <<"not an address">>))
     end),
-    with_store([], fun(Store) ->
-        {ok, [Uri]} = valid_json_store_manager:add(Store, [{Uri, Schema}]),
+    with_store([{base_uri, ?BASE}], fun(Store) ->
+        {ok, [Uri]} = valid_json_store_manager:add_at(Store, [{Uri, Schema}]),
         ?assertEqual(true, valid(Store, Uri, <<"not an address">>))
     end).
 
@@ -236,21 +237,33 @@ assert_format_test() ->
 default_dialect_test() ->
     Uri = <<"https://example.com/tuple">>,
     Schema = #{<<"items">> => [#{<<"type">> => <<"integer">>}]},
-    with_store([{default_dialect, ?DRAFT_2019_09}], fun(Store) ->
-        {ok, [Uri]} = valid_json_store_manager:add(Store, [{Uri, Schema}]),
+    with_store([{base_uri, ?BASE}, {default_dialect, ?DRAFT_2019_09}], fun(Store) ->
+        {ok, [Uri]} = valid_json_store_manager:add_at(Store, [{Uri, Schema}]),
         ?assertEqual(true, valid(Store, Uri, [1])),
         ?assertEqual(false, valid(Store, Uri, [<<"a">>]))
     end),
-    with_store([], fun(Store) ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
         ?assertMatch({error,
                       {compilation, [{Uri, #schema_error{reason = schema_invalid}}]}},
-                     valid_json_store_manager:add(Store, [{Uri, Schema}]))
+                     valid_json_store_manager:add_at(Store, [{Uri, Schema}]))
     end).
 
 %% Незнакомая опция — ошибка конфигурации: хранилище не поднимается вовсе.
 unknown_option_test() ->
     process_flag(trap_exit, true),
-    ?assertMatch({error, _}, valid_json_store_sup:start_link(?STORE, [{oops, 1}])),
+    ?assertMatch({error, _},
+                 valid_json_store_sup:start_link(?STORE, [{base_uri, ?BASE},
+                                                          {oops, 1}])),
+    process_flag(trap_exit, false).
+
+%% Хранилищу без `base_uri` нечем называть свои схемы, и это та же ошибка
+%% конфигурации: подставить умолчание за разработчика нельзя.
+missing_base_uri_test() ->
+    process_flag(trap_exit, true),
+    ?assertMatch({error, _}, valid_json_store_sup:start_link(?STORE, [])),
+    ?assertMatch({error, _},
+                 valid_json_store_sup:start_link(?STORE,
+                                                 [{assert_format, true}])),
     process_flag(trap_exit, false).
 
 %% Короткое имя разрешается и на чтении: артефакт лежит под каноническим именем,
@@ -258,7 +271,7 @@ unknown_option_test() ->
 short_name_lookup_test() ->
     with_store([{base_uri, ?BASE}], fun(Store) ->
         Canonical = <<"https://example.com/schemas/product/banana">>,
-        {ok, [Canonical]} = valid_json_store_manager:add(
+        {ok, [Canonical]} = valid_json_store_manager:add_at(
                               Store, [{<<"product/banana">>,
                                        #{<<"type">> => <<"integer">>}}]),
         ?assertMatch({ok, _},
@@ -274,9 +287,9 @@ short_name_lookup_test() ->
 %% таблицы и снова пишет. Сирот при этом не остаётся — прежний документ реестру
 %% известен, и снять его можно как обычно.
 restart_manager_test() ->
-    with_store([], fun(Store) ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
         Old = <<"https://example.com/old">>,
-        {ok, [Old]} = valid_json_store_manager:add(
+        {ok, [Old]} = valid_json_store_manager:add_at(
                         Store, [{Old, #{<<"type">> => <<"integer">>}}]),
         Tables = tables(Store),
         Restarted = restart(Store, manager(Store)),
@@ -295,12 +308,12 @@ restart_manager_test() ->
 %% таблица реестра переживает: документы известны, и артефакты пересобираются
 %% при старте.
 restart_artifacts_keeper_test() ->
-    with_store([], fun(Store) ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
         Leaf = <<"https://example.com/leaf">>,
         Root = <<"https://example.com/root">>,
-        {ok, [Leaf]} = valid_json_store_manager:add(
+        {ok, [Leaf]} = valid_json_store_manager:add_at(
                          Store, [{Leaf, #{<<"type">> => <<"integer">>}}]),
-        {ok, [Root]} = valid_json_store_manager:add(
+        {ok, [Root]} = valid_json_store_manager:add_at(
                          Store, [{Root, #{<<"$ref">> => Leaf}}]),
         {Artifacts, Registry} = tables(Store),
         _Restarted = restart(Store, keeper(artifacts_table(Store))),
@@ -320,9 +333,9 @@ restart_artifacts_keeper_test() ->
 %% Смерть хранителя реестра уносит обе таблицы: восстанавливать не из чего, и
 %% хранилище начинается пустым. Имя после этого снова свободно.
 restart_registry_keeper_test() ->
-    with_store([], fun(Store) ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
         Uri = <<"https://example.com/integer">>,
-        {ok, [Uri]} = valid_json_store_manager:add(
+        {ok, [Uri]} = valid_json_store_manager:add_at(
                         Store, [{Uri, #{<<"type">> => <<"integer">>}}]),
         {Artifacts, Registry} = tables(Store),
         _Restarted = restart(Store, keeper(registry_table(Store))),
@@ -332,7 +345,7 @@ restart_registry_keeper_test() ->
         ?assertEqual({error, not_found},
                      valid_json_store_manager:lookup(Store, Uri)),
         ?assertEqual({ok, [Uri]},
-                     valid_json_store_manager:add(
+                     valid_json_store_manager:add_at(
                        Store, [{Uri, #{<<"type">> => <<"integer">>}}]))
     end).
 

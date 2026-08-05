@@ -458,7 +458,7 @@ discover(Schema, Retrieval, Dialect) ->
     Profile = valid_json_vocabulary:canonical(Dialect),
     valid_json_resource_index:discover(
       Schema, Retrieval, Profile,
-      valid_json_compile_closure:dialect_resolver(valid_json_store:new([]),
+      valid_json_compile_closure:dialect_resolver(valid_json_store:temporary(),
                                                   Profile)).
 
 resolve_ref(Index, Base, Reference) ->

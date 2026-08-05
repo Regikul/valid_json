@@ -17,8 +17,9 @@
 %% которого реестр и переехал в таблицу.
 %%
 %% Приложение, которому нужно собственное хранилище, берёт отсюда child_spec/2 и
-%% ставит его в своё дерево. Стандартное хранилище библиотека поднимает сама, без
-%% опций: их значения оно берёт из app env либо из встроенных умолчаний.
+%% ставит его в своё дерево. Опции обязательны: без `base_uri` хранилищу нечем
+%% называть свои схемы, и старт кончается badarg. Стандартное хранилище
+%% библиотека поднимает сама и `base_uri` называет ему тоже сама.
 %%
 %% Имени у этого процесса нет намеренно: держит его родитель, а обращаться к нему
 %% пока некому. Имя появится тогда, когда понадобится, а не заранее.
@@ -26,11 +27,7 @@
 
 -behaviour(supervisor).
 
--export([start_link/1, start_link/2, child_spec/1, child_spec/2, init/1]).
-
--spec child_spec(atom()) -> supervisor:child_spec().
-child_spec(Store) ->
-    child_spec(Store, []).
+-export([start_link/2, child_spec/2, init/1]).
 
 -spec child_spec(atom(), [valid_json_store_manager:store_option()]) ->
           supervisor:child_spec().
@@ -41,10 +38,6 @@ child_spec(Store, Options) ->
       shutdown => infinity,
       type => supervisor,
       modules => [?MODULE]}.
-
--spec start_link(atom()) -> {ok, pid()}.
-start_link(Store) ->
-    start_link(Store, []).
 
 -spec start_link(atom(), [valid_json_store_manager:store_option()]) ->
           {ok, pid()}.

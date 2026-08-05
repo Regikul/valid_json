@@ -100,6 +100,7 @@ samples() ->
       unresolved_anchor            => unresolved_anchor,
       core_vocabulary_missing      => core_vocabulary_missing,
       schema_invalid               => schema_invalid,
+      unnamed_schema               => unnamed_schema,
       {dangling_ref, 1}            => {dangling_ref, Target},
       {non_schema_target, 1}       => {non_schema_target, Target},
       {unknown_document, 1}        => {unknown_document, <<"https://example.com/missing">>},

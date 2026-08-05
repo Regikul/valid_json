@@ -5,19 +5,36 @@
 -include("valid_json_core.hrl").
 -include("valid_json_resources.hrl").
 
--export([add/1, add/2, remove/1, wait/1, validate/3,
-         store_add/2, store_add/3, store_remove/2, store_wait/2,
-         store_validate/4, format_error/1]).
+-export([add/1, add_at/1, add_at/2, remove/1, wait/1, validate/3]).
 
--spec add(uri(), json()) ->
-          {ok, [uri()]} | {error, valid_json_store_manager:add_error()}.
-add(Uri, Json) ->
-    add([{Uri, Json}]).
+-export([store_add/2, store_add_at/2, store_add_at/3, store_remove/2,
+         store_wait/2, store_validate/4]).
 
--spec add([{uri(), json()}]) ->
+-export([format_error/1]).
+
+%% Схема называет себя сама: имя документа — его `$id`, и требовать имени рядом
+%% незачем. Список нужен потому, что резолв не ленивый: взаимно ссылающиеся
+%% документы обязаны попасть в реестр одним вызовом. Пар этот вход не берёт —
+%% для них есть `add_at`, и одно имя не значит двух правил именования.
+-spec add(json() | [json()]) ->
           {ok, [uri()]} | {error, valid_json_store_manager:add_error()}.
-add(Entries) ->
-    store_add(?STANDARD_STORE, Entries).
+add(Schemas) when is_list(Schemas) ->
+    store_add(?STANDARD_STORE, Schemas);
+add(Schema) ->
+    add([Schema]).
+
+%% Форма для случая, когда имя есть снаружи: схема взята по этому адресу, и он
+%% же становится её именем, если `$id` она не объявила. Отличается от `add/1`
+%% именем функции, а не устройством аргумента.
+-spec add_at(uri(), json()) ->
+          {ok, [uri()]} | {error, valid_json_store_manager:add_error()}.
+add_at(Uri, Json) ->
+    add_at([{Uri, Json}]).
+
+-spec add_at([{uri(), json()}]) ->
+          {ok, [uri()]} | {error, valid_json_store_manager:add_error()}.
+add_at(Entries) ->
+    store_add_at(?STANDARD_STORE, Entries).
 
 -spec remove([uri()]) -> ok | {error, [{uri(), #schema_error{}}]}.
 remove(Uris) ->
@@ -38,15 +55,22 @@ wait(Timeout) ->
 validate(Uri, Instance, Options) ->
     store_validate(?STANDARD_STORE, Uri, Instance, Options).
 
--spec store_add(atom(), uri(), json()) ->
+-spec store_add_at(atom(), uri(), json()) ->
           {ok, [uri()]} | {error, valid_json_store_manager:add_error()}.
-store_add(Store, Uri, Json) ->
-    store_add(Store, [{Uri, Json}]).
+store_add_at(Store, Uri, Json) ->
+    store_add_at(Store, [{Uri, Json}]).
 
--spec store_add(atom(), [{uri(), json()}]) ->
+-spec store_add_at(atom(), [{uri(), json()}]) ->
           {ok, [uri()]} | {error, valid_json_store_manager:add_error()}.
-store_add(Store, Entries) ->
-    valid_json_store_manager:add(Store, Entries).
+store_add_at(Store, Entries) ->
+    valid_json_store_manager:add_at(Store, Entries).
+
+-spec store_add(atom(), json() | [json()]) ->
+          {ok, [uri()]} | {error, valid_json_store_manager:add_error()}.
+store_add(Store, Schemas) when is_list(Schemas) ->
+    valid_json_store_manager:add(Store, Schemas);
+store_add(Store, Schema) ->
+    store_add(Store, [Schema]).
 
 -spec store_remove(atom(), [uri()]) ->
           ok | {error, [{uri(), #schema_error{}}]}.

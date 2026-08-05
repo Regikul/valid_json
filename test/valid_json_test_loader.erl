@@ -5,12 +5,7 @@
 
 -behaviour(valid_json_loader).
 
--export([load/1, base_uri/1]).
+-export([load/1]).
 
 load(#{load := Fun}) ->
     Fun().
-
-base_uri(#{base := Base}) ->
-    {ok, Base};
-base_uri(#{}) ->
-    undefined.

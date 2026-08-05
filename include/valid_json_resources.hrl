@@ -8,6 +8,11 @@
 -include("valid_json_core.hrl").
 
 -define(STANDARD_STORE, valid_json).
+%% `base_uri` стандартного хранилища. Схемы приложения, которому хватает одного
+%% набора, принадлежат самой библиотеке, и назвать их именем чужого сервиса
+%% нельзя. Домен `.internal` зарезервирован ICANN за частными сетями, поэтому
+%% имя схемы никогда не совпадёт с адресом, за которым что-то отвечает.
+-define(STANDARD_BASE_URI, <<"https://valid_json.internal/schemas/">>).
 
 -define(DRAFT_2020_12,
         <<"https://json-schema.org/draft/2020-12/schema">>).
@@ -34,7 +39,7 @@
 -type schema_validation() :: trusted | format().
 
 -record(document, {
-    retrieval :: uri(),
+    registered :: uri(),
     canonical :: uri(),
     json      :: json()
 }).

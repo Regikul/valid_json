@@ -1,6 +1,8 @@
 %% Загрузчик каталога: рекурсивный обход, чтение файлов по расширению и имя
-%% документа из пути относительно корня. Нормативное описание —
-%% okf/architecture/validator-resources-runtime.md, раздел «Каталог».
+%% документа из пути относительно корня. Имя это относительное, и адресом схемы
+%% оно само по себе не становится: как схемы называются, решает хранилище.
+%% Нормативное описание — okf/architecture/validator-resources-runtime.md,
+%% раздел «Каталог».
 %%
 %% Аргумент — proplist: корень каталога и необязательное `extension`
 %% (по умолчанию `.json`). Корень задаётся либо прямо, `{root, Path}`, либо
@@ -19,7 +21,7 @@
 
 -include("valid_json_resources.hrl").
 
--export([base_uri/1, load/1]).
+-export([load/1]).
 -export_type([dir_option/0, error/0]).
 
 -type dir_option() :: {root, file:filename_all()}
@@ -38,16 +40,6 @@
 %% В первом сегменте относительной ссылки двоеточие запрещено: с ним начало
 %% имени прочиталось бы как scheme.
 -define(SAFE_FIRST, "!$&'()*+,;=@").
-
-%% Каталог сам по себе базой не является: базой становится его `file://` URI,
-%% и завершающий слэш здесь обязателен — без него разрешение относительного
-%% имени съело бы последний сегмент пути.
--spec base_uri([dir_option()]) -> {ok, uri()}.
-base_uri(Options) ->
-    Root = unicode:characters_to_binary(filename:absname(root(Options))),
-    Segments = [quote(Segment, ?SAFE) || Segment <- split(Root), Segment =/= <<>>],
-    %% Пустой хвостовой сегмент и даёт завершающий слэш.
-    {ok, join([<<"file://">> | Segments] ++ [<<>>])}.
 
 -spec load([dir_option()]) -> {ok, [{uri(), json()}]} | {error, error()}.
 load(Options) ->
@@ -158,8 +150,9 @@ decode(Encoded) ->
     catch error:_ -> invalid
     end.
 
-%% Имя документа относительное, поэтому абсолютным его делает база хранилища:
-%% та же схема годится и под базой загрузчика, и под базой, заданной опцией.
+%% Имя документа относительное, поэтому абсолютным его делает `base_uri`
+%% хранилища: один и тот же каталог годится любому хранилищу, а под каким именем
+%% схема окажется, решает не путь к файлу.
 -spec name([binary()]) -> uri().
 name([First | Rest]) ->
     join([quote(First, ?SAFE_FIRST) | [quote(Segment, ?SAFE) || Segment <- Rest]]).
@@ -173,10 +166,6 @@ join(Segments) ->
     lists:foldl(fun(Segment, <<>>) -> Segment;
                    (Segment, Acc)  -> <<Acc/binary, "/", Segment/binary>>
                 end, <<>>, Segments).
-
--spec split(binary()) -> [binary()].
-split(Path) ->
-    binary:split(Path, <<"/">>, [global]).
 
 -spec path(file:filename_all(), [binary()]) -> file:filename_all().
 path(Root, []) ->

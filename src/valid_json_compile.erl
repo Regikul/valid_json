@@ -27,10 +27,10 @@ compile(Schema, Dialect) ->
     %% resource неотличима от неизвестного dialect — как и на любом другом имени,
     %% которого нет в реестре.
     Resolve = valid_json_compile_closure:dialect_resolver(
-                valid_json_store:new([]), Profile),
+                valid_json_store:temporary(), Profile),
     case valid_json_resource_index:discover(Schema, anonymous, Profile, Resolve) of
         {ok, Index} ->
-            finish(valid_json_store:new([]), {ok, Index, []}, basic, false);
+            finish(valid_json_store:temporary(), {ok, Index, []}, basic, false);
         {error, _} = Error ->
             Error
     end.
@@ -44,7 +44,7 @@ compile(Schema, Dialect) ->
 compile_unchecked(Schema, Dialect) ->
     Profile = valid_json_vocabulary:canonical(Dialect),
     Resolve = valid_json_compile_closure:dialect_resolver(
-                valid_json_store:new([]), Profile),
+                valid_json_store:temporary(), Profile),
     case valid_json_resource_index:discover(Schema, anonymous, Profile, Resolve) of
         {ok, Index} -> valid_json_compile_emit:emit(Index, [], false);
         {error, _} = Error -> Error

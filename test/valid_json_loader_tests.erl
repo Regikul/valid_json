@@ -34,17 +34,15 @@ dir_extension_test() ->
         ?assertEqual([<<"kept.schema">>], [Name || {Name, _Json} <- Entries])
     end).
 
-%% База — `file://` URI корня, и завершающий слэш в ней обязателен: без него
-%% разрешение относительного имени съело бы последний сегмент пути.
-dir_base_uri_test() ->
-    {ok, Base} = valid_json_loader_dir:base_uri([{root, fixtures()}]),
-    Expected = unicode:characters_to_binary(
-                 ["file://", filename:absname(fixtures()), "/"]),
-    ?assertEqual(Expected, Base),
-    ?assertMatch(<<"file:///", _/binary>>, Base),
-    %% Относительное имя набора разрешается от неё в обычный абсолютный URI.
-    ?assertMatch({ok, _, root},
-                 valid_json_uri:resolve(<<"product/banana.json">>, Base)).
+%% Имена набора относительные: путь к файлу адресом схемы не становится, и
+%% абсолютным имя делает `base_uri` хранилища.
+dir_names_are_relative_test() ->
+    {ok, Entries} = valid_json_loader_dir:load([{root, fixtures()}]),
+    [?assertMatch({ok, _, root}, valid_json_uri:resolve(Name, ?BASE))
+     || {Name, _Json} <- Entries],
+    [?assertEqual({error, relative_uri_without_base},
+                  valid_json_uri:resolve(Name, anonymous))
+     || {Name, _Json} <- Entries].
 
 %% Пробел экранируется, двоеточие в первом сегменте — тоже, иначе имя
 %% прочиталось бы как scheme. Обычное имя при этом не меняется ни на байт.
@@ -71,16 +69,12 @@ dir_errors_test() ->
     end).
 
 %% Корень можно назвать и путём внутри `priv` приложения: в релизе рабочий
-%% каталог заранее не известен, а `priv` известен всегда. База при этом остаётся
-%% `file://` URI разрешённого каталога.
+%% каталог заранее не известен, а `priv` известен всегда.
 dir_priv_dir_test() ->
     Relative = "json_schema/draft-2020-12/output",
     Options = [{priv_dir, valid_json, Relative}],
     {ok, Entries} = valid_json_loader_dir:load(Options),
-    ?assertEqual([<<"schema.json">>], [Name || {Name, _Json} <- Entries]),
-    {ok, Base} = valid_json_loader_dir:base_uri(Options),
-    Root = filename:join(code:priv_dir(valid_json), Relative),
-    ?assertEqual(unicode:characters_to_binary(["file://", Root, "/"]), Base).
+    ?assertEqual([<<"schema.json">>], [Name || {Name, _Json} <- Entries]).
 
 %% Символьная ссылка — отказ, называющий путь: обходить её значило бы выйти за
 %% пределы объявленной области, а молча пропустить — потерять документ, который
@@ -116,7 +110,7 @@ dir_bad_argument_test() ->
     ?assertError(badarg, valid_json_loader_dir:load([{priv_dir, valid_json, "../.."}])),
     ?assertError(badarg, valid_json_loader_dir:load([{priv_dir, valid_json, "/etc"}])),
     ?assertError(badarg, valid_json_loader_dir:load([{priv_dir, no_such_app, "schemas"}])),
-    ?assertError(badarg, valid_json_loader_dir:base_uri([{priv_dir, valid_json, oops}])).
+    ?assertError(badarg, valid_json_loader_dir:load([{priv_dir, valid_json, oops}])).
 
 %% -------------------------------------------------------------------
 %% Загрузчик в хранилище
@@ -125,7 +119,7 @@ dir_bad_argument_test() ->
 %% Холодный старт наполняет хранилище целиком: ссылки между файлами каталога
 %% сошлись, потому что набор ушёл в реестр одним вызовом.
 dir_store_test() ->
-    with_store([{loader, dir_loader()}], fun(Store) ->
+    with_store([{base_uri, ?BASE}, {loader, dir_loader()}], fun(Store) ->
         {ok, _Ref} = valid_json_store_manager:wait(Store, 5000),
         ?assertEqual(true, valid(Store, <<"root.json">>,
                                  #{<<"banana">> => #{<<"weight">> => 3}})),
@@ -137,19 +131,9 @@ dir_store_test() ->
         ?assertEqual(true, valid(Store, <<"weight.json">>, 1))
     end).
 
-%% База берётся от загрузчика: имя документа становится `file://` URI своего
-%% файла.
-loader_base_uri_test() ->
-    with_store([{loader, dir_loader()}], fun(Store) ->
-        {ok, _Ref} = valid_json_store_manager:wait(Store, 5000),
-        {ok, Base} = valid_json_loader_dir:base_uri([{root, fixtures()}]),
-        Canonical = <<Base/binary, "weight.json">>,
-        ?assertMatch({ok, _}, valid_json_store_manager:lookup(Store, Canonical))
-    end).
-
-%% Явная опция загрузчика не перебивается: имена набора относительные и потому
-%% ложатся под ту базу, которую выбрал вызывающий.
-option_base_uri_wins_test() ->
+%% Имена набора называет хранилище: относительное имя файла ложится под
+%% `base_uri` и адресуется только получившимся именем.
+store_base_uri_test() ->
     with_store([{base_uri, ?BASE}, {loader, dir_loader()}], fun(Store) ->
         {ok, _Ref} = valid_json_store_manager:wait(Store, 5000),
         ?assertMatch({ok, _},
@@ -159,22 +143,37 @@ option_base_uri_wins_test() ->
                                  #{<<"banana">> => #{<<"weight">> => 3}}))
     end).
 
-%% Загрузчик без базы оставляет цепочку разрешения прежней: база приходит из
-%% app env, и короткие имена набора ложатся под неё.
-bare_loader_test() ->
-    ok = application:set_env(valid_json, base_uri, ?BASE),
-    try
-        Entries = [{<<"weight">>, #{<<"type">> => <<"integer">>}}],
-        with_store([{loader, {valid_json_test_loader_bare, Entries}}],
-                   fun(Store) ->
-                       {ok, _Ref} = valid_json_store_manager:wait(Store, 5000),
-                       ?assertMatch({ok, _},
-                                    valid_json_store_manager:lookup(
-                                      Store, <<"https://example.com/schemas/weight">>))
-                   end)
-    after
-        ok = application:unset_env(valid_json, base_uri)
-    end.
+%% Один и тот же набор под двумя хранилищами получает разные имена: `base_uri`
+%% и есть способ заявить о принадлежности схем сервису.
+two_stores_name_apart_test() ->
+    Shop = <<"https://shop.service/schemas/">>,
+    with_store([{base_uri, Shop}, {loader, dir_loader()}], fun(Store) ->
+        {ok, _Ref} = valid_json_store_manager:wait(Store, 5000),
+        ?assertMatch({ok, _},
+                     valid_json_store_manager:lookup(
+                       Store, <<"https://shop.service/schemas/weight.json">>)),
+        %% Имя чужого хранилища здесь не значит ничего.
+        ?assertEqual({error, not_found},
+                     valid_json_store_manager:lookup(
+                       Store, <<"https://example.com/schemas/weight.json">>))
+    end).
+
+%% Хранилище без `base_uri` называть свои схемы нечем, и старт его кончается
+%% badarg.
+missing_base_uri_test() ->
+    ?assertEqual(dead, tree_outcome([{loader, dir_loader()}])).
+
+%% Загрузчик отдаёт только относительные имена, а абсолютными их делает
+%% хранилище: собственному загрузчику для этого не нужно знать ничего.
+relative_names_test() ->
+    Entries = [{<<"weight">>, #{<<"type">> => <<"integer">>}}],
+    Loader = {valid_json_test_loader, #{load => fun() -> {ok, Entries} end}},
+    with_store([{base_uri, ?BASE}, {loader, Loader}], fun(Store) ->
+        {ok, _Ref} = valid_json_store_manager:wait(Store, 5000),
+        ?assertMatch({ok, _},
+                     valid_json_store_manager:lookup(
+                       Store, <<"https://example.com/schemas/weight">>))
+    end).
 
 %% Загрузчик стандартного хранилища задаётся только через app env: его дерево
 %% поднимает библиотека, и опций ему передать неоткуда.
@@ -249,19 +248,18 @@ removed_document_stays_removed_test() ->
 loader_failure_test() ->
     Failing = {valid_json_test_loader,
                #{load => fun() -> {error, no_such_directory} end}},
-    ?assertEqual(dead, tree_outcome([{loader, Failing}])).
+    ?assertEqual(dead, tree_outcome([{base_uri, ?BASE}, {loader, Failing}])).
 
 %% Отказ компиляции набора разбирается там же и так же.
 loader_compilation_failure_test() ->
     Broken = {valid_json_test_loader,
-              #{base => ?BASE,
-                load => fun() -> {ok, [{<<"broken">>, #{<<"type">> => 1}}]} end}},
-    ?assertEqual(dead, tree_outcome([{loader, Broken}])).
+              #{load => fun() -> {ok, [{<<"broken">>, #{<<"type">> => 1}}]} end}},
+    ?assertEqual(dead, tree_outcome([{base_uri, ?BASE}, {loader, Broken}])).
 
 %% Негодная опция загрузчика останавливает старт так же громко, как любая
 %% другая.
 bad_loader_option_test() ->
-    ?assertEqual(dead, tree_outcome([{loader, not_a_loader}])).
+    ?assertEqual(dead, tree_outcome([{base_uri, ?BASE}, {loader, not_a_loader}])).
 
 %% -------------------------------------------------------------------
 %% Готовность
@@ -272,12 +270,11 @@ bad_loader_option_test() ->
 unavailable_while_loading_test() ->
     Parent = self(),
     Blocking = {valid_json_test_loader,
-                #{base => ?BASE,
-                  load => fun() ->
+                #{load => fun() ->
                                   Parent ! {loading, self()},
                                   receive release -> {ok, entries()} end
                           end}},
-    with_store([{loader, Blocking}], fun(Store) ->
+    with_store([{base_uri, ?BASE}, {loader, Blocking}], fun(Store) ->
         Manager = receive {loading, Pid} -> Pid
                   after 5000 -> erlang:error(no_loading) end,
         ?assertEqual({error, unavailable},
@@ -302,7 +299,7 @@ unavailable_without_store_test() ->
 %% Монитор ставится до подтверждения готовности, поэтому смерть управляющего
 %% после ответа не проходит мимо вызывающего.
 wait_monitor_test() ->
-    with_store([], fun(Store) ->
+    with_store([{base_uri, ?BASE}], fun(Store) ->
         {ok, Ref} = valid_json_store_manager:wait(Store, 5000),
         Manager = manager(Store),
         exit(Manager, kill),
@@ -332,15 +329,14 @@ wait_timeout_test() ->
 dir_loader() ->
     {valid_json_loader_dir, [{root, fixtures()}]}.
 
-%% Единственный документ набора назван базой хранилища: так проверке всё равно,
-%% какая база выбрана, и имя остаётся коротким.
+%% Единственный документ набора назван полным именем: так проверке не нужно
+%% пересчитывать короткое имя под `base_uri` хранилища.
 entries() ->
     [{?BASE, #{<<"type">> => <<"integer">>}}].
 
 counting_loader() ->
     {valid_json_test_loader,
-     #{base => ?BASE,
-       load => fun() ->
+     #{load => fun() ->
                        ets:update_counter(?PROBE, calls, 1),
                        {ok, entries()}
                end}}.
@@ -351,7 +347,7 @@ calls() ->
 %% Хранилище со считающим загрузчиком, договорившее свой старт.
 with_loaded(Fun) ->
     with_probe(fun() ->
-        with_store([{loader, counting_loader()}], fun(Store) ->
+        with_store([{base_uri, ?BASE}, {loader, counting_loader()}], fun(Store) ->
             {ok, _Ref} = valid_json_store_manager:wait(Store, 5000),
             Fun(Store)
         end)

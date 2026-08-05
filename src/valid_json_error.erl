@@ -44,6 +44,8 @@ reason({misplaced_keyword, Keyword}) ->
     ["keyword is not allowed at this position: ", Keyword];
 reason({name_taken, Uri}) ->
     ["URI is already used by another document: ", Uri];
+reason(unnamed_schema) ->
+    "schema has no \"$id\" and was added without a URI";
 reason({referenced_by, Uri, Refs}) ->
     ["document ", Uri, " cannot be removed, it is referenced by: ",
      lists:join(", ", Refs)];

@@ -47,6 +47,24 @@ library does not do.
 | `hostname` | An `xn--…` label is treated as an ordinary label: A-labels are not decoded and IDNA2008 rules are not applied to their contents |
 | Numeric precision | `multipleOf` and numeric comparisons are computed on doubles, so a decimal fraction with no exact binary representation can disagree with decimal arithmetic |
 
+## Comparison
+
+`valid_json` is new. To help you decide whether it fits, here is how it lines up
+against the two closest alternatives — [jesse](https://github.com/for-GET/jesse)
+for Erlang and [jsonschex](https://github.com/xinz/jsonschex) for Elixir.
+
+| | valid_json | jesse | jsonschex |
+| --- | --- | --- | --- |
+| Dialects | 2020-12, 2019-09 | draft 03, 04, 06 | 2020-12 |
+| Output | standard `flag`, `basic`, `detailed`, `verbose` | own error tuples | own error structs |
+| Registry | offline, pre-populated, in ETS under supervision | global ETS, may fetch over HTTP | inside the compiled struct, filled by your loader |
+
+The full comparison lives in [docs/comparison](docs/comparison/index.md), split
+into [API](docs/comparison/api.md),
+[architecture](docs/comparison/architecture.md), and
+[keyword and feature coverage](docs/comparison/keywords.md). It was measured
+against jesse 1.8.2 and jsonschex 0.9.0 on 2026-08-05.
+
 ## Requirements
 
 - Erlang/OTP 27 or later — the library decodes JSON with the `json` module
@@ -84,51 +102,58 @@ rebar3 shell
 
 ### Validate an inline schema with the standard store
 
-Register an inline schema under a URI, then validate instances against it:
+A schema names itself with `$id`. Register it, then validate instances against
+that name:
 
 ```erlang
 {ok, _} = application:ensure_all_started(valid_json),
 
-Uri = <<"https://example.com/schemas/user">>,
+Name = <<"https://example.com/schemas/user">>,
 Schema = #{
+    <<"$id">> => Name,
     <<"type">> => <<"object">>,
     <<"properties">> => #{
         <<"name">> => #{<<"type">> => <<"string">>}
     },
     <<"required">> => [<<"name">>]
 },
-{ok, [Uri]} = valid_json:add(Uri, Schema),
+{ok, [CanonicalUri]} = valid_json:add(Schema),
 
 {ok, #{<<"valid">> := true}} =
     valid_json:validate(
-        Uri,
+        CanonicalUri,
         #{<<"name">> => <<"Ada">>},
         [{output, flag}]).
 ```
+
+Schemas that reference one another must go in one call, because references are
+resolved eagerly: `valid_json:add([SchemaA, SchemaB])`. See
+[Schema names](#schema-names) for schemas that do not declare `$id`.
 
 The default output format is `flag`. Select `basic`, `detailed`, or `verbose`
 with the same `[{output, Format}]` option:
 
 ```erlang
 {ok, Result} = valid_json:validate(
-    Uri,
+    CanonicalUri,
     #{<<"name">> => 42},
     [{output, detailed}]).
 ```
 
 ### Report a rejected schema
 
-`add/2` and `remove/1` report failures as pairs of a document name and a schema
+`add/1` and `remove/1` report failures as pairs of a document name and a schema
 error. The error is a machine-readable record; `format_error/1` turns one into
-human-readable text:
+human-readable text. A schema rejected before it got a name is reported under
+the atom `anonymous`:
 
 ```erlang
-case valid_json:add(Uri, Schema) of
+case valid_json:add(Schema) of
     {ok, Names} ->
         Names;
     {error, {compilation, Errors}} ->
-        [io:format("~ts: ~ts~n", [Name, valid_json:format_error(Error)])
-         || {Name, Error} <- Errors]
+        [io:format("~ts: ~ts~n", [DocName, valid_json:format_error(Error)])
+         || {DocName, Error} <- Errors]
 end.
 ```
 
@@ -180,19 +205,66 @@ rebar3 shell
     valid_json:validate(<<"weight.json">>, 5, [{output, flag}]).
 ```
 
-The loader derives a `file://` base URI from the directory. File names are
-therefore available as relative document names, and `.json` is the default
-extension.
+The schema above declares no `$id`, so it is named by the path it was loaded
+from — `weight.json`, with `.json` as the default extension. See
+[Schema names](#schema-names) for the full rule.
 
 ### References and custom stores
 
 For schemas with `$ref` links, register every document needed by the reference
-closure before registering the root schema. The store is pre-populated only;
-it never fetches referenced documents over the network.
+closure in one call — `valid_json:add([SchemaA, SchemaB])`, or
+`valid_json:add_at([{UriA, SchemaA}, {UriB, SchemaB}])` when the names come
+from outside. References are resolved eagerly, and a document whose target is
+not in the store yet is rejected. The store is pre-populated only; it never
+fetches referenced documents over the network.
 
 For a custom store, add `valid_json_store_sup:child_spec/2` to your
 application's supervision tree, then use the `valid_json` facade's `store_*`
 functions, such as `valid_json:store_add/2` and `valid_json:store_validate/4`.
+A store requires a `base_uri`: it is how the store claims its schemas for a
+service, and two stores over the same directory under
+`https://shop.service/schemas/` and `https://internal.service/schemas/` name
+their documents apart.
+
+## Schema names
+
+A document is addressed by its `$id`. Nothing else is an address: a schema
+registered under a path that also declares `$id` answers to the `$id` only, and
+the path stays behind as the base against which its relative `$ref` resolve.
+
+A relative `$id` is resolved against the `base_uri` of the store. The standard
+store uses `https://valid_json.internal/schemas/`, so a schema with
+`"$id": "weight"` is addressable as
+`https://valid_json.internal/schemas/weight` and, in the short form resolved
+against that `base_uri`, as `weight`. The `.internal` top-level domain is
+reserved by ICANN for private use, so such a name never collides with an
+address that something answers at. This is the implementation-defined default
+base URI that RFC 3986 Section 5.1.4 permits and JSON Schema Section 9.1.1 asks
+implementations to document.
+
+A schema that declares no `$id` has to be named from the outside, and that is
+what `add_at` is for. It takes one document, or a batch of them when they
+reference each other:
+
+```erlang
+{ok, [Name]}  = valid_json:add_at(<<"allow">>, true),
+{ok, [A, B]}  = valid_json:add_at([{<<"a">>, SchemaA}, {<<"b">>, SchemaB}]).
+```
+
+The loader does the same for a whole directory, naming each document by its
+path relative to the root. Both kinds of path are relative, and the store's
+`base_uri` makes them absolute — which is why the same set of files suits any
+store.
+
+The two doors do not overlap: `add/1` takes schemas and nothing else, `add_at`
+takes named entries and nothing else. Which function you call is what decides
+where the name comes from — never the shape of the argument.
+
+A schema passed to `valid_json:add/1` without an `$id` is rejected with
+`unnamed_schema`: the root of a document is always a schema resource and needs
+an absolute name, and there is nothing to build one from. That includes the
+boolean schemas `true` and `false`, which carry no keywords and therefore no
+`$id` — they can only be registered by the loader or by `add_at`.
 
 ## License
 

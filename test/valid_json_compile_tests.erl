@@ -818,7 +818,7 @@ remote_anchor_via_retrieval_test() ->
                <<"$anchor">> => <<"leaf">>,
                <<"type">> => <<"string">>},
     {ok, Canonical, Store} =
-        valid_json_store:add(valid_json_store:new([]), Retrieval, Remote),
+        valid_json_store:add(valid_json_store:temporary(), Retrieval, Remote),
     Schema = #{<<"$ref">> => <<Retrieval/binary, "#leaf">>},
     Expected =
         #{root => anonymous,
@@ -838,7 +838,7 @@ remote_cycle_finite_ir_test() ->
     A = <<"https://example.com/a">>,
     B = <<"https://example.com/b">>,
     {ok, [A, B], Store} =
-        valid_json_store:add(valid_json_store:new([]),
+        valid_json_store:add(valid_json_store:temporary(),
                              [{A, #{<<"$id">> => A, <<"$ref">> => B}},
                               {B, #{<<"$id">> => B, <<"$ref">> => A}}]),
     Expected =
@@ -858,7 +858,7 @@ remote_transitive_sources_test() ->
     Embedded = <<"https://example.com/embedded">>,
     {ok, [A, B, C], Store} =
         valid_json_store:add(
-          valid_json_store:new([]),
+          valid_json_store:temporary(),
           [{A, #{<<"$ref">> => B}},
            {B, #{<<"$ref">> => C,
                  <<"$defs">> => #{<<"local">> => #{<<"$id">> => Embedded}}}},
@@ -878,7 +878,7 @@ remote_pointer_evaluation_test() ->
                <<"$defs">> =>
                    #{<<"integer">> => #{<<"type">> => <<"integer">>}}},
     {ok, Canonical, Store} =
-        valid_json_store:add(valid_json_store:new([]), Retrieval, Remote),
+        valid_json_store:add(valid_json_store:temporary(), Retrieval, Remote),
     Schema = #{<<"$ref">> => <<Retrieval/binary, "#/$defs/integer">>},
     {ok, Compiled} = trusted_compile(Store, Schema, []),
     ?assertMatch({ok, #eval_result{valid = true}},
@@ -898,7 +898,7 @@ remote_parent_pointer_alias_test() ->
                          #{<<"$id">> => Child,
                            <<"properties">> => #{<<"x">> => false}}}},
     {ok, Root, Store} =
-        valid_json_store:add(valid_json_store:new([]), Retrieval, Remote),
+        valid_json_store:add(valid_json_store:temporary(), Retrieval, Remote),
     Ref = <<Retrieval/binary, "#/$defs/child/properties/x">>,
     {ok, Compiled} =
         trusted_compile(Store, #{<<"$ref">> => Ref}, []),
@@ -924,16 +924,16 @@ compile_uri_alias_and_base_test() ->
         maps:get(Canonical, maps:get(resources, Compiled)),
     %% Retrieval alias действительно был входом, хотя root artifact canonical.
     ?assertEqual(Retrieval,
-                 (valid_json_store:fetch(Retrieval, Store))#document.retrieval).
+                 (valid_json_store:fetch(Retrieval, Store))#document.registered).
 
 public_dialect_test() ->
     Legacy = #{<<"$schema">> => ?LEGACY, <<"type">> => <<"integer">>},
     {ok, Compiled} =
-        trusted_compile(valid_json_store:new([]), Legacy, []),
+        trusted_compile(valid_json_store:temporary(), Legacy, []),
     #resource{dialect = ?LEGACY} =
         maps:get(anonymous, maps:get(resources, Compiled)),
     {ok, Defaulted} =
-        trusted_compile(valid_json_store:new([]), #{},
+        trusted_compile(valid_json_store:temporary(), #{},
                         [{default_dialect, ?LEGACY}]),
     #resource{dialect = ?LEGACY} =
         maps:get(anonymous, maps:get(resources, Defaulted)).
@@ -957,7 +957,7 @@ cross_draft_embedded_test() ->
                            <<"items">> => [#{<<"type">> => <<"string">>}],
                            <<"additionalItems">> => #{<<"type">> => <<"integer">>}}}},
     {ok, #{resources := Resources}} =
-        trusted_compile(valid_json_store:new([]), Schema, []),
+        trusted_compile(valid_json_store:temporary(), Schema, []),
     #resource{dialect = RootDialect, nodes = RootNodes} = maps:get(Root, Resources),
     #resource{dialect = LegacyDialect, nodes = LegacyNodes} =
         maps:get(Legacy, Resources),
@@ -981,7 +981,7 @@ cross_draft_embedded_test() ->
 cross_draft_remote_test() ->
     Remote = <<"https://example.com/remote">>,
     {ok, Remote, Store} =
-        valid_json_store:add(valid_json_store:new([]), Remote,
+        valid_json_store:add(valid_json_store:temporary(), Remote,
                              #{<<"$id">> => Remote,
                                <<"$schema">> => ?LEGACY,
                                <<"prefixItems">> => [#{<<"type">> => <<"string">>}]}),
@@ -1024,7 +1024,7 @@ cross_draft_embedded_metaschema_test() ->
 misplaced_schema_test_() ->
     Compile = fun(Dialect) ->
                       valid_json_compile:compile(
-                        valid_json_store:new([]),
+                        valid_json_store:temporary(),
                         #{<<"$defs">> => #{<<"x">> => #{<<"$schema">> => ?DIALECT}}},
                         [{default_dialect, Dialect}])
               end,
@@ -1036,7 +1036,7 @@ misplaced_schema_test_() ->
 public_reference_error_test_() ->
     Missing = <<"https://example.com/missing">>,
     Remote = <<"https://example.com/remote">>,
-    Store = valid_json_store:new([]),
+    Store = valid_json_store:temporary(),
     TakenStore = begin
                      {ok, Missing, AddedTaken} =
                          valid_json_store:add(Store, Missing, true),
@@ -1235,7 +1235,7 @@ assert_format_option_test_() ->
                    option_constraints(#{<<"format">> => <<"custom-name">>},
                                       [{assert_format, true}])),
      ?_assertError(badarg,
-                   trusted_compile(valid_json_store:new([]), Ipv4,
+                   trusted_compile(valid_json_store:temporary(), Ipv4,
                                    [{assert_format, yes}]))].
 
 %% Опция принадлежит проходу компиляции целиком, а не отдельному документу:
@@ -1246,7 +1246,7 @@ assert_format_reaches_every_resource_test() ->
                <<"$defs">> => #{<<"inner">> => #{<<"$id">> => Inner,
                                                  <<"format">> => <<"ipv4">>}}},
     {ok, #{resources := Resources}} =
-        trusted_compile(valid_json_store:new([]), Schema,
+        trusted_compile(valid_json_store:temporary(), Schema,
                         [{assert_format, true}]),
     #resource{nodes = Nodes} = maps:get(Inner, Resources),
     ?assertEqual([{format, <<"ipv4">>, true}], constraints(<<>>, Nodes)).
@@ -1327,7 +1327,7 @@ vocabulary_unrecognized_test_() ->
                end,
     {ok, _, Store} =
         valid_json_store:add(
-          valid_json_store:new([]),
+          valid_json_store:temporary(),
           [{Required, metaschema(Required, Declared(true))},
            {Optional, metaschema(Optional, Declared(false))}]),
     Compile = fun(Meta) ->
@@ -1338,7 +1338,7 @@ vocabulary_unrecognized_test_() ->
     Assertion = <<"https://example.com/meta/format-assertion">>,
     {ok, Assertion, WithAssertion} =
         valid_json_store:add(
-          valid_json_store:new([]), Assertion,
+          valid_json_store:temporary(), Assertion,
           metaschema(Assertion, #{vocab(<<"core">>) => true,
                                   vocab(<<"format-assertion">>) => true})),
     [?_assertEqual({error, #schema_error{reason = {unrecognized_vocabulary, Custom},
@@ -1365,7 +1365,7 @@ vocabulary_core_test_() ->
     Unknown = <<"https://example.com/meta/unregistered">>,
     {ok, _, Store} =
         valid_json_store:add(
-          valid_json_store:new([]),
+          valid_json_store:temporary(),
           [{Missing, metaschema(Missing, #{vocab(<<"validation">>) => true})},
            {Disabled, metaschema(Disabled, #{vocab(<<"core">>) => false})}]),
     Compile = fun(Meta) ->
@@ -1530,7 +1530,7 @@ metaschema(Uri, Declared) ->
 metaschema_store(Uri, Names) ->
     Declared = maps:from_list([{vocab(Name), true} || Name <- Names]),
     {ok, Uri, Store} =
-        valid_json_store:add(valid_json_store:new([]), Uri,
+        valid_json_store:add(valid_json_store:temporary(), Uri,
                              metaschema(Uri, Declared)),
     Store.
 
@@ -1545,7 +1545,7 @@ constraints(Pointer, Nodes) ->
 %% принимает вовсе.
 option_constraints(Schema, Options) ->
     {ok, #{resources := Resources}} =
-        trusted_compile(valid_json_store:new([]), Schema, Options),
+        trusted_compile(valid_json_store:temporary(), Schema, Options),
     #resource{nodes = Nodes} = maps:get(anonymous, Resources),
     constraints(<<>>, Nodes).
 

@@ -33,11 +33,11 @@
 -include("valid_json_resources.hrl").
 
 -export([start_link/2, manager_name/1, artifacts_table/1, registry_table/1,
-         table_options/1, add/2, remove/2, lookup/2, wait/2]).
+         table_options/1, add/2, add_at/2, remove/2, lookup/2, wait/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, handle_continue/2]).
 -export_type([add_error/0, store_option/0]).
 
--type add_error() :: {registration, [{uri(), #schema_error{}}]}
+-type add_error() :: {registration, [{rid(), #schema_error{}}]}
                    | {compilation, [{uri(), #schema_error{}}]}.
 -type store_option() :: {base_uri, uri()}
                       | {default_dialect, dialect()}
@@ -94,11 +94,22 @@ table_options(registry) ->
 %% Обе ветви ошибки списочные, а различает их тег, потому что имена в них значат
 %% разное. У `registration` ключ — имя записи в написании вызывающего: до
 %% артефактов дело не дошло, и канонического имени у отвергнутой записи может не
-%% быть вовсе. У `compilation` ключ — каноническое имя, то самое, по которому
-%% ходят в таблицу.
--spec add(atom(), [{uri(), json()}]) -> {ok, [uri()]} | {error, add_error()}.
-add(Store, Entries) when is_list(Entries) ->
-    gen_server:call(manager_name(Store), {add, Entries}).
+%% быть вовсе; у схемы, назвавшей себя сама, написания нет вовсе, и ключом
+%% служит `anonymous`. У `compilation` ключ — каноническое имя, то самое, по
+%% которому ходят в таблицу.
+%%
+%% Дверей две, потому что имя документа приходит из двух разных мест, и
+%% различать их по устройству аргумента значило бы вернуть ту самую
+%% двусмысленность, ради которой ступени и разведены. `add/2` берёт схемы и
+%% выводит имена из `$id`; `add_at/2` берёт готовые пары и идёт прямо в реестр.
+%% Загрузчик ходит второй: путь к файлу у него есть.
+-spec add(atom(), [json()]) -> {ok, [uri()]} | {error, add_error()}.
+add(Store, Schemas) when is_list(Schemas) ->
+    gen_server:call(manager_name(Store), {add_schemas, Schemas}).
+
+-spec add_at(atom(), [{uri(), json()}]) -> {ok, [uri()]} | {error, add_error()}.
+add_at(Store, Entries) when is_list(Entries) ->
+    gen_server:call(manager_name(Store), {add_entries, Entries}).
 
 %% У удаления фаза одна, поэтому и тега у ошибки нет: и неразрешимое имя, и
 %% `referenced_by` названы написанием записи, и различать тут нечего.
@@ -107,9 +118,10 @@ remove(Store, Uris) when is_list(Uris) ->
     gen_server:call(manager_name(Store), {remove, Uris}).
 
 %% Имя пробуется сперва как есть, и канонический вызов этим и заканчивается —
-%% одним чтением. Разрешение от базы стоит второго чтения и достаётся только
-%% промаху, то есть короткому имени. База читается из таблицы реестра: состояние
-%% управляющего читателю не видно, а будить его на горячем пути незачем.
+%% одним чтением. Разрешение от `base_uri` стоит второго чтения и достаётся
+%% только промаху, то есть короткому имени. `base_uri` читается из таблицы
+%% реестра: состояние управляющего читателю не видно, а будить его на горячем
+%% пути незачем.
 -spec lookup(atom(), uri()) ->
           {ok, compiled()} | {error, not_found} | {error, unavailable}.
 lookup(Store, Uri) ->
@@ -153,10 +165,10 @@ lookup_resolved(Store, Uri) ->
         _Other     -> {error, unavailable}
     end.
 
-%% База читается из таблицы реестра, потому что состояние управляющего читателю
-%% не видно, а будить его на горячем пути незачем. Её отсутствие оставляет
-%% промах промахом: хранилище о своей готовности уже сказало, а разрешить
-%% короткое имя не от чего.
+%% `base_uri` читается из таблицы реестра, потому что состояние управляющего
+%% читателю не видно, а будить его на горячем пути незачем. Его отсутствие
+%% оставляет промах промахом: хранилище о своей готовности уже сказало, а
+%% разрешить короткое имя не от чего.
 -spec lookup_short(atom(), uri()) ->
           {ok, compiled()} | {error, not_found} | {error, unavailable}.
 lookup_short(Store, Uri) ->
@@ -165,7 +177,7 @@ lookup_short(Store, Uri) ->
         _Other     -> {error, not_found}
     end.
 
--spec lookup_from(atom(), uri(), uri() | anonymous) ->
+-spec lookup_from(atom(), uri(), uri()) ->
           {ok, compiled()} | {error, not_found} | {error, unavailable}.
 lookup_from(Store, Uri, Base) ->
     case valid_json_store:resolve_name(Uri, Base) of
@@ -260,11 +272,10 @@ left(Deadline) ->
 %% незачем: после ответа хранителя таблица уже наша. Отказ означает, что ею
 %% владеет кто-то третий, а без владения писать всё равно нельзя.
 %%
-%% Реестр поднимается из своей таблицы, а база берётся из опции либо от
-%% загрузчика, но не из пережившей таблицы: и опция, и загрузчик приходят через
-%% `start_link`, и супервизор перезапускает управляющего с теми же самыми,
-%% поэтому сравнивать базу с пережившей нечего. В таблицу база уходит
-%% односторонне, для читателей.
+%% Реестр поднимается из своей таблицы, а `base_uri` берётся из опции, но не из
+%% пережившей таблицы: опция приходит через `start_link`, и супервизор
+%% перезапускает управляющего с той же самой, поэтому сравнивать её с пережившей
+%% нечего. В таблицу `base_uri` уходит односторонне, для читателей.
 init({Store, Options}) ->
     ok = check_options(Options),
     Loader = option(loader, Options, undefined),
@@ -273,7 +284,7 @@ init({Store, Options}) ->
     case claim([Registry, Artifacts]) of
         ok ->
             Registered = valid_json_store:from_documents(
-                           documents(Registry), registry_options(Options, Loader)),
+                           documents(Registry), registry_options(Options)),
             true = ets:insert(Registry, {base, valid_json_store:base(Registered)}),
             {ok, #state{table = Artifacts, registry = Registry,
                         store = Registered, options = compile_options(Options),
@@ -293,7 +304,10 @@ handle_continue(start, State0) ->
     true = ets:insert(State#state.table, {ready, true}),
     {noreply, State}.
 
-handle_call({add, Entries}, _From, State) ->
+handle_call({add_schemas, Schemas}, _From, State) ->
+    {Reply, Next} = add_schemas(Schemas, State),
+    {reply, Reply, Next};
+handle_call({add_entries, Entries}, _From, State) ->
     {Reply, Next} = add_entries(Entries, State),
     {reply, Reply, Next};
 handle_call({remove, Uris}, _From, State) ->
@@ -388,6 +402,17 @@ documents(Registry) ->
 -spec missing(atom(), [uri()]) -> [uri()].
 missing(Table, Names) ->
     [Name || Name <- Names, ets:member(Table, Name) =:= false].
+
+%% Первая ступень регистрации: схемы называют себя сами, и дальше идёт уже
+%% обычный набор пар. Не выведенное имя останавливает вызов целиком — той же
+%% ценой, что и негодное имя записи: регистрировать нечего.
+-spec add_schemas([json()], #state{}) ->
+          {{ok, [uri()]} | {error, add_error()}, #state{}}.
+add_schemas(Schemas, #state{store = Store} = State) ->
+    case valid_json_store:name_entries(Store, Schemas) of
+        {ok, Entries}   -> add_entries(Entries, State);
+        {error, Errors} -> {{error, {registration, Errors}}, State}
+    end.
 
 %% Реестр меняется первым, но принимается только вместе с артефактами: до
 %% успешной компиляции всего пересобираемого набора состояние остаётся прежним.
@@ -499,9 +524,9 @@ compile_all(Names, Store, Options) ->
     end.
 
 %% Документ лежит в таблице под своим каноническим именем и тегированным ключом:
-%% служебная строка с базой не попадает в перебор документов по устройству
-%% ключа, а не по договорённости. Адрес загрузки отдельным ключом не заводится —
-%% он есть полем документа, и обратно реестр собирает оба ключа сам.
+%% служебная строка с `base_uri` не попадает в перебор документов по устройству
+%% ключа, а не по договорённости. Имя регистрации отдельным ключом не заводится —
+%% оно есть полем документа, и обратно реестр собирает оба ключа сам.
 -spec rows([uri()], store()) -> [{{document, uri()}, #document{}}].
 rows(Names, Store) ->
     [{{document, Name}, valid_json_store:fetch(Name, Store)} || Name <- Names].
@@ -520,50 +545,35 @@ commit(#state{table = Table, registry = Registry}, Artifacts, Documents, Gone) -
                   end, Gone).
 
 %% Незнакомая опция — ошибка конфигурации, а не пользовательского ввода, поэтому
-%% она завершается badarg и обваливает старт хранилища громко.
+%% она завершается badarg и обваливает старт хранилища громко. Тем же кончается
+%% и хранилище без `base_uri`: им оно объявляет принадлежность своих схем
+%% сервису, и назвать его умолчанием за разработчика нельзя.
 -spec check_options([term()]) -> ok.
-check_options([]) ->
-    ok;
-check_options([{loader, {Module, _Args}} | Rest]) when is_atom(Module) ->
-    check_options(Rest);
-check_options([{Key, _Value} | Rest])
-  when Key =:= base_uri; Key =:= default_dialect; Key =:= assert_format ->
-    check_options(Rest);
+check_options(Options) when is_list(Options) ->
+    case lists:keyfind(base_uri, 1, Options) of
+        {base_uri, _Uri} -> known_options(Options);
+        false            -> erlang:error(badarg, [Options])
+    end;
 check_options(Options) ->
     erlang:error(badarg, [Options]).
 
-%% Негодное значение base_uri отвергнет сам реестр: правило допустимой базы
-%% принадлежит ему.
--spec registry_options([store_option()], valid_json_loader:loader() | undefined) ->
-          [valid_json_store:registry_option()].
-registry_options(Options, Loader) ->
-    case base_uri(Options, Loader) of
-        undefined -> [];
-        Uri       -> [{base_uri, Uri}]
-    end.
+-spec known_options([term()]) -> ok.
+known_options([]) ->
+    ok;
+known_options([{loader, {Module, _Args}} | Rest]) when is_atom(Module) ->
+    known_options(Rest);
+known_options([{Key, _Value} | Rest])
+  when Key =:= base_uri; Key =:= default_dialect; Key =:= assert_format ->
+    known_options(Rest);
+known_options(Options) ->
+    erlang:error(badarg, [Options]).
 
-%% Приоритет базы: явная опция, затем база загрузчика, затем app env. Явная
-%% опция загрузчик не перебивает: вызывающий мог сознательно захотеть другую
-%% базу, и относительные имена набора лягут под неё.
--spec base_uri([store_option()], valid_json_loader:loader() | undefined) ->
-          uri() | undefined.
-base_uri(Options, Loader) ->
-    case lists:keyfind(base_uri, 1, Options) of
-        {base_uri, Uri} ->
-            Uri;
-        false ->
-            loader_or_env_base(Loader)
-    end.
-
--spec loader_or_env_base(valid_json_loader:loader() | undefined) ->
-          uri() | undefined.
-loader_or_env_base(undefined) ->
-    option(base_uri, [], undefined);
-loader_or_env_base({Module, Args}) ->
-    case Module:base_uri(Args) of
-        {ok, Uri} -> Uri;
-        undefined -> option(base_uri, [], undefined)
-    end.
+%% Негодное значение base_uri отвергнет сам реестр: правило допустимого
+%% base_uri принадлежит ему.
+-spec registry_options([store_option()]) -> [valid_json_store:registry_option()].
+registry_options(Options) ->
+    {base_uri, Uri} = lists:keyfind(base_uri, 1, Options),
+    [{base_uri, Uri}].
 
 -spec compile_options([store_option()]) -> [valid_json_compile:compile_option()].
 compile_options(Options) ->

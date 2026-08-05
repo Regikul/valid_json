@@ -1,17 +1,27 @@
-%% Чистый реестр JSON Schema documents. Он регистрирует два имени документа —
-%% retrieval и canonical URI, — но ничего не компилирует и не знает о ссылках.
+%% Чистый реестр JSON Schema documents. Он держит документ под двумя именами —
+%% именем регистрации и каноническим, — но ничего не компилирует и не знает о
+%% ссылках. Адресом схемы служит каноническое имя; имя регистрации нужно
+%% компиляции, чтобы разрешать `$ref`, написанные относительно него.
 %% Нормативный контракт — okf/architecture/validator-resources-runtime.md,
 %% разделы «Registry без сети» и «API и фазы компиляции».
+%%
+%% Регистрация состоит из двух ступеней, и `add/2` — вторая: она принимает
+%% только пары «имя — документ». Первая ступень, `name_entries/2`, нужна тем,
+%% кто имени не принёс: она выводит его из `$id` самой схемы. Так у каждой
+%% ступени одна форма входа, и разбирать, что именно ей дали, не приходится.
 -module(valid_json_store).
 
 -include("valid_json_resources.hrl").
 
--export([new/1, add/2, add/3, remove/2, fetch/2, canonical_names/1,
-         base/1, resolve_name/2, from_documents/2]).
+-export([new/1, temporary/0, name_entries/2, add/2, add/3, remove/2, fetch/2,
+         canonical_names/1, base/1, resolve_name/2, from_documents/2]).
 -export_type([store/0, registry_option/0]).
 
-%% `new/1` не имеет error-ветви по публичному контракту. Ошибочная опция —
-%% ошибка вызова API, поэтому она завершается badarg, а не schema_error.
+%% Реестр называет свои документы, поэтому `base_uri` ему обязателен: без него
+%% имя регистрации осталось бы относительным, а адреса у схемы не возникло бы.
+%% `new/1` не имеет error-ветви по публичному контракту: отсутствующая или
+%% ошибочная опция — ошибка вызова API, поэтому она завершается badarg, а не
+%% schema_error.
 -spec new([registry_option()]) -> store().
 new(Options) when is_list(Options) ->
     case base_option(Options) of
@@ -20,6 +30,57 @@ new(Options) when is_list(Options) ->
     end;
 new(Options) ->
     erlang:error(badarg, [Options]).
+
+%% Реестр на один вызов компиляции: схема пришла значением, регистрировать её
+%% негде и называть нечем, а нужен он затем, чтобы достать встроенные метасхемы.
+%% Имён этот реестр не разрешает и потому обходится без `base_uri`.
+-spec temporary() -> store().
+temporary() ->
+    #store{}.
+
+%% Первая ступень регистрации: схема, пришедшая без имени, называет себя сама.
+%% Имя выводится из `$id` и разрешается от базы хранилища — это четвёртый слой
+%% лестницы баз RFC 3986, application-dependent default, на который спека
+%% ссылается прямо (core.txt:1811). Не назвавшая себя схема дальше не идёт:
+%% корень документа всегда является schema resource и обязан иметь абсолютное
+%% имя (core.txt:565). Так же отвергается boolean — keywords он не несёт, и
+%% `$id` в нём быть не может.
+%%
+%% Ошибка называется `anonymous`: написания, с каким пришёл вызывающий, у такой
+%% записи нет. Собираются они все, как и на второй ступени, но с ней в один
+%% список не сходятся: пока имя не выведено, регистрировать нечего, и до разбора
+%% путей дело не доходит.
+-spec name_entries(store(), [json()]) ->
+          {ok, [{uri(), json()}]} | {error, [{anonymous, #schema_error{}}]}.
+name_entries(#store{} = Store, Entries) when is_list(Entries) ->
+    case lists:foldl(fun(Entry, Acc) -> name_entry(Entry, Store#store.base, Acc) end,
+                     {[], []}, Entries) of
+        {Named, []}      -> {ok, lists:reverse(Named)};
+        {_Named, Errors} -> {error, lists:reverse(Errors)}
+    end;
+name_entries(Store, Entries) ->
+    erlang:error(badarg, [Store, Entries]).
+
+%% Схема — это объект либо boolean, и других форм здесь нет: пара сюда не ходит
+%% вовсе, а падение на ней `function_clause` называет и функцию, и сам негодный
+%% элемент.
+-spec name_entry(json(), rid(),
+                 {[{uri(), json()}], [{anonymous, #schema_error{}}]}) ->
+          {[{uri(), json()}], [{anonymous, #schema_error{}}]}.
+name_entry(Json, Base, {Named, Errors}) when is_map(Json); is_boolean(Json) ->
+    case name_of(Json, Base) of
+        {ok, Name}     -> {[{Name, Json} | Named], Errors};
+        {error, Error} -> {Named, [{anonymous, Error} | Errors]}
+    end.
+
+%% Разрешение `$id` то же самое, каким пользуется вторая ступень: правило имени
+%% в реестре одно. Boolean сюда попадает второй клаузой — `$id` в нём нет и быть
+%% не может.
+-spec name_of(json(), rid()) -> {ok, uri()} | {error, #schema_error{}}.
+name_of(#{<<"$id">> := _} = Json, Base) ->
+    canonical(Json, Base);
+name_of(_Json, _Base) ->
+    schema_error(unnamed_schema).
 
 %% Запись здесь одна, поэтому имя ошибки вызывающий знает и без нас.
 -spec add(store(), uri(), json()) ->
@@ -110,14 +171,12 @@ from_documents(Documents, Options) when is_list(Documents) ->
 
 -spec index([#document{}]) -> #{uri() => #document{}}.
 index(Documents) ->
-    lists:foldl(fun(#document{retrieval = Retrieval,
+    lists:foldl(fun(#document{registered = Registered,
                               canonical = Canonical} = Document, Acc) ->
-                        Acc#{Retrieval => Document, Canonical => Document}
+                        Acc#{Registered => Document, Canonical => Document}
                 end, #{}, Documents).
 
--spec base_option([term()]) -> {ok, rid()} | error.
-base_option([]) ->
-    {ok, anonymous};
+-spec base_option([term()]) -> {ok, uri()} | error.
 base_option([{base_uri, Uri}]) when is_binary(Uri) ->
     hierarchical_base(Uri);
 base_option(_Options) ->
@@ -126,15 +185,29 @@ base_option(_Options) ->
 %% Относительные имена безопасно разрешаются только от hierarchical URI.
 %% Authority делает URI hierarchical независимо от path; без authority path
 %% обязан быть абсолютным. Так `file:/schemas/root` разрешён, а URN отвергнут.
+%% Query у base_uri запрещён: разрешение относительного имени его всё равно
+%% отбрасывает, а завершающий слэш дописывать было бы некуда.
 -spec hierarchical_base(uri()) -> {ok, uri()} | error.
 hierarchical_base(Uri) ->
     case {uri_string:parse(Uri), valid_json_uri:resolve(Uri, anonymous)} of
+        {#{query := _}, _} ->
+            error;
         {#{scheme := _, host := _}, {ok, Normalized, root}} ->
-            {ok, Normalized};
+            {ok, trailing_slash(Normalized)};
         {#{scheme := _, path := <<"/", _/binary>>}, {ok, Normalized, root}} ->
-            {ok, Normalized};
+            {ok, trailing_slash(Normalized)};
         _ ->
             error
+    end.
+
+%% Завершающий слэш дописывается как нормализация: без него разрешение съело бы
+%% последний сегмент, и `product/banana` под `https://shop.service/schemas`
+%% попало бы в `https://shop.service/product/banana`.
+-spec trailing_slash(uri()) -> uri().
+trailing_slash(Uri) ->
+    case binary:last(Uri) of
+        $/    -> Uri;
+        _Byte -> <<Uri/binary, "/">>
     end.
 
 %% Записи разбираются независимо друг от друга, поэтому ошибки одной не мешают
@@ -162,10 +235,10 @@ build(_Entry, _Base, _Acc) ->
 -spec document(uri(), json(), rid()) -> {ok, #document{}} | {error, #schema_error{}}.
 document(Uri, Json, Base) ->
     case registration_name(Uri, Base) of
-        {ok, Retrieval} ->
-            case canonical(Json, Retrieval) of
+        {ok, Registered} ->
+            case canonical(Json, Registered) of
                 {ok, Canonical} ->
-                    {ok, #document{retrieval = Retrieval,
+                    {ok, #document{registered = Registered,
                                    canonical = Canonical,
                                    json = Json}};
                 {error, _} = Error ->
@@ -183,17 +256,17 @@ registration_name(Uri, Base) ->
         {error, Reason}                         -> schema_error(Reason)
     end.
 
--spec canonical(json(), uri()) -> {ok, uri()} | {error, #schema_error{}}.
-canonical(#{<<"$id">> := Id}, Retrieval) when is_binary(Id) ->
-    case valid_json_uri:resolve(Id, Retrieval) of
+-spec canonical(json(), rid()) -> {ok, uri()} | {error, #schema_error{}}.
+canonical(#{<<"$id">> := Id}, Registered) when is_binary(Id) ->
+    case valid_json_uri:resolve(Id, Registered) of
         {ok, Canonical, root} when Canonical =/= anonymous -> {ok, Canonical};
         {ok, _Canonical, _Fragment} -> schema_error({bad_keyword_value, Id});
         {error, Reason}             -> schema_error(Reason)
     end;
-canonical(#{<<"$id">> := Id}, _Retrieval) ->
+canonical(#{<<"$id">> := Id}, _Registered) ->
     schema_error({bad_keyword_value, Id});
-canonical(_Json, Retrieval) ->
-    {ok, Retrieval}.
+canonical(_Json, Registered) ->
+    {ok, Registered}.
 
 -spec names([term()], rid()) ->
           {ok, [{uri(), uri()}]} | {error, [{uri(), #schema_error{}}]}.
@@ -216,8 +289,8 @@ name(_Uri, _Base, _Acc) ->
 -spec insert_all([{uri(), #document{}}], store()) ->
           {ok, [uri()], store()} | {error, [{uri(), #schema_error{}}]}.
 insert_all(Added, #store{documents = Existing} = Store) ->
-    Retrievals = [Uri || {_Entry, #document{retrieval = Uri}} <- Added],
-    Stripped = strip_replacements(Retrievals, Existing),
+    Registrations = [Uri || {_Entry, #document{registered = Uri}} <- Added],
+    Stripped = strip_replacements(Registrations, Existing),
     case lists:foldl(fun insert/2, {[], [], Stripped}, Added) of
         {Canonicals, [], Documents} ->
             {ok, lists:reverse(Canonicals), Store#store{documents = Documents}};
@@ -231,13 +304,13 @@ insert_all(Added, #store{documents = Existing} = Store) ->
 -spec insert({uri(), #document{}},
              {[uri()], [{uri(), #schema_error{}}], #{uri() => #document{}}}) ->
           {[uri()], [{uri(), #schema_error{}}], #{uri() => #document{}}}.
-insert({Entry, #document{retrieval = Retrieval, canonical = Canonical} = Document},
+insert({Entry, #document{registered = Registered, canonical = Canonical} = Document},
        {Canonicals, Errors, Documents0}) ->
-    %% Повтор одного retrieval внутри batch — тот же upsert, что между вызовами.
-    Documents = strip_replacement(Retrieval, Documents0),
-    case free_names([Retrieval, Canonical], Documents) of
+    %% Повтор имени регистрации внутри batch — тот же upsert, что между вызовами.
+    Documents = strip_replacement(Registered, Documents0),
+    case free_names([Registered, Canonical], Documents) of
         ok ->
-            Stored = Documents#{Retrieval => Document, Canonical => Document},
+            Stored = Documents#{Registered => Document, Canonical => Document},
             {[Canonical | Canonicals], Errors, Stored};
         {error, Error} ->
             {Canonicals, [{Entry, Error} | Errors], Documents0}
@@ -245,14 +318,14 @@ insert({Entry, #document{retrieval = Retrieval, canonical = Canonical} = Documen
 
 -spec strip_replacements([uri()], #{uri() => #document{}}) ->
           #{uri() => #document{}}.
-strip_replacements(Retrievals, Documents) ->
-    lists:foldl(fun strip_replacement/2, Documents, Retrievals).
+strip_replacements(Registrations, Documents) ->
+    lists:foldl(fun strip_replacement/2, Documents, Registrations).
 
 -spec strip_replacement(uri(), #{uri() => #document{}}) ->
           #{uri() => #document{}}.
-strip_replacement(Retrieval, Documents) ->
-    case maps:get(Retrieval, Documents, undefined) of
-        #document{retrieval = Retrieval} = Old -> remove_document(Old, Documents);
+strip_replacement(Registered, Documents) ->
+    case maps:get(Registered, Documents, undefined) of
+        #document{registered = Registered} = Old -> remove_document(Old, Documents);
         _Other                                -> Documents
     end.
 
@@ -288,8 +361,8 @@ remove_name({Entry, Name}, {Removed, Documents}) ->
 
 -spec remove_document(#document{}, #{uri() => #document{}}) ->
           #{uri() => #document{}}.
-remove_document(#document{retrieval = Retrieval, canonical = Canonical}, Documents) ->
-    maps:remove(Canonical, maps:remove(Retrieval, Documents)).
+remove_document(#document{registered = Registered, canonical = Canonical}, Documents) ->
+    maps:remove(Canonical, maps:remove(Registered, Documents)).
 
 -spec schema_error(reason()) -> {error, #schema_error{}}.
 schema_error(Reason) ->

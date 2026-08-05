@@ -3,7 +3,8 @@
 %% valid_json_store_sup.
 %%
 %% Стандартное хранилище поднимается всегда: приложению, которому хватает одного
-%% набора схем, ничего заводить не нужно.
+%% набора схем, ничего заводить не нужно. `base_uri` ему называется здесь, потому
+%% что опций ему передать неоткуда: дерево поднимает сама библиотека.
 -module(valid_json_sup).
 
 -behaviour(supervisor).
@@ -16,5 +17,6 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    Standard = valid_json_store_sup:child_spec(?STANDARD_STORE),
+    Standard = valid_json_store_sup:child_spec(
+                 ?STANDARD_STORE, [{base_uri, ?STANDARD_BASE_URI}]),
     {ok, {#{strategy => one_for_one, intensity => 1, period => 5}, [Standard]}}.

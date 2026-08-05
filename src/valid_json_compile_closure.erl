@@ -103,14 +103,14 @@ close_documents(Store, [Entry | Rest], Default, Index0, Loaded, Sources0) ->
           {term(), rid(), json(), uri() | undefined, uri() | undefined}.
 document_parts({inline, Schema}, _Store) ->
     {inline, anonymous, Schema, undefined, undefined};
-document_parts({document, #document{retrieval = Retrieval,
+document_parts({document, #document{registered = Retrieval,
                                     canonical = Canonical,
                                     json = Schema} = Document}, Store) ->
     {{document, Canonical}, Retrieval, Schema, Canonical,
      source_name(Document, Store)}.
 
 -spec registered_document(#document{}, store()) -> boolean().
-registered_document(#document{retrieval = Retrieval, canonical = Canonical} = Document,
+registered_document(#document{registered = Retrieval, canonical = Canonical} = Document,
                     #store{documents = Documents}) ->
     maps:get(Retrieval, Documents, undefined) =:= Document orelse
     maps:get(Canonical, Documents, undefined) =:= Document.
