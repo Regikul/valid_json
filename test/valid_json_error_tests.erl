@@ -64,6 +64,14 @@ metaschema_reason_test_() ->
                               {anonymous, <<>>}),
                        <<"https://example.com/meta">>))].
 
+%% Ошибка вычисления печатается тем же входом, что и ошибка схемы: у неё есть
+%% локация, и текст её называет.
+eval_error_test_() ->
+    Text = iolist_to_binary(
+             valid_json_error:format_error({no_progress, {anonymous, <<"/$ref">>}})),
+    [?_assert(contains(Text, <<"#/$ref">>)),
+     ?_assert(contains(Text, <<"cycle">>))].
+
 %% Каталог причин читается из самого типа, а не переписывается сюда руками:
 %% текст обязан быть у каждой причины, и новая не должна проскочить мимо теста.
 %% Проверка появилась не от хорошей жизни — `misplaced_keyword` уже полежала в

@@ -45,12 +45,10 @@ start_link(Store, Options) ->
     supervisor:start_link(?MODULE, {Store, Options}).
 
 init({Store, Options}) ->
-    Registry = valid_json_ets_keeper:child_spec(
-                 valid_json_store_manager:registry_table(Store),
-                 valid_json_store_manager:table_options(registry)),
-    Artifacts = valid_json_ets_keeper:child_spec(
-                  valid_json_store_manager:artifacts_table(Store),
-                  valid_json_store_manager:table_options(artifacts)),
+    Registry = keeper_spec(valid_json_store_manager:registry_table(Store),
+                           valid_json_store_manager:table_options(registry)),
+    Artifacts = keeper_spec(valid_json_store_manager:artifacts_table(Store),
+                            valid_json_store_manager:table_options(artifacts)),
     Manager = #{id => valid_json_store_manager,
                 start => {valid_json_store_manager, start_link, [Store, Options]},
                 restart => permanent,
@@ -59,3 +57,15 @@ init({Store, Options}) ->
                 modules => [valid_json_store_manager]},
     {ok, {#{strategy => rest_for_one, intensity => 1, period => 5},
           [Registry, Artifacts, Manager]}}.
+
+%% Спека хранителя составляется здесь, а не в нём самом: перезапуск, остановка и
+%% `id` — решение того, кто ставит потомка, и у всех троих оно принято в этом
+%% модуле. Хранителя больше никто и не поднимает, поэтому описывать себя для
+%% чужого дерева ему незачем.
+keeper_spec(Table, Options) ->
+    #{id => Table,
+      start => {valid_json_ets_keeper, start_link, [Table, Options]},
+      restart => permanent,
+      shutdown => 5000,
+      type => worker,
+      modules => [valid_json_ets_keeper]}.

@@ -1,14 +1,18 @@
 %% Фасад библиотеки. Переводит публичный вызов во внутренний и делегирует;
-%% собственной логики не имеет. Области описаны в okf/architecture/validator-design.md.
+%% решений не принимает, и вся работа сверх делегирования состоит в том, чтобы
+%% развести опции двух слоёв по их слоям. Области описаны в
+%% okf/architecture/validator-design.md.
 -module(valid_json).
 
 -include("valid_json_core.hrl").
 -include("valid_json_resources.hrl").
 
+-export([run_schema/3]).
+
 -export([add/1, add_at/1, add_at/2, remove/1, wait/1, validate/3]).
 
--export([store_add/2, store_add_at/2, store_add_at/3, store_remove/2,
-         store_wait/2, store_validate/4]).
+-export([store_child_spec/2, store_add/2, store_add_at/2, store_add_at/3,
+         store_remove/2, store_wait/2, store_validate/4]).
 
 -export([format_error/1]).
 
@@ -46,14 +50,59 @@ remove(Uris) ->
 wait(Timeout) ->
     store_wait(?STANDARD_STORE, Timeout).
 
-%% Названа парно к `compile_uri/3` и отличается от `validate/3` встроенного
-%% режима именем, а не формой первого аргумента: одна арность не должна значить
-%% двух разных вещей.
+%% Первым аргументом идёт имя схемы, а не сама схема: встроенный режим живёт под
+%% отдельным именем `run_schema/3`. Различает их имя функции, а не форма
+%% аргумента: одна арность не должна значить двух разных вещей.
 -spec validate(uri(), json(), [option()]) ->
           {ok, output()} | {error, not_found} | {error, unavailable}
         | {error, eval_error()}.
 validate(Uri, Instance, Options) ->
     store_validate(?STANDARD_STORE, Uri, Instance, Options).
+
+%% Встроенный режим одним вызовом: схема компилируется здесь же, в процессе
+%% вызывающего, и сразу вычисляет инстанс. Ни хранилища, ни запущенного
+%% приложения для этого не нужно — встроенные метасхемы публикуются по первому
+%% обращению.
+%%
+%% Реестр у такой компиляции временный, поэтому схема обязана быть
+%% самодостаточной: `$ref` видит только её саму и встроенные метасхемы, а
+%% зарегистрированные документы любого хранилища ей не видны. Относительный
+%% `$id` разрешать не от чего — базы у временного реестра нет.
+%%
+%% Артефакт нигде не остаётся, и каждый вызов заново проходит discovery,
+%% проверку метасхемой, компиляцию паттернов и эмиссию IR. Дверь эта разовая:
+%% схему, которой пользуются больше одного раза, дешевле зарегистрировать и
+%% звать `validate/3`.
+-spec run_schema(json(), json(),
+                 [option() | valid_json_compile:compile_option()]) ->
+          {ok, output()} | {error, #schema_error{}} | {error, eval_error()}.
+run_schema(Schema, Instance, Options) ->
+    {EvalOptions, CompileOptions} = split_options(Options),
+    case valid_json_compile:compile(valid_json_store:temporary(), Schema,
+                                    CompileOptions) of
+        {ok, Compiled}     -> valid_json_core:validate(Compiled, Instance,
+                                                       EvalOptions);
+        {error, _} = Error -> Error
+    end.
+
+%% Опции обоих слоёв приходят одним списком: вызывающему это опции одного
+%% вызова, а не двух. Ядру принадлежит `output`, всё прочее уходит компилятору,
+%% и незнакомый ключ падает badarg там же, где падал бы при прямом вызове.
+-spec split_options([term()]) ->
+          {[option()], [valid_json_compile:compile_option()]}.
+split_options(Options) ->
+    lists:partition(fun({output, _Format}) -> true;
+                       (_Other)            -> false
+                    end, Options).
+
+%% Единственная из семьи `store_*` без пары без приставки: стандартное хранилище
+%% библиотека ставит в своё дерево сама, а встраивать нужно только собственное.
+%% Спека принадлежит супервизору хранилища, фасад её только пересказывает — чтобы
+%% за ней не идти в исходники.
+-spec store_child_spec(atom(), [valid_json_store_manager:store_option()]) ->
+          supervisor:child_spec().
+store_child_spec(Store, Options) ->
+    valid_json_store_sup:child_spec(Store, Options).
 
 -spec store_add_at(atom(), uri(), json()) ->
           {ok, [uri()]} | {error, valid_json_store_manager:add_error()}.
@@ -93,6 +142,6 @@ store_validate(Store, Uri, Instance, Options) ->
         {error, _Reason} = E -> E
     end.
 
--spec format_error(#schema_error{}) -> unicode:chardata().
+-spec format_error(#schema_error{} | eval_error()) -> unicode:chardata().
 format_error(Error) ->
     valid_json_error:format_error(Error).

@@ -16,22 +16,15 @@
 %% отказ. Хранилищу, которому нужны две таблицы, ставят двух хранителей.
 %%
 %% О содержимом таблицы хранитель не знает: имя и опции приходят параметром, а
-%% про хранилище знает тот, кто эти параметры составил.
+%% про хранилище знает тот, кто эти параметры составил. Спеку потомка он о себе
+%% тоже не составляет: перезапуск, остановка и `id` — политика супервизора
+%% хранилища, и там она и написана.
 -module(valid_json_ets_keeper).
 
 -behaviour(gen_server).
 
--export([start_link/2, child_spec/2, keeper_name/1, claim/1]).
+-export([start_link/2, keeper_name/1, claim/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
-
--spec child_spec(atom(), [term()]) -> supervisor:child_spec().
-child_spec(Table, Options) ->
-    #{id => Table,
-      start => {?MODULE, start_link, [Table, Options]},
-      restart => permanent,
-      shutdown => 5000,
-      type => worker,
-      modules => [?MODULE]}.
 
 -spec start_link(atom(), [term()]) -> {ok, pid()}.
 start_link(Table, Options) ->

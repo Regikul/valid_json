@@ -33,7 +33,7 @@ so `{ok, Output}` may well describe a failed validation — `valid` is a field i
 `Output`, not the shape of the return. `{error, Reason}` is reserved for not
 getting as far as evaluating: `not_found`, `unavailable`, or an evaluation error.
 
-**Options of a store**, given to `valid_json_store_sup:child_spec/2`:
+**Options of a store**, given to `valid_json:store_child_spec/2`:
 `base_uri`, `default_dialect`, `assert_format`, and `loader`; the last three
 also read from the application environment. `base_uri` is required — it is how a
 store claims its schemas for a service, and relative document names become

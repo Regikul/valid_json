@@ -9,7 +9,7 @@ that implies for running a system. Revisions and dates are recorded in the
 `valid_json` is an OTP application. Its root supervisor runs one store subtree
 per set of schemas, `one_for_one`, so a store that fails does not disturb the
 others. The standard store is always started; an application that needs its own
-adds `valid_json_store_sup:child_spec/2` to its own supervision tree.
+adds `valid_json:store_child_spec/2` to its own supervision tree.
 
 A store is a manager process and two ETS tables, one for compiled artifacts and
 one for the registry of documents. The tables are not owned by the manager. Each

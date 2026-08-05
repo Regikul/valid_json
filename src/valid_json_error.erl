@@ -8,11 +8,17 @@
 
 -export([format_error/1]).
 
--spec format_error(#schema_error{}) -> unicode:chardata().
+%% Ошибка вычисления печатается тем же входом, что и ошибка схемы: вызывающему
+%% обе приходят из одного `validate/3`, и второй функции для этого заводить
+%% незачем. Ловушка цикла названа местом, где обход упёрся в себя.
+-spec format_error(#schema_error{} | eval_error()) -> unicode:chardata().
 format_error(#schema_error{reason = Reason, location = undefined}) ->
     reason(Reason);
 format_error(#schema_error{reason = Reason, location = Location}) ->
-    [location(Location), ": ", reason(Reason)].
+    [location(Location), ": ", reason(Reason)];
+format_error({no_progress, Location}) ->
+    [location(Location),
+     ": evaluation has no verdict, in-place applicators form a cycle"].
 
 %% У анонимного resource URI нет, поэтому от локации остаётся один fragment.
 -spec location(addr()) -> unicode:chardata().
@@ -52,8 +58,7 @@ reason({referenced_by, Uri, Refs}) ->
 reason(schema_invalid) ->
     "schema does not conform to its meta-schema";
 reason({metaschema_evaluation_failed, Uri, EvalError}) ->
-    ["meta-schema evaluation failed for ", Uri, ": ",
-     io_lib:format("~tp", [EvalError])];
+    ["meta-schema evaluation failed for ", Uri, ": ", format_error(EvalError)];
 reason({bad_keyword_value, Value}) ->
     ["value is not allowed here: ", json:encode(Value)];
 %% Причина от re принадлежит библиотеке и структуры не имеет, поэтому печатается

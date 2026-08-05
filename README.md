@@ -100,10 +100,26 @@ rebar3 shell
 
 ## Usage
 
-### Validate an inline schema with the standard store
+### Validate against a schema value
 
-A schema names itself with `$id`. Register it, then validate instances against
-that name:
+`run_schema/3` takes the schema itself instead of its name: it compiles the
+schema in the calling process and validates right away, without a store or a
+started application. Such a schema has to stand on its own — the documents of a
+store are not visible to it.
+
+```erlang
+{ok, #{<<"valid">> := true}} =
+    valid_json:run_schema(
+        #{<<"type">> => <<"integer">>, <<"minimum">> => 0},
+        5,
+        [{output, flag}]).
+```
+
+### Register a schema and validate by name
+
+A schema used more than once belongs in a store: it is compiled once, and every
+validation after that is a lookup by name. A schema names itself with `$id`.
+Register it, then validate instances against that name:
 
 ```erlang
 {ok, _} = application:ensure_all_started(valid_json),
@@ -218,7 +234,7 @@ from outside. References are resolved eagerly, and a document whose target is
 not in the store yet is rejected. The store is pre-populated only; it never
 fetches referenced documents over the network.
 
-For a custom store, add `valid_json_store_sup:child_spec/2` to your
+For a custom store, add `valid_json:store_child_spec/2` to your
 application's supervision tree, then use the `valid_json` facade's `store_*`
 functions, such as `valid_json:store_add/2` and `valid_json:store_validate/4`.
 A store requires a `base_uri`: it is how the store claims its schemas for a
