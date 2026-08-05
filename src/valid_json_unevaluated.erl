@@ -88,15 +88,16 @@ keyword_result(Keyword, #eval_result{valid = Valid, units = Units},
              end,
     #eval_result{valid     = Valid,
                  evaluated = coverage(Valid, Evaluated),
-                 units     = own(Keyword, Valid, Detail, Units, Context)}.
+                 units     = valid_json_unit:keyword_units(Keyword, Valid, Detail,
+                                                           Units, Context)}.
 
 %% Провалившийся keyword аннотации не производит и потому покрытия не вносит.
 -spec coverage(boolean(), evaluated()) -> evaluated().
 coverage(true, Evaluated)   -> Evaluated;
 coverage(false, _Evaluated) -> valid_json_evaluated:neutral().
 
-%% Покрытие дочерней schema принадлежит ей самой и наверх не идёт: родитель
-%% покрывает само свойство или индекс, а не то, что нашлось внутри значения.
+%% Родитель покрывает само свойство или индекс, а не то, что нашлось внутри
+%% значения: наверх идут применённые сегменты, а не покрытие их подсхем.
 -spec apply_all([application()], addr(), binary(), #eval_context{}, #eval_result{},
                 [binary()]) -> {#eval_result{}, [binary()]}.
 apply_all([], _Addr, _Keyword, _Context, Result, Applied) ->
@@ -112,7 +113,9 @@ apply_all([{Segment, Value} | Rest], Addr, Keyword, Context, Result, Applied) ->
     end.
 
 %% Локация keyword следует схеме, локация инстанса — значению. Своего сегмента у
-%% ветви нет: она стоит на самом keyword.
+%% ветви нет: она стоит на самом keyword. Флаг `coverage` при спуске гаснет:
+%% покрытие дочерней schema принадлежит ей самой (validator-core.md, «Контекст
+%% и cycle guard»).
 -spec branch(addr(), binary(), binary(), json(), #eval_context{}) -> #eval_result{}.
 branch(Addr, Keyword, Segment, Value, Context) ->
     #eval_context{keyword_location = Keywords,
@@ -121,16 +124,6 @@ branch(Addr, Keyword, Segment, Value, Context) ->
                                   instance_location = {Depth + 1, [Segment | Instance]},
                                   coverage          = false},
     valid_json_eval:eval(Addr, Value, Nested).
-
-%% Units применённых подсхем лежат внутри unit'а того keyword, который их
-%% применил. В режиме flag units не собираются вовсе: ответ исчерпывается
-%% вердиктом.
--spec own(binary(), boolean(), detail(), [#output_unit{}], #eval_context{}) ->
-          [#output_unit{}].
-own(_Keyword, _Valid, _Detail, _Nested, #eval_context{format = flag}) ->
-    [];
-own(Keyword, Valid, Detail, Nested, Context) ->
-    [valid_json_unit:keyword(Keyword, Valid, Detail, Nested, Context)].
 
 -spec message(binary()) -> binary().
 message(<<"unevaluatedProperties">>) ->

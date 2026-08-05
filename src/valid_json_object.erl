@@ -49,8 +49,9 @@ names(Names, Addr, Context) ->
         #eval_result{valid = Valid, units = Units} ->
             #eval_result{valid     = Valid,
                          evaluated = valid_json_evaluated:neutral(),
-                         units     = own(<<"propertyNames">>, Valid,
-                                         name_detail(Valid), Units, Context)}
+                         units     = valid_json_unit:keyword_units(
+                                       <<"propertyNames">>, Valid,
+                                       name_detail(Valid), Units, Context)}
     end.
 
 -spec scan([binary()], addr(), #eval_context{}, #eval_result{}) -> #eval_result{}.
@@ -148,17 +149,18 @@ keyword(Keyword, Applications, Instance, Context) ->
             Applied = lists:usort(Names),
             #eval_result{valid     = Valid,
                          evaluated = coverage(Valid, Applied),
-                         units     = own(Keyword, Valid,
-                                         detail(Keyword, Valid, Applied),
-                                         Units, Context)}
+                         units     = valid_json_unit:keyword_units(
+                                       Keyword, Valid,
+                                       detail(Keyword, Valid, Applied),
+                                       Units, Context)}
     end.
 
 -spec coverage(boolean(), [binary()]) -> evaluated().
 coverage(true, Applied) -> valid_json_evaluated:properties(Applied);
 coverage(false, _Applied) -> valid_json_evaluated:neutral().
 
-%% Покрытие дочерней schema принадлежит ей самой и наверх не идёт: родитель
-%% покрывает имя свойства, а не то, что нашлось внутри значения.
+%% Родитель покрывает имя свойства, а не то, что нашлось внутри значения:
+%% наверх идут имена применённых свойств, а не покрытие их подсхем.
 -spec apply_all([application()], json(), #eval_context{}, #eval_result{},
                 [binary()]) -> {#eval_result{}, [binary()]}.
 apply_all([], _Instance, _Context, Result, Names) ->
@@ -175,8 +177,8 @@ apply_all([{Tail, Name, Addr} | Rest], Instance, Context, Result, Names) ->
 
 %% Локация keyword следует схеме, локация инстанса — значению: имя свойства
 %% двигает второй стек, а сегменты первого зависят от применившегося keyword.
-%% Ожидание покрытия сюда не наследуется: покрытие дочерней schema принадлежит
-%% ей самой, и обрывать её обход ради чужих аннотаций незачем.
+%% Флаг `coverage` при спуске гаснет: покрытие дочерней schema принадлежит ей
+%% самой (validator-core.md, «Контекст и cycle guard»).
 -spec branch(addr(), [binary()], binary(), json(), #eval_context{}) -> #eval_result{}.
 branch(Addr, Tail, Name, Value, Context) ->
     #eval_context{keyword_location = Keywords,
@@ -185,16 +187,6 @@ branch(Addr, Tail, Name, Value, Context) ->
                                   instance_location = {Depth + 1, [Name | Instance]},
                                   coverage          = false},
     valid_json_eval:eval(Addr, Value, Nested).
-
-%% Units применённых подсхем лежат внутри unit'а того keyword, который их
-%% применил. В режиме flag units не собираются вовсе: ответ исчерпывается
-%% вердиктом.
--spec own(binary(), boolean(), detail(), [#output_unit{}], #eval_context{}) ->
-          [#output_unit{}].
-own(_Keyword, _Valid, _Detail, _Nested, #eval_context{format = flag}) ->
-    [];
-own(Keyword, Valid, Detail, Nested, Context) ->
-    [valid_json_unit:keyword(Keyword, Valid, Detail, Nested, Context)].
 
 -spec detail(binary(), boolean(), [binary()]) -> detail().
 detail(_Keyword, true, Applied) -> {annotation, Applied};

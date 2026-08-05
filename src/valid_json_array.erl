@@ -115,14 +115,14 @@ keyword(Keyword, Role, Applications, Length, Context) ->
         #eval_result{valid = Valid, units = Units} ->
             #eval_result{valid     = Valid,
                          evaluated = coverage(Role, Valid, Applied, Length),
-                         units     = own(
+                         units     = valid_json_unit:keyword_units(
                                        Keyword, Valid,
                                        detail(Role, Keyword, Valid, Applied, Length),
                                        Units, Context)}
     end.
 
-%% Покрытие дочерней schema принадлежит ей самой и наверх не идёт: родитель
-%% покрывает индекс элемента, а не то, что нашлось внутри значения.
+%% Родитель покрывает индекс элемента, а не то, что нашлось внутри значения:
+%% наверх идёт число применённых элементов, а не покрытие их подсхем.
 -spec apply_all([application()], #eval_context{}, #eval_result{}, non_neg_integer()) ->
           {#eval_result{}, non_neg_integer()}.
 apply_all([], _Context, Result, Applied) ->
@@ -197,8 +197,10 @@ contains_complete(Min, Max, Marks, Instance, Matched, Units, Context) ->
               ++ bounded(<<"maxContains">>, Max, at_most(Count, Max)),
     #eval_result{valid     = lists:all(fun({_K, Valid, _D, _N}) -> Valid end, Written),
                  evaluated = marks(Marks, Found, Matched, Count, Length),
-                 units     = lists:append([own(Keyword, Valid, Detail, Nested, Context)
-                                           || {Keyword, Valid, Detail, Nested} <- Written])}.
+                 units     = lists:append(
+                               [valid_json_unit:keyword_units(Keyword, Valid, Detail,
+                                                              Nested, Context)
+                                || {Keyword, Valid, Detail, Nested} <- Written])}.
 
 %% При no-progress часть элементов имеет неизвестный результат. Если весь
 %% диапазон возможного числа совпадений лежит по одну сторону границ, boolean
@@ -296,8 +298,8 @@ marks(true, true, Matched, _Count, _Length) ->
 
 %% Локация keyword следует схеме, локация инстанса — значению: индекс элемента
 %% двигает второй стек, а сегменты первого зависят от применившегося keyword.
-%% Ожидание покрытия сюда не наследуется: покрытие дочерней schema принадлежит
-%% ей самой, и обрывать её обход ради чужих аннотаций незачем.
+%% Флаг `coverage` при спуске гаснет: покрытие дочерней schema принадлежит ей
+%% самой (validator-core.md, «Контекст и cycle guard»).
 -spec branch(addr(), [binary()], non_neg_integer(), json(), #eval_context{}) ->
           #eval_result{}.
 branch(Addr, Tail, Index, Element, Context) ->
@@ -308,16 +310,6 @@ branch(Addr, Tail, Index, Element, Context) ->
                                                        [integer_to_binary(Index) | Instance]},
                                   coverage          = false},
     valid_json_eval:eval(Addr, Element, Nested).
-
-%% Units применённых подсхем лежат внутри unit'а того keyword, который их
-%% применил. В режиме flag units не собираются вовсе: ответ исчерпывается
-%% вердиктом.
--spec own(binary(), boolean(), detail(), [#output_unit{}], #eval_context{}) ->
-          [#output_unit{}].
-own(_Keyword, _Valid, _Detail, _Nested, #eval_context{format = flag}) ->
-    [];
-own(Keyword, Valid, Detail, Nested, Context) ->
-    [valid_json_unit:keyword(Keyword, Valid, Detail, Nested, Context)].
 
 %% Keyword префикса раздаёт по схеме на индекс, keyword остатка — одну схему на
 %% всё, что осталось; отсюда и разное число в тексте.

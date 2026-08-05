@@ -4,7 +4,7 @@
 
 -include("valid_json_core.hrl").
 
--export([keyword/4, keyword/5, reference/5, schema/4]).
+-export([keyword/4, keyword/5, keyword_units/5, reference/5, schema/4]).
 
 %% Unit фактически написанного keyword стоит на сегмент глубже своего node.
 %% Составной constraint выпускает по одному unit на каждый фактический keyword,
@@ -20,6 +20,15 @@ keyword(Keyword, Valid, Detail, Context) ->
           #output_unit{}.
 keyword(Keyword, Valid, Detail, Nested, #eval_context{keyword_location = Location} = Context) ->
     build(keyword, Valid, [Keyword | Location], [Keyword], Detail, Nested, Context).
+
+%% Applicator в режиме flag units не собирает вовсе: ответ исчерпывается
+%% вердиктом (validator-core.md, «Проекции output»).
+-spec keyword_units(binary(), boolean(), detail(), [#output_unit{}], #eval_context{}) ->
+          [#output_unit{}].
+keyword_units(_Keyword, _Valid, _Detail, _Nested, #eval_context{format = flag}) ->
+    [];
+keyword_units(Keyword, Valid, Detail, Nested, Context) ->
+    [keyword(Keyword, Valid, Detail, Nested, Context)].
 
 %% Reference хранит два уровня. Собственный unit называет написанный keyword и
 %% его physical absolute location; вложенный schema unit уже называет
