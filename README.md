@@ -1,128 +1,76 @@
 # valid_json
 
+Modern JSON Schema validation for Erlang/OTP.
+
+`valid_json` is an Erlang/OTP library that validates JSON instances against
+JSON Schema Draft 2020-12 and Draft 2019-09, including references across the
+two dialects. Schemas are compiled once when they are registered and are then
+validated against in one of the four standard output formats. The registry is
+offline — no network requests are made during validation.
+
 [![CI](https://github.com/Regikul/valid_json/actions/workflows/ci.yml/badge.svg)](https://github.com/Regikul/valid_json/actions/workflows/ci.yml)
 
-`valid_json` is an Erlang/OTP library for validating JSON instances against
-[JSON Schema](https://json-schema.org/).
+## Why valid_json?
 
-The implementation is under active development. See the
-[roadmap](ROADMAP.md) for the current conformance and feature status.
+`valid_json` fills the niche of a modern JSON Schema validator for Erlang.
+[jesse](https://github.com/for-GET/jesse), the incumbent Erlang validator, has
+not followed the specification past draft 06. [jsonschex](https://github.com/xinz/jsonschex)
+implements Draft 2020-12 in full, but it is an Elixir library: using it from
+Erlang brings the Elixir toolchain and a struct-shaped API into your build.
 
-## Supported features
+If you are writing Erlang and need Draft 2019-09 or Draft 2020-12, `valid_json`
+provides modern JSON Schema support without requiring an Elixir-based
+validation stack.
 
-- JSON Schema Draft 2020-12 and Draft 2019-09.
-- Cross-draft schema resources and references.
-- Schema compilation from inline documents or a pre-populated document store.
-- URI resolution and schema resources using `$id`, `$anchor`, `$defs`, and
-  `$ref`, including references to other registered documents.
-- Draft 2020-12 dynamic references (`$dynamicAnchor` and `$dynamicRef`) and
-  Draft 2019-09 recursive references (`$recursiveAnchor` and `$recursiveRef`).
-- Assertions and applicators for scalar, array, and object values, including
-  conditionals, dependent schemas, `contains`, and `unevaluated*` keywords.
-- `$vocabulary`, built-in metaschemas, and user-provided metaschemas from the
-  document store.
-- Standard validation output formats: `flag`, `basic`, `detailed`, and
-  `verbose`.
-
-The registry is deliberately offline: documents reachable through `$ref` must
-be registered before compilation or validation. No network requests are made
-at runtime.
-
-`format` is collected as an annotation by default. Opt-in format assertions are
-available for the implemented built-in formats; IDN and IRI formats remain
-annotations. `contentEncoding`, `contentMediaType`, and `contentSchema` are
-annotations and do not decode or validate string content.
-
-## Not supported
-
-Every mandatory file of the JSON Schema Test Suite is run for both dialects.
-The list below is what both Draft 2020-12 and Draft 2019-09 ask for and the
-library does not do.
-
-| Area | What is not supported |
-| --- | --- |
-| Regular expression dialect | `pattern`, `patternProperties`, and `format: regex` are compiled with the `re` module, which is PCRE rather than ECMA-262. A pattern outside the subset shared by both dialects — `\p{Letter}`, for example — fails to compile and the whole schema is rejected |
-| Format-Assertion vocabulary | Not all format names of the specification are checked, so a metaschema that requires this vocabulary is rejected. Format assertions are enabled with the `assert_format` compile option instead |
-| `idn-email`, `idn-hostname`, `iri`, `iri-reference` | Always annotations, even with assertions enabled: the string itself is not checked |
-| `hostname` | An `xn--…` label is treated as an ordinary label: A-labels are not decoded and IDNA2008 rules are not applied to their contents |
-| Numeric precision | `multipleOf` and numeric comparisons are computed on doubles, so a decimal fraction with no exact binary representation can disagree with decimal arithmetic |
-
-## Comparison
-
-`valid_json` is new. To help you decide whether it fits, here is how it lines up
-against the two closest alternatives — [jesse](https://github.com/for-GET/jesse)
-for Erlang and [jsonschex](https://github.com/xinz/jsonschex) for Elixir.
-
-| | valid_json | jesse | jsonschex |
+| Feature | valid_json | jesse | jsonschex |
 | --- | --- | --- | --- |
-| Dialects | 2020-12, 2019-09 | draft 03, 04, 06 | 2020-12 |
-| Output | standard `flag`, `basic`, `detailed`, `verbose` | own error tuples | own error structs |
-| Registry | offline, pre-populated, in ETS under supervision | global ETS, may fetch over HTTP | inside the compiled struct, filled by your loader |
+| Erlang-native | yes | yes | no (Elixir) |
+| Draft 2020-12 | yes | no (drafts 03, 04, 06) | yes |
+| Draft 2019-09 | yes | no | no |
+| Cross-draft references | yes | no | no |
+| `$dynamicRef` / `$recursiveRef` | yes | no | `$dynamicRef` only |
+| `unevaluatedProperties` / `unevaluatedItems` | yes | no | yes |
+| Standard output formats | `flag`, `basic`, `detailed`, `verbose` | own error tuples | own error structs |
+| Runtime dependencies | none | none | optional `jason`, `decimal`, `idna` |
+| Network at validation time | never | possible for unknown `$ref` | whatever your loader does |
 
-The full comparison lives in [docs/comparison](docs/comparison/index.md), split
-into [API](docs/comparison/api.md),
-[architecture](docs/comparison/architecture.md), and
-[keyword and feature coverage](docs/comparison/keywords.md). It was measured
-against jesse 1.8.2 and jsonschex 0.9.0 on 2026-08-05.
+See the full comparison in [docs/comparison](docs/comparison/index.md) — API,
+architecture, and keyword-by-keyword coverage, measured against jesse 1.8.2 and
+jsonschex 0.9.0.
 
-## Requirements
+## Installation
 
-- Erlang/OTP 20 or later — older releases use the vendored `json` and
-  `uri_string` compatibility sources; OTP 27 and later use the stdlib
-  implementations directly.
-- [rebar3](https://rebar3.org/)
-
-## Build and test
-
-Compile the project with:
-
-```shell
-rebar3 compile
-```
-
-Run the EUnit and conformance test suite with:
-
-```shell
-rebar3 eunit
-```
-
-Run the conformance profiles alone — the JSON Schema Test Suite and the
-official output tests, without the remaining unit tests:
-
-```shell
-rebar3 conformance
-```
-
-Start an interactive Erlang shell with the application loaded:
-
-```shell
-rebar3 shell
-```
-
-## Usage
-
-### Validate against a schema value
-
-`run_schema/3` takes the schema itself instead of its name: it compiles the
-schema in the calling process and validates right away, without a store. The
-application still has to be started: every compile checks the schema against its
-meta-schema, and the built-in meta-schemas are published by the supervision tree.
-Such a schema has to stand on its own — the documents of a store are not visible
-to it.
+The package is not published on [Hex](https://hex.pm) yet; add it as a Git
+dependency, pinned to the latest tag:
 
 ```erlang
-{ok, #{<<"valid">> := true}} =
-    valid_json:run_schema(
-        #{<<"type">> => <<"integer">>, <<"minimum">> => 0},
-        5,
-        [{output, flag}]).
+{deps, [
+    {valid_json, {git, "https://github.com/Regikul/valid_json.git", {tag, "v0.2.2"}}}
+]}.
 ```
 
-### Register a schema and validate by name
+## Quick start
 
-A schema used more than once belongs in a store: it is compiled once, and every
-validation after that is a lookup by name. A schema names itself with `$id`.
-Register it, then validate instances against that name:
+Start the application so that the built-in meta-schemas are published, then
+validate.
+
+### Validate a schema once
+
+`run_schema/3` compiles the schema in the calling process and validates the
+instance right away — nothing is kept:
+
+```erlang
+{ok, _} = application:ensure_all_started(valid_json),
+
+Schema = #{<<"type">> => <<"integer">>, <<"minimum">> => 0},
+{ok, #{<<"valid">> := true}} =
+    valid_json:run_schema(Schema, 5, [{output, flag}]).
+```
+
+### Compile once, validate many times
+
+Register the schema under its `$id`, then validate by name. Registration
+compiles the schema; every validation after that is a lookup:
 
 ```erlang
 {ok, _} = application:ensure_all_started(valid_json),
@@ -145,145 +93,221 @@ Schema = #{
         [{output, flag}]).
 ```
 
-Schemas that reference one another must go in one call, because references are
-resolved eagerly: `valid_json:add([SchemaA, SchemaB])`. See
-[Schema names](#schema-names) for schemas that do not declare `$id`.
+Registered schemas are compiled once and reused. Artifacts are stored in a
+supervised ETS table, so a schema used more than once belongs in a store; a
+schema that arrives with a single request can use `run_schema/3`, at the price
+of compiling it on every call.
 
-The default output format is `flag`. Select `basic`, `detailed`, or `verbose`
-with the same `[{output, Format}]` option:
+## Features
+
+### Supported dialects
+
+- JSON Schema Draft 2020-12
+- JSON Schema Draft 2019-09
+- Cross-draft references between the two
+
+### References and schema resources
+
+- `$id`, `$anchor`, `$defs`, `$ref`
+- `$dynamicRef` / `$dynamicAnchor` (Draft 2020-12)
+- `$recursiveRef` / `$recursiveAnchor` (Draft 2019-09)
+- `$vocabulary`, built-in meta-schemas, and user-provided meta-schemas from the
+  store
+- References are resolved eagerly at compile time, so a reference closure is a
+  finite, comparable value — cyclic schemas are not a problem
+
+### Validation
+
+- All standard assertion keywords: `type`, `enum`, `const`, numeric bounds,
+  `pattern`, length and collection-size keywords, `uniqueItems`, `required`,
+  `dependentRequired`
+- Applicators: `allOf`, `anyOf`, `oneOf`, `not`, `if` / `then` / `else`,
+  `dependentSchemas`
+- Object applicators: `properties`, `patternProperties`,
+  `additionalProperties`, `propertyNames`
+- Array applicators: `prefixItems`, `items`, `contains`, `minContains`,
+  `maxContains`, plus the Draft 2019-09 array form of `items` and
+  `additionalItems`
+- `unevaluatedProperties` and `unevaluatedItems`
+
+### Output
+
+- The four standard output formats of the specification: `flag`, `basic`,
+  `detailed`, and `verbose`
+
+### Registry and storage
+
+- Schemas are compiled once on registration; artifacts live in a supervised
+  ETS table
+- Transactional reload and removal with dependency checking — a document that
+  others reference cannot be removed
+- A directory loader reads `.json` files recursively at startup
+- `run_schema/3` for schemas that are used once
+
+## Schema references and the registry
+
+The registry is deliberately offline: documents reachable through `$ref` must
+be registered before compilation. No network requests are made at runtime, so
+validation is deterministic, has no latency from fetching, and exposes no
+fetching surface for untrusted schemas.
+
+A document is addressed by its `$id`; a schema that declares none can be named
+from the outside with `add_at/1,2` or by the loader. Sets of documents that
+reference one another are registered in one call, because references are
+resolved eagerly:
 
 ```erlang
-{ok, Result} = valid_json:validate(
-    CanonicalUri,
-    #{<<"name">> => 42},
-    [{output, detailed}]).
+{ok, [CanonicalUriA, CanonicalUriB]} = valid_json:add([SchemaA, SchemaB]).
 ```
 
-### Report a rejected schema
+The full identifier model — `$id`, `base_uri`, relative names, embedded
+resources, and the directory loader — is described in
+[Schema resources and identifiers](docs/schema-resources.md).
 
-`add/1` and `remove/1` report failures as pairs of a document name and a schema
-error. The error is a machine-readable record; `format_error/1` turns one into
-human-readable text. A schema rejected before it got a name is reported under
-the atom `anonymous`:
+## Output formats
+
+Validation returns the standard output document of the specification, so `{ok,
+Output}` may well describe a failed validation — `valid` is a field inside
+`Output`, not the shape of the return. The address itself may be a relative,
+short name: on a miss it is resolved against the store's `base_uri` before
+reporting `not_found`.
 
 ```erlang
-case valid_json:add(Schema) of
-    {ok, Names} ->
-        Names;
-    {error, {compilation, Errors}} ->
-        [io:format("~ts: ~ts~n", [DocName, valid_json:format_error(Error)])
-         || {DocName, Error} <- Errors]
-end.
+{ok, #{<<"valid">> := false, <<"errors">> := [_ | _]}} =
+    valid_json:validate(RelativelUri, #{<<"name">> => 42}, [{output, detailed}]).
 ```
 
-The wording is an implementation detail and may change; the record's `reason`
-and `location` are the stable contract.
+`{error, Reason}` is reserved for not getting as far as evaluating:
+`not_found`, `unavailable`, or an evaluation error.
 
-### Load schemas from a directory
+## Specification compliance
 
-The built-in directory loader recursively reads `.json` files into the standard
-store when the application starts. For example, create
-`priv/schemas/weight.json`:
+`valid_json` runs the official
+[JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite)
+for both dialects. The pinned conformance run executes **792 test groups and
+3547 test cases** — the whole validation suite, including the declared
+capability profiles, minus the declared exclusions — plus the **8 official
+output test cases** and 41 remote documents used by `refRemote` tests. Remote
+documents are registered in advance; the validation run itself makes no network
+requests.
 
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "integer",
-  "minimum": 0
-}
-```
+The declared capability profiles are:
 
-Configure the loader in `config/sys.config`:
+- `optional/` files whose schemas compile within the supported dialects,
+  including `optional/id`, `optional/unknownKeyword`, and `optional/cross-draft`;
+- a `format` profile — the `optional/format/` files, compiled with
+  `{assert_format, true}` — covering 16 files per dialect (the four IDN/IRI
+  files are declared exclusions);
+- the official output tests, which pin the `basic` format; `flag`, `detailed`,
+  and `verbose` are covered by the project's own golden tests, because the
+  official suite does not exercise them.
+
+Every schema resource is checked against its own meta-schema when it is
+compiled; a schema that fails its meta-schema is rejected at registration.
+The conformance policy, including the exact list of files, excluded groups, and
+the pinned census, lives in [okf/testing/conformance-policy.md](okf/testing/conformance-policy.md).
+
+### Format
+
+`format` is collected as an **annotation** by default in both dialects.
+Format assertions are opt-in: compiling with `{assert_format, true}` enables
+string checking for the implemented formats. An annotation is still collected
+for a passing value, and a value of a non-string type always passes.
 
 ```erlang
-[
-    {valid_json, [
-        {loader, {valid_json_loader_dir, [
-            {priv_dir, valid_json, "schemas"}
-        ]}}
-    ]}
-].
+Schema = #{<<"format">> => <<"ipv4">>},
+
+%% Annotation only: the string passes, whatever it contains.
+{ok, #{<<"valid">> := true}} =
+    valid_json:run_schema(Schema, <<"999.1.1.1">>, []),
+
+%% With assertions enabled, the value is checked.
+{ok, #{<<"valid">> := false}} =
+    valid_json:run_schema(Schema, <<"999.1.1.1">>,
+                          [{assert_format, true}]).
 ```
 
-The path is resolved inside the `priv` directory of the named application, which
-is where a release keeps it — unlike a path relative to the current working
-directory, it does not depend on where the node was started from. In your own
-application, name that application instead. The loader stays inside the
-directory it was given: it does not follow symbolic links but reports them as an
-error.
+| | Formats |
+| --- | --- |
+| Assertion (with `assert_format`) | `date`, `time`, `date-time`, `duration`, `ipv4`, `ipv6`, `hostname`, `email`, `uri`, `uri-reference`, `uri-template`, `json-pointer`, `relative-json-pointer`, `uuid`, `regex` — 15 formats |
+| Annotation only, by declaration | `idn-email`, `idn-hostname`, `iri`, `iri-reference` |
 
-Then start the shell and wait for the initial load to finish:
+Unknown format names always pass and still produce an annotation. The
+Format-Assertion vocabulary is not claimed: a meta-schema that declares it
+`true` is rejected, as the specification requires of an implementation that
+does not check every format name. `contentEncoding`, `contentMediaType`, and
+`contentSchema` are annotations and do not decode or validate string content.
+
+The per-format algorithms and their exact boundaries are documented in
+[okf/architecture/format-attributes.md](okf/architecture/format-attributes.md).
+
+## Known limitations
+
+- **Regular expression dialect.** `pattern`, `patternProperties`, and
+  `format: regex` are compiled with Erlang's `re` module, which is PCRE rather
+  than ECMA-262. A pattern outside the subset shared by both dialects — for
+  example `\p{Letter}` — fails to compile and the whole schema is rejected.
+  The ECMA-262/PCRE differences are measured in
+  [okf/architecture/ecma-to-pcre-adaptation.md](okf/architecture/ecma-to-pcre-adaptation.md).
+- **IDN and IRI formats.** `idn-email`, `idn-hostname`, `iri`, and
+  `iri-reference` are always annotations: the string itself is not checked.
+  This is a declared exclusion of the profile, not a temporary gap.
+- **`hostname` and A-labels.** An `xn--…` label is treated as an ordinary LDH
+  label: A-labels are not decoded and IDNA2008 rules are not applied to their
+  contents.
+- **Numeric precision.** `multipleOf` and numeric comparisons are computed on
+  doubles, so a decimal fraction with no exact binary representation can
+  disagree with decimal arithmetic.
+- **Content keywords.** `contentEncoding`, `contentMediaType`, and
+  `contentSchema` are annotations only; string content is not decoded.
+
+## Documentation
+
+- [Comparison with jesse and jsonschex](docs/comparison/index.md) — the full
+  checklist, split into [API](docs/comparison/api.md),
+  [architecture](docs/comparison/architecture.md), and
+  [keyword coverage](docs/comparison/keywords.md)
+- [Schema resources and identifiers](docs/schema-resources.md) — naming,
+  the registry, the loader, and custom stores
+- [okf/](okf/index.md) — normative documents: architecture, core contract,
+  conformance policy, and format attributes
+- [ROADMAP.md](ROADMAP.md) — the implementation checklist, phase by phase
+
+## Requirements
+
+- Erlang/OTP **20 or later**. CI runs the full suite (compile, conformance,
+  EUnit) on OTP 20 through 29.
+- [rebar3](https://rebar3.org/)
+
+OTP releases before 27 use vendored copies of the stdlib `json` and `uri_string`
+modules, taken from OTP 28.1.1 and compiled only on the old releases. This is
+what keeps `{deps, []}` empty — the library has no third-party dependencies, on
+any OTP version. See [THIRD_PARTY.md](THIRD_PARTY.md).
+
+## Development
 
 ```shell
-rebar3 shell
+rebar3 compile
+rebar3 eunit
+rebar3 conformance
 ```
 
-```erlang
-{ok, _} = valid_json:wait(5000),
-{ok, #{<<"valid">> := true}} =
-    valid_json:validate(<<"weight.json">>, 5, [{output, flag}]).
-```
+`conformance` is an alias that runs the conformance profiles alone — the JSON
+Schema Test Suite and the official output tests — without the remaining unit
+tests. In CI, the `ci` profile turns compiler warnings into errors and runs
+`rebar3 as ci compile`, `rebar3 as ci conformance`, and `rebar3 as ci eunit`.
 
-The schema above declares no `$id`, so it is named by the path it was loaded
-from — `weight.json`, with `.json` as the default extension. See
-[Schema names](#schema-names) for the full rule.
+## Project status
 
-### References and custom stores
+`valid_json` is version 0.2.2 and is under active development. Draft 2020-12
+and Draft 2019-09 are supported within the conformance profile declared above;
+the remaining work is tracked in [ROADMAP.md](ROADMAP.md) — the `format`
+profiles and optional capability profiles of phase P8, the HTTP loader, and
+the cross-cutting items.
 
-For schemas with `$ref` links, register every document needed by the reference
-closure in one call — `valid_json:add([SchemaA, SchemaB])`, or
-`valid_json:add_at([{UriA, SchemaA}, {UriB, SchemaB}])` when the names come
-from outside. References are resolved eagerly, and a document whose target is
-not in the store yet is rejected. The store is pre-populated only; it never
-fetches referenced documents over the network.
-
-For a custom store, add `valid_json:store_child_spec/2` to your
-application's supervision tree, then use the `valid_json` facade's `store_*`
-functions, such as `valid_json:store_add/2` and `valid_json:store_validate/4`.
-A store requires a `base_uri`: it is how the store claims its schemas for a
-service, and two stores over the same directory under
-`https://shop.service/schemas/` and `https://internal.service/schemas/` name
-their documents apart.
-
-## Schema names
-
-A document is addressed by its `$id`. Nothing else is an address: a schema
-registered under a path that also declares `$id` answers to the `$id` only, and
-the path stays behind as the base against which its relative `$ref` resolve.
-
-A relative `$id` is resolved against the `base_uri` of the store. The standard
-store uses `https://valid_json.internal/schemas/`, so a schema with
-`"$id": "weight"` is addressable as
-`https://valid_json.internal/schemas/weight` and, in the short form resolved
-against that `base_uri`, as `weight`. The `.internal` top-level domain is
-reserved by ICANN for private use, so such a name never collides with an
-address that something answers at. This is the implementation-defined default
-base URI that RFC 3986 Section 5.1.4 permits and JSON Schema Section 9.1.1 asks
-implementations to document.
-
-A schema that declares no `$id` has to be named from the outside, and that is
-what `add_at` is for. It takes one document, or a batch of them when they
-reference each other:
-
-```erlang
-{ok, [Name]}  = valid_json:add_at(<<"allow">>, true),
-{ok, [A, B]}  = valid_json:add_at([{<<"a">>, SchemaA}, {<<"b">>, SchemaB}]).
-```
-
-The loader does the same for a whole directory, naming each document by its
-path relative to the root. Both kinds of path are relative, and the store's
-`base_uri` makes them absolute — which is why the same set of files suits any
-store.
-
-The two doors do not overlap: `add/1` takes schemas and nothing else, `add_at`
-takes named entries and nothing else. Which function you call is what decides
-where the name comes from — never the shape of the argument.
-
-A schema passed to `valid_json:add/1` without an `$id` is rejected with
-`unnamed_schema`: the root of a document is always a schema resource and needs
-an absolute name, and there is nothing to build one from. That includes the
-boolean schemas `true` and `false`, which carry no keywords and therefore no
-`$id` — they can only be registered by the loader or by `add_at`.
+The records' `reason` and `location` fields are the stable error contract; the
+wording produced by `format_error/1` is an implementation detail and may change.
+The public API may have breaking changes before 1.0.
 
 ## License
 
