@@ -14,7 +14,7 @@ listed here.
 
 | Library | Version | Commit | Commit date |
 | --- | --- | --- | --- |
-| `valid_json` | 0.2.0, not published on hex | `5bcad01` | 2026-08-06 |
+| `valid_json` | 0.2.2, not published on hex | `838e3a8` | 2026-08-06 |
 | jesse | 1.8.2 (the tag points at `master`) | `d06868f` | 2025-09-28 |
 | jsonschex | 0.9.0 (the release commit) | `3572664` | 2026-07-23 |
 
@@ -47,7 +47,7 @@ process.
 
 | | valid_json | jesse | jsonschex |
 | --- | --- | --- | --- |
-| Language | Erlang/OTP 27+ | Erlang | Elixir ~> 1.14 |
+| Language | Erlang/OTP 20+ | Erlang | Elixir ~> 1.14 |
 | License | Apache 2.0 | Apache 2.0 | MIT |
 | Dialects | 2020-12, 2019-09, cross-draft | draft 03, 04, 06 | 2020-12 |
 | Runtime dependencies | none | none | optional `jason`, `decimal`, `idna` |
