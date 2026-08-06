@@ -280,6 +280,7 @@ schema_validation_is_propagated_to_custom_metaschema_test() ->
 %% двух убийств подряд он не переживает, а имя таблицы глобально и второй ветки
 %% рядом с приложением не допускает. Приложение возвращается на место, потому
 %% что остальные проверки модуля его ждут.
+-ifdef(CAP_ETS_INFO_ID).
 with_branch(Fun) ->
     _ = application:stop(valid_json),
     {ok, Sup} = valid_json_metaschema_sup:start_link(),
@@ -339,6 +340,7 @@ wait_bundle(Owner, Attempts) ->
 retry_bundle(Owner, Attempts) ->
     timer:sleep(10),
     wait_bundle(Owner, Attempts - 1).
+-endif.
 
 recursive_metaschema(Id, DecisiveBranch) ->
     #{<<"$id">> => Id,

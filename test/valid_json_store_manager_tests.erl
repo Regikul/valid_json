@@ -374,7 +374,12 @@ isolated_start(Options) ->
     Parent = self(),
     {Worker, WorkerRef} = spawn_monitor(fun() ->
         process_flag(trap_exit, true),
-        Result = (catch valid_json_store_sup:start_link(?STORE, Options)),
+        Result = try valid_json_store_sup:start_link(?STORE, Options) of
+                     Started -> Started
+                 catch
+                     throw:Thrown -> Thrown;
+                     _Class:Reason -> {'EXIT', Reason}
+                 end,
         Parent ! {isolated_start, self(), Result},
         receive stop -> ok end
     end),

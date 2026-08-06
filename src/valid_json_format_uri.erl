@@ -24,10 +24,13 @@ strict_uri(String, RequireScheme) ->
     case ascii_uri(String) of
         false -> false;
         true ->
-            case catch valid_json_uri_backend:parse(String) of
+            try valid_json_uri_backend:parse(String) of
                 Parsed when is_map(Parsed) ->
                     not RequireScheme orelse maps:is_key(scheme, Parsed);
                 _Other ->
+                    false
+            catch
+                _Class:_Reason ->
                     false
             end
     end.
