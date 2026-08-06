@@ -5,8 +5,14 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("valid_json_resources.hrl").
 
-%% Тесты не меняют глобального состояния и могут выполняться параллельно.
-eunit_wrapper_(Tests) -> {inparallel, Tests}.
+%% Встроенные метасхемы поднимает дерево приложения, и без него компиляция
+%% схемы не идёт.
+ensure_app() ->
+    {ok, _Started} = application:ensure_all_started(valid_json),
+    ok.
+
+eunit_wrapper_(Tests) ->
+    {setup, fun ensure_app/0, {inparallel, Tests}}.
 
 -define(BASE, <<"https://example.com/schemas/">>).
 -define(BUILTIN, <<"https://json-schema.org/draft/2020-12/schema">>).

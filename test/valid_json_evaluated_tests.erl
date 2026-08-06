@@ -64,10 +64,10 @@ indexes(Mask, Length) ->
 
 merged(Masks) ->
     expand(lists:foldl(fun valid_json_evaluated:merge_items/2,
-                       {0, sets:new([{version, 2}])}, Masks)).
+                       {0, sets:new()}, Masks)).
 
 mask(Prefix, Indexes) ->
-    {Prefix, sets:from_list(Indexes, [{version, 2}])}.
+    {Prefix, sets:from_list(Indexes)}.
 
 expand({Prefix, Sparse}) -> {Prefix, lists:sort(sets:to_list(Sparse))}.
 

@@ -8,6 +8,12 @@
 -define(STORE, valid_json_facade_test_store).
 -define(BASE, <<"https://example.com/schemas/">>).
 
+%% Встроенные метасхемы поднимает дерево приложения, и без него компиляция
+%% схемы не идёт.
+ensure_app() ->
+    {ok, _Started} = application:ensure_all_started(valid_json),
+    ok.
+
 %% Таблица именована глобально, поэтому каждая проверка поднимает своё дерево и
 %% гасит его за собой.
 store_add_and_validate_test() ->
@@ -211,9 +217,10 @@ standard_store_self_named_test() ->
         ok = application:stop(valid_json)
     end.
 
-%% Встроенный режим: схема компилируется в процессе вызывающего, и ни хранилища,
-%% ни запущенного приложения ему не нужно.
+%% Встроенный режим: схема компилируется в процессе вызывающего, и хранилища ему
+%% не нужно. Приложение нужно: проверка метасхемой идёт при каждой компиляции.
 run_schema_test() ->
+    ok = ensure_app(),
     Schema = #{<<"type">> => <<"integer">>},
     ?assertEqual({ok, #{<<"valid">> => true}},
                  valid_json:run_schema(Schema, 1, [{output, flag}])),
@@ -226,6 +233,7 @@ run_schema_test() ->
 
 %% Булев корень имени не требует, поэтому встроенному режиму он доступен прямо.
 run_schema_boolean_test() ->
+    ok = ensure_app(),
     ?assertEqual({ok, #{<<"valid">> => true}},
                  valid_json:run_schema(true, 1, [])),
     ?assertEqual({ok, #{<<"valid">> => false}},
@@ -234,6 +242,7 @@ run_schema_boolean_test() ->
 %% Негодная схема отвергается до вычисления, и ошибка у неё та же, что у
 %% регистрации: инстанса она не касается.
 run_schema_invalid_schema_test() ->
+    ok = ensure_app(),
     ?assertMatch({error, #schema_error{reason = schema_invalid}},
                  valid_json:run_schema(#{<<"type">> => 42}, 1, [])).
 
@@ -257,6 +266,7 @@ run_schema_does_not_see_store_test() ->
 %% Встроенные метасхемы временному реестру видны: они лежат отдельной областью,
 %% а не в хранилище.
 run_schema_builtin_metaschema_test() ->
+    ok = ensure_app(),
     Schema = #{<<"$ref">> => ?DRAFT_2020_12},
     ?assertEqual({ok, #{<<"valid">> => true}},
                  valid_json:run_schema(Schema, #{<<"type">> => <<"string">>}, [])),
@@ -265,12 +275,14 @@ run_schema_builtin_metaschema_test() ->
 
 %% Относительное имя разрешать не от чего: базы у временного реестра нет.
 run_schema_relative_id_test() ->
+    ok = ensure_app(),
     ?assertMatch({error, #schema_error{reason = relative_uri_without_base}},
                  valid_json:run_schema(#{<<"$id">> => <<"weight">>}, 1, [])).
 
 %% Опции обоих слоёв идут одним списком. `default_dialect` виден по массиву в
 %% `items`: 2020-12 такую схему отвергает метасхемой, 2019-09 принимает.
 run_schema_default_dialect_test() ->
+    ok = ensure_app(),
     Schema = #{<<"items">> => [#{<<"type">> => <<"integer">>}]},
     ?assertMatch({error, #schema_error{reason = schema_invalid}},
                  valid_json:run_schema(Schema, [1], [])),
@@ -281,6 +293,7 @@ run_schema_default_dialect_test() ->
 %% `assert_format` меняет IR, поэтому доехать он должен до компиляции, а не до
 %% вычисления: без него `format` только аннотирует.
 run_schema_assert_format_test() ->
+    ok = ensure_app(),
     Schema = #{<<"format">> => <<"ipv4">>},
     ?assertEqual({ok, #{<<"valid">> => true}},
                  valid_json:run_schema(Schema, <<"999.1.1.1">>, [])),
@@ -291,6 +304,7 @@ run_schema_assert_format_test() ->
 %% Незнакомый ключ и негодное значение — ошибка вызова API, и падают они там же,
 %% где падали бы при прямом вызове слоя, которому принадлежат.
 run_schema_bad_option_test() ->
+    ok = ensure_app(),
     ?assertError(badarg, valid_json:run_schema(true, 1, [{quiet, true}])),
     ?assertError(badarg, valid_json:run_schema(true, 1, [{output, invalid}])).
 
@@ -298,6 +312,7 @@ run_schema_bad_option_test() ->
 %% незачем идти в исходники. Пересказ должен быть дословным, и по этой спеке
 %% хранилище должно подниматься.
 store_child_spec_test() ->
+    ok = ensure_app(),
     Options = [{base_uri, ?BASE}],
     Spec = valid_json:store_child_spec(?STORE, Options),
     ?assertEqual(valid_json_store_sup:child_spec(?STORE, Options), Spec),
@@ -317,6 +332,7 @@ with_store(Fun) ->
     with_store([{base_uri, ?BASE}], Fun).
 
 with_store(Options, Fun) ->
+    ok = ensure_app(),
     {ok, Sup} = valid_json_store_sup:start_link(?STORE, Options),
     try Fun(?STORE)
     after
@@ -325,7 +341,7 @@ with_store(Options, Fun) ->
 
 stop_store(Sup) ->
     unlink(Sup),
-    Ref = monitor(process, Sup),
+    Ref = erlang:monitor(process, Sup),
     exit(Sup, shutdown),
     receive
         {'DOWN', Ref, process, Sup, _Reason} -> ok

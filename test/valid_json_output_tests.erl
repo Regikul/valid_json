@@ -47,7 +47,7 @@ basic_location_test_() ->
                    maps:get(<<"keywordLocation">>, Printed)),
      ?_assertEqual(<<"/~0a~1b">>, maps:get(<<"instanceLocation">>, Printed)),
      %% Анонимный resource URI не синтезирует, поэтому ключа просто нет.
-     ?_assertNot(is_map_key(<<"absoluteKeywordLocation">>, Printed))].
+     ?_assertNot(maps:is_key(<<"absoluteKeywordLocation">>, Printed))].
 
 %% Ссылка уводит в другой resource, и тогда абсолютная локация печатается
 %% отдельным ключом в URI fragment identifier form.
@@ -239,7 +239,7 @@ verbose_visibility_test_() ->
     AnyOf = unit(true, [<<"anyOf">>], none, [], [FailedBranch]),
     #{<<"annotations">> := [PrintedProperties, PrintedAnyOf]} =
         project(verbose, root(true, [Properties, AnyOf])),
-    [?_assertNot(is_map_key(<<"annotations">>, PrintedProperties)),
+    [?_assertNot(maps:is_key(<<"annotations">>, PrintedProperties)),
      ?_assertMatch(#{<<"annotations">> :=
                          [#{<<"valid">> := false,
                             <<"keywordLocation">> := <<"/anyOf/0">>}]},

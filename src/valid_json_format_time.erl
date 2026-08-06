@@ -55,14 +55,26 @@ duration(_Other) ->
 -spec offset(binary()) -> {ok, binary(), integer()} | error.
 offset(String) ->
     Size = byte_size(String),
-    case String of
-        <<Partial:(Size - 1)/binary, Zulu>> when Zulu =:= $Z; Zulu =:= $z ->
-            {ok, Partial, 0};
-        <<Partial:(Size - 6)/binary, Sign, Hour:2/binary, $:, Minute:2/binary>>
-          when Sign =:= $+; Sign =:= $- ->
-            numoffset(Partial, Sign, digits(Hour), digits(Minute));
-        _Other ->
-            error
+    case Size of
+        0 ->
+            error;
+        _ ->
+            case binary:last(String) of
+                Zulu when Zulu =:= $Z; Zulu =:= $z ->
+                    {ok, binary:part(String, 0, Size - 1), 0};
+                _Other when Size < 6 ->
+                    error;
+                _Other ->
+                    Offset = binary:part(String, Size - 6, 6),
+                    case Offset of
+                        <<Sign, Hour:2/binary, $:, Minute:2/binary>>
+                          when Sign =:= $+; Sign =:= $- ->
+                            numoffset(binary:part(String, 0, Size - 6),
+                                      Sign, digits(Hour), digits(Minute));
+                        _OtherOffset ->
+                            error
+                    end
+            end
     end.
 
 -spec numoffset(binary(), byte(), {ok, non_neg_integer()} | error,

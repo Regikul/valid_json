@@ -78,7 +78,7 @@ covered(Props, Patterns, Names) ->
     [Name || Name <- Names, is_named(Props, Name) orelse is_patterned(Patterns, Name)].
 
 is_named(undefined, _Name) -> false;
-is_named(Props, Name)      -> is_map_key(Name, Props).
+is_named(Props, Name)      -> maps:is_key(Name, Props).
 
 is_patterned(undefined, _Name) ->
     false;
@@ -95,7 +95,7 @@ named(undefined, _Names) ->
     undefined;
 named(Props, Names) ->
     [{[Name, <<"properties">>], Name, maps:get(Name, Props)}
-     || Name <- Names, is_map_key(Name, Props)].
+     || Name <- Names, maps:is_key(Name, Props)].
 
 %% Совпавших паттернов может быть несколько, и применяется каждый: сегмент
 %% локации берётся из исходного текста паттерна, а не из имени свойства.

@@ -158,8 +158,49 @@ name([First | Rest]) ->
     join([quote(First, ?SAFE_FIRST) | [quote(Segment, ?SAFE) || Segment <- Rest]]).
 
 -spec quote(binary(), [byte()]) -> binary().
+
+-ifdef(CAP_URI_QUOTE).
 quote(Segment, Safe) ->
     uri_string:quote(Segment, Safe).
+
+-else.
+
+quote(Segment, Safe) ->
+    quote_legacy(Segment, Safe).
+
+quote_legacy(Segment, Safe) ->
+    quote_legacy(Segment, Safe, <<>>).
+
+quote_legacy(<<Char/utf8, Rest/binary>>, Safe, Acc) ->
+    Encoded = case is_unreserved(Char) orelse lists:member(Char, Safe) of
+                  true  -> <<Char>>;
+                  false -> percent_encode(Char)
+              end,
+    quote_legacy(Rest, Safe, <<Acc/binary, Encoded/binary>>);
+quote_legacy(<<>>, _Safe, Acc) ->
+    Acc.
+
+is_unreserved(C) when $A =< C, C =< $Z -> true;
+is_unreserved(C) when $a =< C, C =< $z -> true;
+is_unreserved(C) when $0 =< C, C =< $9 -> true;
+is_unreserved($- ) -> true;
+is_unreserved($_) -> true;
+is_unreserved($.) -> true;
+is_unreserved($~) -> true;
+is_unreserved(_) -> false.
+
+percent_encode(Codepoint) ->
+    percent_encode(<<Codepoint/utf8>>, <<>>).
+
+percent_encode(<<Byte, Rest/binary>>, Acc) ->
+    Hex = <<"0123456789ABCDEF">>,
+    A = binary:at(Hex, Byte div 16),
+    B = binary:at(Hex, Byte rem 16),
+    percent_encode(Rest, <<Acc/binary, $%, A, B>>);
+percent_encode(<<>>, Acc) ->
+    Acc.
+
+-endif.
 
 -spec join([binary()]) -> binary().
 join(Segments) ->
@@ -194,15 +235,77 @@ root(Options) ->
 %% приводит к нормальному виду.
 -spec priv_root(atom(), file:filename_all(), [dir_option()]) -> file:filename_all().
 priv_root(App, Path, Options) ->
+    Priv = priv_dir(App, Options),
+    case safe_relative_path(Path, Priv) of
+        unsafe -> erlang:error(badarg, [Options]);
+        Safe when Safe =:= []; Safe =:= <<>> -> Priv;
+        Safe -> filename:join(Priv, Safe)
+    end.
+
+priv_dir(App, Options) ->
     case code:priv_dir(App) of
         {error, bad_name} ->
-            erlang:error(badarg, [Options]);
-        Priv ->
-            case filelib:safe_relative_path(Path, Priv) of
-                unsafe -> erlang:error(badarg, [Options]);
-                Safe when Safe =:= []; Safe =:= <<>> -> Priv;
-                Safe -> filename:join(Priv, Safe)
-            end
+            case code:which(App) of
+                Beam when is_list(Beam) ->
+                    filename:join(filename:dirname(Beam), "../priv");
+                _Other ->
+                    erlang:error(badarg, [Options])
+            end;
+        Directory ->
+            Directory
+    end.
+
+%% OTP 23 added filelib:safe_relative_path/2. This local copy keeps the same
+%% path and symlink rules on OTP 20: absolute paths, escapes above Cwd and
+%% symlink loops are unsafe, while a safe relative path is returned normalized.
+-spec safe_relative_path(file:filename_all(), file:filename_all()) ->
+          unsafe | file:filename_all().
+safe_relative_path(Path, "") ->
+    safe_relative_path(Path, ".");
+safe_relative_path(Path, Cwd) ->
+    srp_path(filename:split(Path), Cwd, sets:new(), []).
+
+srp_path([], _Cwd, _Seen, []) ->
+    "";
+srp_path([], _Cwd, _Seen, Acc) ->
+    filename:join(Acc);
+srp_path(["." | Segments], Cwd, Seen, Acc) ->
+    srp_path(Segments, Cwd, Seen, Acc);
+srp_path([<<".">> | Segments], Cwd, Seen, Acc) ->
+    srp_path(Segments, Cwd, Seen, Acc);
+srp_path([".." | _Segments], _Cwd, _Seen, []) ->
+    unsafe;
+srp_path([".." | Segments], Cwd, Seen, [_ | _] = Acc) ->
+    srp_path(Segments, Cwd, Seen, lists:droplast(Acc));
+srp_path([<<"..">> | _Segments], _Cwd, _Seen, []) ->
+    unsafe;
+srp_path([<<"..">> | Segments], Cwd, Seen, [_ | _] = Acc) ->
+    srp_path(Segments, Cwd, Seen, lists:droplast(Acc));
+srp_path([clear | Segments], Cwd, _Seen, Acc) ->
+    srp_path(Segments, Cwd, sets:new(), Acc);
+srp_path([Segment | _] = Segments, Cwd, Seen, Acc) ->
+    case filename:pathtype(Segment) of
+        relative -> srp_segment(Segments, Cwd, Seen, Acc);
+        _        -> unsafe
+    end.
+
+srp_segment([Segment | Segments], Cwd, Seen, Acc) ->
+    Path = filename:join([Cwd | Acc]),
+    case file:read_link(filename:join(Path, Segment)) of
+        {ok, LinkPath} ->
+            srp_link(Path, LinkPath, Segments, Cwd, Seen, Acc);
+        {error, _} ->
+            srp_path(Segments, Cwd, Seen, Acc ++ [Segment])
+    end.
+
+srp_link(Path, LinkPath, Segments, Cwd, Seen, Acc) ->
+    FullLinkPath = filename:join(Path, LinkPath),
+    case sets:is_element(FullLinkPath, Seen) of
+        true ->
+            unsafe;
+        false ->
+            srp_path(filename:split(LinkPath) ++ [clear | Segments],
+                     Cwd, sets:add_element(FullLinkPath, Seen), Acc)
     end.
 
 -spec extension([dir_option()]) -> binary().

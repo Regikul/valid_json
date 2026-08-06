@@ -189,7 +189,8 @@ base_option(_Options) ->
 %% отбрасывает, а завершающий слэш дописывать было бы некуда.
 -spec hierarchical_base(uri()) -> {ok, uri()} | error.
 hierarchical_base(Uri) ->
-    case {uri_string:parse(Uri), valid_json_uri:resolve(Uri, anonymous)} of
+    case {valid_json_uri_backend:parse(Uri),
+          valid_json_uri:resolve(Uri, anonymous)} of
         {#{query := _}, _} ->
             error;
         {#{scheme := _, host := _}, {ok, Normalized, root}} ->

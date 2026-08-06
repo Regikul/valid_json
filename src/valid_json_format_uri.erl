@@ -24,7 +24,7 @@ strict_uri(String, RequireScheme) ->
     case ascii_uri(String) of
         false -> false;
         true ->
-            case catch uri_string:parse(String) of
+            case catch valid_json_uri_backend:parse(String) of
                 Parsed when is_map(Parsed) ->
                     not RequireScheme orelse maps:is_key(scheme, Parsed);
                 _Other ->

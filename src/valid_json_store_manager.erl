@@ -12,7 +12,7 @@
 %% после перезапуска он поднимается из таблицы реестра, а не начинается пустым.
 %% Артефактов без документа поэтому не остаётся. Обратное расхождение —
 %% документы есть, артефактов нет — возникает при перезапуске хранителя
-%% артефактов и закрывается пересборкой в `handle_continue`.
+%% артефактов и закрывается пересборкой в `init/1`.
 %%
 %% Истина по реестру — `#state.store`: таблица реестра ему проекция, которая
 %% нужна затем, чтобы пережить перезапуск. Оттого и порядок: значение меняется
@@ -20,7 +20,7 @@
 %% принятое.
 %%
 %% Стартовый набор документов приходит от загрузчика, если он задан опцией.
-%% Читается он в `handle_continue`, то есть до первого обслуженного сообщения, и
+%% Читается он в `init/1`, то есть до первого обслуженного сообщения, и
 %% ровно один раз: на холодном старте и после потери реестра. Отслеживают это две
 %% служебные строки, и каждая лежит в той таблице, чью полноту описывает:
 %% `loaded` в реестре говорит, что загрузчик прочитан, `ready` в артефактах — что
@@ -34,7 +34,7 @@
 
 -export([start_link/2, manager_name/1, artifacts_table/1, registry_table/1,
          table_options/1, add/2, add_at/2, remove/2, lookup/2, wait/2]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, handle_continue/2]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 -export_type([add_error/0, store_option/0]).
 
 -type add_error() :: {registration, [{rid(), #schema_error{}}]}
@@ -286,23 +286,16 @@ init({Store, Options}) ->
             Registered = valid_json_store:from_documents(
                            documents(Registry), registry_options(Options)),
             true = ets:insert(Registry, {base, valid_json_store:base(Registered)}),
-            {ok, #state{table = Artifacts, registry = Registry,
-                        store = Registered, options = compile_options(Options),
-                        loader = Loader},
-             {continue, start}};
+            State0 = #state{table = Artifacts, registry = Registry,
+                            store = Registered, options = compile_options(Options),
+                            loader = Loader},
+            State = load(State0),
+            ok = repair(State),
+            true = ets:insert(Artifacts, {ready, true}),
+            {ok, State};
         {error, not_owner} ->
             {stop, {claim_failed, not_owner}}
     end.
-
-%% Старт договаривается здесь, до первого обслуженного сообщения: сначала
-%% читается загрузчик, если ему есть что сказать, затем досоздаются артефакты, у
-%% которых документ есть, а артефакта нет, и только потом хранилище объявляет
-%% себя готовым.
-handle_continue(start, State0) ->
-    State = load(State0),
-    ok = repair(State),
-    true = ets:insert(State#state.table, {ready, true}),
-    {noreply, State}.
 
 handle_call({add_schemas, Schemas}, _From, State) ->
     {Reply, Next} = add_schemas(Schemas, State),
@@ -313,8 +306,8 @@ handle_call({add_entries, Entries}, _From, State) ->
 handle_call({remove, Uris}, _From, State) ->
     {Reply, Next} = remove_entries(Uris, State),
     {reply, Reply, Next};
-%% Ответить на это сообщение управляющий может только договорив `handle_continue`,
-%% и в этом весь ответ: другого состояния готовности у него нет.
+%% Ответить на это сообщение управляющий может только после завершения init/1,
+%% где загрузчик и восстановление уже отработали.
 handle_call(ready, _From, State) ->
     {reply, ok, State}.
 
@@ -474,7 +467,7 @@ referenced(Table, Survivors, Removed, Gone) ->
                            location = undefined}}
      || {Entry, Name} <- Removed, maps:is_key(Name, Refs)].
 
-%% Имя реестра без артефакта здесь недостижимо: пересборка в `handle_continue`
+%% Имя реестра без артефакта здесь недостижимо: пересборка в `init/1`
 %% закрывает это расхождение до первого вызова.
 -spec refers(atom(), uri(), [uri()], #{uri() => [uri()]}) -> #{uri() => [uri()]}.
 refers(Table, Name, Gone, Refs) ->

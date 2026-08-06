@@ -9,7 +9,14 @@
                  {<<"2019-09">>,
                   <<"https://json-schema.org/draft/2019-09/schema">>}]).
 
-eunit_wrapper_(Tests) -> {inparallel, Tests}.
+%% Встроенные метасхемы поднимает дерево приложения, и без него компиляция
+%% схемы не идёт.
+ensure_app() ->
+    {ok, _Started} = application:ensure_all_started(valid_json),
+    ok.
+
+eunit_wrapper_(Tests) ->
+    {setup, fun ensure_app/0, {inparallel, Tests}}.
 
 %% keywordLocation продолжает written path через $ref, а absolute location
 %% строится от фактически применённой target schema.
@@ -430,7 +437,7 @@ output_dir(Dir) ->
             {error, _} -> [filename:join(Relative)];
             AppDir     -> [filename:join([AppDir | Relative]), filename:join(Relative)]
         end,
-    case lists:search(fun filelib:is_dir/1, Candidates) of
-        {value, Path} -> Path;
-        false         -> erlang:error({output_suite_not_found, Candidates})
+    case [Path || Path <- Candidates, filelib:is_dir(Path)] of
+        [Path | _] -> Path;
+        []         -> erlang:error({output_suite_not_found, Candidates})
     end.

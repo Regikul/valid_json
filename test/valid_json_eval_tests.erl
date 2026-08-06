@@ -1574,7 +1574,7 @@ items(Child) ->
 %% `items` стоит на собственном keyword и задаётся `undefined`, если не написан.
 prefix_items(Children, Tail) ->
     Pointer = fun(Index) -> <<"/prefixItems/", (integer_to_binary(Index))/binary>> end,
-    Prefix = lists:enumerate(0, Children),
+    Prefix = lists:zip(lists:seq(0, length(Children) - 1), Children),
     branching([{prefix_items, [addr(Pointer(Index)) || {Index, _Child} <- Prefix],
                 slot(<<"/items">>, Tail)}],
               [{Pointer(Index), Child} || {Index, Child} <- Prefix]
@@ -1585,7 +1585,7 @@ prefix_items(Children, Tail) ->
 %% написан.
 items_array(Children, Tail) ->
     Pointer = fun(Index) -> <<"/items/", (integer_to_binary(Index))/binary>> end,
-    Prefix = lists:enumerate(0, Children),
+    Prefix = lists:zip(lists:seq(0, length(Children) - 1), Children),
     branching([{items_array, [addr(Pointer(Index)) || {Index, _Child} <- Prefix],
                 slot(<<"/additionalItems">>, Tail)}],
               [{Pointer(Index), Child} || {Index, Child} <- Prefix]

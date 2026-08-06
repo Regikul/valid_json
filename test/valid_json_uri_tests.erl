@@ -165,4 +165,4 @@ resource(Anchors, Pointers) ->
               dialect = <<"https://json-schema.org/draft/2020-12/schema">>,
               anchors = Anchors,
               dynamic_anchors = #{},
-              nodes = maps:from_keys(Pointers, true)}.
+              nodes = maps:from_list([{Pointer, true} || Pointer <- Pointers])}.

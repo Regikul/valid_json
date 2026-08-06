@@ -16,13 +16,23 @@
 -define(META_2019_APPLICATOR,
         <<"https://json-schema.org/draft/2019-09/meta/applicator">>).
 
+%% Встроенные метасхемы поднимает дерево приложения, и без него компиляция
+%% схемы не идёт.
+ensure_app() ->
+    {ok, _Started} = application:ensure_all_started(valid_json),
+    ok.
+
+eunit_wrapper_(Tests) ->
+    {setup, fun ensure_app/0, Tests}.
+
 published_bundles_test() ->
-    %% Первый API lookup также покрывает fallback для embedded-режима, где OTP
-    %% application вызывающий мог ещё не стартовать явно.
+    %% Первый lookup идёт после старта приложения: встроенную область поднимает
+    %% дерево, и фолбэка на ленивую публикацию больше нет.
     Modern = valid_json_metaschema:compiled(?DRAFT_2020_12),
     Legacy = valid_json_metaschema:compiled(?DRAFT_2019_09),
-    ModernBundle = persistent_term:get({valid_json_metaschema, ?DRAFT_2020_12}),
-    LegacyBundle = persistent_term:get({valid_json_metaschema, ?DRAFT_2019_09}),
+    [{bundles, Bundles}] = ets:lookup(valid_json_metaschema, bundles),
+    ModernBundle = maps:get(?DRAFT_2020_12, Bundles),
+    LegacyBundle = maps:get(?DRAFT_2019_09, Bundles),
     ?assertEqual(8, map_size(maps:get(resources, Modern))),
     ?assertEqual(7, map_size(maps:get(resources, Legacy))),
     ?assertEqual([], maps:get(sources, Modern)),
@@ -216,6 +226,37 @@ custom_metaschema_no_progress_outcome_test() ->
           location = {anonymous, <<>>}}},
        valid_json_compile:compile(Store, #{<<"$schema">> => Unknown}, [])).
 
+%% Смерть владельца таблицу не рушит: она возвращается хранителю по `heir`
+%% вместе с bundle, и перезапущенный владелец её просто забирает.
+-ifdef(CAP_ETS_INFO_ID).
+owner_restart_keeps_bundle_test() ->
+    with_branch(fun() ->
+        Table = ets:info(valid_json_metaschema, id),
+        [{bundles, Before}] = ets:lookup(valid_json_metaschema, bundles),
+        Owner = ets:info(valid_json_metaschema, owner),
+        _Restarted = kill_and_wait(Owner, Owner),
+        ?assertEqual(Table, ets:info(valid_json_metaschema, id)),
+        ?assertEqual([{bundles, Before}],
+                     ets:lookup(valid_json_metaschema, bundles))
+    end).
+
+%% Смерть хранителя гасит и владельца: таблица уничтожается и создаётся заново,
+%% а bundle собирается заново вместе с ней.
+keeper_restart_rebuilds_bundle_test() ->
+    with_branch(fun() ->
+        Table = ets:info(valid_json_metaschema, id),
+        Owner = ets:info(valid_json_metaschema, owner),
+        Keeper = whereis(
+                   valid_json_ets_keeper:keeper_name(valid_json_metaschema)),
+        _Restarted = kill_and_wait(Keeper, Owner),
+        ?assertNotEqual(Table, ets:info(valid_json_metaschema, id)),
+        ?assertEqual(8, map_size(maps:get(
+                                   resources,
+                                   valid_json_metaschema:compiled(
+                                     ?DRAFT_2020_12))))
+    end).
+-endif.
+
 schema_validation_is_propagated_to_custom_metaschema_test() ->
     Meta = <<"https://example.com/meta/invalid">>,
     MetaJson = #{<<"$id">> => Meta,
@@ -234,6 +275,70 @@ schema_validation_is_propagated_to_custom_metaschema_test() ->
         valid_json_compile:compile(Store, Schema,
                                    [{schema_validation, trusted}]),
     ?assertEqual([Meta], maps:get(sources, Compiled)).
+
+%% Перезапуски идут на отдельной ветке: intensity супервизора равна единице, и
+%% двух убийств подряд он не переживает, а имя таблицы глобально и второй ветки
+%% рядом с приложением не допускает. Приложение возвращается на место, потому
+%% что остальные проверки модуля его ждут.
+with_branch(Fun) ->
+    _ = application:stop(valid_json),
+    {ok, Sup} = valid_json_metaschema_sup:start_link(),
+    try Fun()
+    after
+        stop_branch(Sup),
+        ok = ensure_app()
+    end.
+
+%% Ветка связана с процессом теста, поэтому её гасят явно: иначе она пережила бы
+%% проверку и следующая не смогла бы создать таблицу под тем же именем.
+stop_branch(Sup) ->
+    unlink(Sup),
+    Ref = erlang:monitor(process, Sup),
+    exit(Sup, shutdown),
+    receive
+        {'DOWN', Ref, process, Sup, _Reason} -> ok
+    after
+        5000 -> erlang:error(branch_alive)
+    end.
+
+%% Ждём опубликованный bundle: claim таблицы и `publish/0` идут последовательно,
+%% поэтому смена владельца сама по себе ещё не означает готовность ветки.
+kill_and_wait(Pid, Owner) ->
+    Ref = erlang:monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+        {'DOWN', Ref, process, Pid, killed} -> ok
+    after
+        1000 -> erlang:error(process_alive)
+    end,
+    wait_bundle(Owner, 100).
+
+wait_bundle(_Owner, 0) ->
+    erlang:error(no_restart);
+wait_bundle(Owner, Attempts) ->
+    Keeper = whereis(valid_json_ets_keeper:keeper_name(valid_json_metaschema)),
+    case ets:info(valid_json_metaschema, owner) of
+        undefined ->
+            retry_bundle(Owner, Attempts);
+        Owner ->
+            retry_bundle(Owner, Attempts);
+        Keeper ->
+            retry_bundle(Owner, Attempts);
+        Pid ->
+            try ets:lookup(valid_json_metaschema, bundles) of
+                [{bundles, _}] ->
+                    Pid;
+                [] ->
+                    retry_bundle(Owner, Attempts)
+            catch
+                error:badarg ->
+                    retry_bundle(Owner, Attempts)
+            end
+    end.
+
+retry_bundle(Owner, Attempts) ->
+    timer:sleep(10),
+    wait_bundle(Owner, Attempts - 1).
 
 recursive_metaschema(Id, DecisiveBranch) ->
     #{<<"$id">> => Id,

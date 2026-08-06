@@ -81,12 +81,12 @@ object(_Check, _Instance)                     -> true.
 
 -spec missing([binary()], #{binary() => json()}) -> [binary()].
 missing(Names, Object) ->
-    [Name || Name <- Names, not is_map_key(Name, Object)].
+    [Name || Name <- Names, not maps:is_key(Name, Object)].
 
 %% Требование включается только для имён, которые в instance действительно есть.
 -spec missing_dependents(#{binary() => [binary()]}, #{binary() => json()}) -> [binary()].
 missing_dependents(Dependencies, Object) ->
-    Triggered = maps:filter(fun(Name, _) -> is_map_key(Name, Object) end, Dependencies),
+    Triggered = maps:filter(fun(Name, _) -> maps:is_key(Name, Object) end, Dependencies),
     lists:usort(missing(lists:append(maps:values(Triggered)), Object)).
 
 %% Чистые assertions не вносят покрытия. В режиме flag units не собираются:
@@ -131,7 +131,7 @@ keyword({dependent_required, _}) -> <<"dependentRequired">>.
 %% Клаузы для `{unique_items, false}` нет: этот constraint не может провалиться.
 -spec message(constraint(), json()) -> binary().
 message({type, Types}, Instance) ->
-    Got = atom_to_binary(valid_json_value:type_of(Instance)),
+    Got = atom_to_binary(valid_json_value:type_of(Instance), utf8),
     <<"expected ", (alternatives(Types))/binary, ", got ", Got/binary>>;
 message({enum, _Values}, _Instance) ->
     <<"value is not one of the enumerated values">>;
@@ -188,10 +188,75 @@ quoted(Name) ->
 alternatives([]) ->
     <<"no type">>;
 alternatives(Types) ->
-    iolist_to_binary(lists:join(<<" or ">>, [atom_to_binary(Type) || Type <- Types])).
+    iolist_to_binary(lists:join(<<" or ">>,
+                                 [atom_to_binary(Type, utf8) || Type <- Types])).
 
 %% Число печатается в форме, из которой читается обратно: у float это кратчайшее
 %% представление, а не округление ~p.
 -spec number_text(number()) -> binary().
 number_text(Value) when is_integer(Value) -> integer_to_binary(Value);
-number_text(Value) when is_float(Value)   -> float_to_binary(Value, [short]).
+number_text(Value) when is_float(Value)   -> float_text(Value).
+
+-ifdef(CAP_FLOAT_TO_BINARY_SHORT).
+float_text(Value) ->
+    erlang:float_to_binary(Value, [short]).
+
+-else.
+
+float_text(Value) ->
+    list_to_binary(normalize_short_float(
+                     lists:flatten(io_lib:write(Value,
+                                                [{float_format, short}])))).
+
+normalize_short_float(Text) ->
+    case exponent_position(Text, 1) of
+        0 -> Text;
+        Position ->
+            {Mantissa, ExponentText} = lists:split(Position - 1, Text),
+            Exponent = list_to_integer(tl(ExponentText)),
+            {Sign, Unsigned} = case Mantissa of
+                                   [$- | Rest] -> {[$-], Rest};
+                                   [$+ | Rest] -> {[$+], Rest};
+                                   _            -> {[], Mantissa}
+                               end,
+            DotPosition = dot_position(Unsigned, 1),
+            Digits = [C || C <- Unsigned, C =/= $.],
+            Sign ++ trim_fraction(move_decimal(Digits,
+                                                DotPosition + Exponent))
+    end.
+
+exponent_position([], _Position) -> 0;
+exponent_position([$e | _], Position) -> Position;
+exponent_position([$E | _], Position) -> Position;
+exponent_position([_ | Rest], Position) ->
+    exponent_position(Rest, Position + 1).
+
+dot_position([], Position) -> Position - 1;
+dot_position([$. | _], Position) -> Position - 1;
+dot_position([_ | Rest], Position) -> dot_position(Rest, Position + 1).
+
+move_decimal(Digits, Position) when Position =< 0 ->
+    "0." ++ lists:duplicate(-Position, $0) ++ Digits;
+move_decimal(Digits, Position) when Position >= length(Digits) ->
+    Digits ++ lists:duplicate(Position - length(Digits), $0);
+move_decimal(Digits, Position) ->
+    {Left, Right} = lists:split(Position, Digits),
+    Left ++ "." ++ Right.
+
+trim_fraction(Text) ->
+    case lists:splitwith(fun(C) -> C =/= $. end, Text) of
+        {_Integer, [_Dot | Fraction]} ->
+            Trimmed = trim_right_zeros(Fraction),
+            case Trimmed of
+                [] -> lists:sublist(Text, length(Text) - length(Fraction) - 1);
+                _  -> lists:sublist(Text, length(Text) - length(Fraction)) ++ Trimmed
+            end;
+        _NoFraction ->
+            Text
+    end.
+
+trim_right_zeros(Text) ->
+    lists:reverse(lists:dropwhile(fun(C) -> C =:= $0 end,
+                                  lists:reverse(Text))).
+
+-endif.

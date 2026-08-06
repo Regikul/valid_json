@@ -10,14 +10,14 @@
 
 -spec neutral() -> evaluated().
 neutral() ->
-    #{properties => sets:new([{version, 2}]),
-      items      => {0, sets:new([{version, 2}])}}.
+    #{properties => sets:new(),
+      items      => {0, sets:new()}}.
 
 %% Покрытие, внесённое одним object applicator: имена свойств, к которым он
 %% применился. Маску массива он не трогает.
 -spec properties([binary()]) -> evaluated().
 properties(Names) ->
-    (neutral())#{properties := sets:from_list(Names, [{version, 2}])}.
+    (neutral())#{properties := sets:from_list(Names)}.
 
 %% Покрытие, внесённое одним array applicator: непрерывный префикс и совпавшие
 %% индексы `contains`. Список индексов нормализуется здесь, чтобы обработчики не
@@ -26,7 +26,7 @@ properties(Names) ->
 items(all) ->
     (neutral())#{items := all};
 items({Prefix, Indexes}) ->
-    (neutral())#{items := normalize(Prefix, sets:from_list(Indexes, [{version, 2}]))}.
+    (neutral())#{items := normalize(Prefix, sets:from_list(Indexes))}.
 
 -spec merge(evaluated(), evaluated()) -> evaluated().
 merge(#{properties := P1, items := I1}, #{properties := P2, items := I2}) ->

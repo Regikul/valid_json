@@ -1,0 +1,18 @@
+%% json is absent before OTP 27. uri_string itself is absent before OTP 21,
+%% so only OTP 20 selects the vendored module.
+Release = list_to_integer(erlang:system_info(otp_release)),
+Dirs = case Release of
+           R when R < 21 -> ["src", "vendor/json", "vendor/uri_string"];
+           R when R < 27 -> ["src", "vendor/json"];
+           _             -> ["src"]
+       end,
+FeatureFlags =
+    [{d, 'CAP_URI_PERCENT_DECODE'} || Release >= 23] ++
+    [{d, 'CAP_URI_QUOTE'} || Release >= 25] ++
+    [{d, 'CAP_FLOAT_TO_BINARY_SHORT'} || Release >= 25] ++
+    [{d, 'CAP_ETS_INFO_ID'} || Release >= 21] ++
+    [{d, 'CAP_URI_RESOLVE'} || Release >= 22],
+{erl_opts, ErlOpts} = lists:keyfind(erl_opts, 1, CONFIG),
+Config = lists:keystore(erl_opts, 1, CONFIG,
+                         {erl_opts, ErlOpts ++ FeatureFlags}),
+lists:keystore(src_dirs, 1, Config, {src_dirs, Dirs}).

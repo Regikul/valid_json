@@ -30,7 +30,7 @@
 %% цели внутри него. База `anonymous` — корень без абсолютной локации.
 -spec resolve(binary(), rid()) -> {ok, rid(), target()} | {error, uri_error()}.
 resolve(Reference, Base) ->
-    case uri_string:parse(Reference) of
+    case valid_json_uri_backend:parse(Reference) of
         {error, _, _} -> {error, invalid_uri};
         Parsed        -> resolve_parts(Parsed, Base)
     end.
@@ -40,7 +40,7 @@ resolve(Reference, Base) ->
 %% относительной ссылке `uri_string:normalize` молча возвращает вход неизменным,
 %% поэтому ранняя нормализация не выявила бы отсутствие базы, а замаскировала бы
 %% его.
--spec resolve_parts(uri_string:uri_map(), rid()) ->
+-spec resolve_parts(valid_json_uri_backend:uri_map(), rid()) ->
           {ok, rid(), target()} | {error, uri_error()}.
 resolve_parts(Parsed, Base) ->
     case document(Parsed, Base) of
@@ -59,9 +59,10 @@ attach(Uri, Fragment) ->
 %% Имя документа — ссылка без fragment, разрешённая и приведённая к канонической
 %% форме. Ошибка recompose здесь недостижима: карта только что получена удачным
 %% разбором, — но ветвь оставлена, чтобы слой оставался тотальным.
--spec document(uri_string:uri_map(), rid()) -> {ok, rid()} | {error, uri_error()}.
+-spec document(valid_json_uri_backend:uri_map(), rid()) ->
+          {ok, rid()} | {error, uri_error()}.
 document(Parsed, Base) ->
-    case uri_string:recompose(maps:remove(fragment, Parsed)) of
+    case valid_json_uri_backend:recompose(maps:remove(fragment, Parsed)) of
         Document when is_binary(Document) -> resolved(Document, Parsed, Base);
         _Error                            -> {error, invalid_uri}
     end.
@@ -70,7 +71,7 @@ document(Parsed, Base) ->
 %% path, `recompose` даёт пустую строку, а разрешение пустой ссылки возвращает
 %% сам base URI (rfc3986.txt:1482). У anonymous root базы нет вовсе, поэтому
 %% такая ссылка остаётся внутри него и абсолютного имени не получает.
--spec resolved(binary(), uri_string:uri_map(), rid()) ->
+-spec resolved(binary(), valid_json_uri_backend:uri_map(), rid()) ->
           {ok, rid()} | {error, uri_error()}.
 resolved(<<>>, _Parsed, anonymous) ->
     {ok, anonymous};
@@ -82,7 +83,7 @@ resolved(Document, Parsed, anonymous) ->
         false -> {error, relative_uri_without_base}
     end;
 resolved(Document, _Parsed, Base) ->
-    case uri_string:resolve(Document, Base) of
+    case valid_json_uri_backend:resolve(Document, Base) of
         {error, invalid_scheme, _}        -> {error, relative_uri_without_base};
         {error, _, _}                     -> {error, invalid_uri};
         Absolute when is_binary(Absolute) -> normalize(Absolute)
@@ -94,7 +95,7 @@ resolved(Document, _Parsed, Base) ->
 %% реестра служит именно её результат.
 -spec normalize(uri()) -> {ok, uri()} | {error, uri_error()}.
 normalize(Uri) ->
-    case uri_string:normalize(Uri) of
+    case valid_json_uri_backend:normalize(Uri) of
         Normalized when is_binary(Normalized) -> {ok, Normalized};
         _Error                                -> {error, invalid_uri}
     end.
@@ -118,11 +119,13 @@ target(Fragment) ->
         Anchor                  -> {anchor, Anchor}
     end.
 
-%% Документированный контракт `percent_decode/1` допускает возврат ошибки, но на
-%% binary OTP 27 сообщает о ней throw'ом, поэтому закрыты оба пути. Битая
-%% escape-последовательность и октеты, не складывающиеся в UTF-8, означают для
-%% fragment одно и то же: прочитать его как текст нельзя.
+%% Документированный контракт `percent_decode/1` допускает возврат ошибки, но
+%% современные OTP сообщают об ошибке throw'ом. Битая escape-последовательность
+%% и октеты, не складывающиеся в UTF-8, означают для fragment одно и то же:
+%% прочитать его как текст нельзя.
 -spec decode(unicode:chardata()) -> binary() | {error, uri_error()}.
+
+-ifdef(CAP_URI_PERCENT_DECODE).
 decode(Fragment) ->
     try uri_string:percent_decode(Fragment) of
         Decoded when is_binary(Decoded) -> Decoded;
@@ -130,6 +133,58 @@ decode(Fragment) ->
     catch
         throw:{error, _, _} -> {error, invalid_percent_encoding}
     end.
+
+-else.
+
+decode(Fragment) ->
+    percent_decode_legacy(Fragment).
+
+%% OTP 20-22 expose the URI parser, but not percent_decode/1. Keep this small
+%% compatibility path local: it is used only for fragments and mirrors the
+%% raw byte decoding semantics of newer uri_string releases.
+-spec percent_decode_legacy(unicode:chardata()) -> binary() | {error, uri_error()}.
+percent_decode_legacy(Fragment) when is_binary(Fragment) ->
+    try check_decoded_utf8(decode_percent(Fragment, <<>>)) of
+        Decoded -> Decoded
+    catch
+        throw:{error, invalid_percent_encoding} ->
+            {error, invalid_percent_encoding};
+        throw:{error, invalid_utf8} ->
+            {error, invalid_percent_encoding}
+    end;
+percent_decode_legacy(Fragment) when is_list(Fragment) ->
+    try percent_decode_legacy(unicode:characters_to_binary(Fragment)) of
+        Decoded when is_binary(Decoded) -> unicode:characters_to_list(Decoded);
+        Error                              -> Error
+    catch
+        _:_ -> {error, invalid_percent_encoding}
+    end.
+
+decode_percent(<<$%, C0, C1, Rest/binary>>, Acc) ->
+    case {hex_digit(C0), hex_digit(C1)} of
+        {A, B} when is_integer(A), is_integer(B) ->
+            decode_percent(Rest, <<Acc/binary, (A * 16 + B)>>);
+        _ ->
+            throw({error, invalid_percent_encoding})
+    end;
+decode_percent(<<C, Rest/binary>>, Acc) ->
+    decode_percent(Rest, <<Acc/binary, C>>);
+decode_percent(<<>>, Acc) ->
+    Acc.
+
+hex_digit(C) when $0 =< C, C =< $9 -> C - $0;
+hex_digit(C) when $A =< C, C =< $F -> C - $A + 10;
+hex_digit(C) when $a =< C, C =< $f -> C - $a + 10;
+hex_digit(_) -> invalid.
+
+check_decoded_utf8(Binary) ->
+    case unicode:characters_to_list(Binary) of
+        {incomplete, _, _} -> throw({error, invalid_utf8});
+        {error, _, _}      -> throw({error, invalid_utf8});
+        _                  -> Binary
+    end.
+
+-endif.
 
 %% Цель ищется только среди заранее построенных schema nodes и объявленных
 %% anchors: существующий JSON value в non-schema position допустимой целью не
@@ -150,7 +205,7 @@ lookup({anchor, Name}, #resource{anchors = Anchors, nodes = Nodes}) ->
 
 -spec node_at(pointer(), #{pointer() => schema_node()}) -> {ok, pointer()} | error.
 node_at(Pointer, Nodes) ->
-    case is_map_key(Pointer, Nodes) of
+    case maps:is_key(Pointer, Nodes) of
         true  -> {ok, Pointer};
         false -> error
     end.

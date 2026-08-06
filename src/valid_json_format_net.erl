@@ -161,7 +161,8 @@ label(<<Single>>) ->
     is_letdig(Single);
 label(<<First, Rest/binary>>) ->
     Size = byte_size(Rest) - 1,
-    <<Inner:Size/binary, Last>> = Rest,
+    Inner = binary:part(Rest, 0, Size),
+    Last = binary:last(Rest),
     is_letdig(First) andalso is_letdig(Last) andalso is_ldh(Inner).
 
 -spec is_letdig(byte()) -> boolean().
@@ -223,10 +224,14 @@ quoted(_Other) ->
 %% скобках.
 -spec domain(binary()) -> boolean().
 domain(<<$[, Rest/binary>>) ->
-    Size = byte_size(Rest) - 1,
-    case Rest of
-        <<Literal:Size/binary, $]>> -> address_literal(Literal);
-        _Other                      -> false
+    case byte_size(Rest) of
+        0 ->
+            false;
+        Size ->
+            case binary:last(Rest) of
+                $] -> address_literal(binary:part(Rest, 0, Size - 1));
+                _  -> false
+            end
     end;
 domain(Domain) ->
     lists:all(fun label/1, binary:split(Domain, <<".">>, [global])).

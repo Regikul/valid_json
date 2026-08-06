@@ -439,8 +439,11 @@ enter_resource(#{<<"$id">> := Id} = Schema, Rid, Location, Contexts, child,
 %% запрещён обоими dialects (core.txt:1377 в 2020-12, core.txt:1320 в 2019-09).
 %% Молча игнорировать его нельзя: автор написал бы смену dialect и получил бы
 %% dialect объемлющего.
-enter_resource(#{<<"$schema">> := _} = Schema, Rid, Location, _Contexts, child,
-               _Profile, _State) when not is_map_key(<<"$id">>, Schema) ->
+enter_resource(#{<<"$schema">> := _, <<"$id">> := _}, Rid, Location,
+               Contexts, child, Profile, State) ->
+    {ok, Rid, Location, Contexts, Profile, State};
+enter_resource(#{<<"$schema">> := _}, Rid, Location, _Contexts, child,
+               _Profile, _State) ->
     {error, schema_error({misplaced_keyword, <<"$schema">>},
                          keyword_addr(Rid, Location, <<"$schema">>))};
 enter_resource(_Schema, Rid, Location, Contexts, child, Profile, State) ->

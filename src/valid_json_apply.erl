@@ -46,7 +46,7 @@ check({if_then_else, If, Then, Else}, Instance, Context) ->
 %% имён: наблюдаемое дерево units не должно зависеть от порядка обхода map.
 check({dependent_schemas, Schemas}, Instance, Context) when is_map(Instance) ->
     Present = [{Name, maps:get(Name, Schemas)}
-               || Name <- lists:sort(maps:keys(Schemas)), is_map_key(Name, Instance)],
+               || Name <- lists:sort(maps:keys(Schemas)), maps:is_key(Name, Instance)],
     dependent(Present, Instance, Context);
 %% Keyword применяется только к объекту: другое значение даёт успешный unit без
 %% error и annotation, а не отказ.

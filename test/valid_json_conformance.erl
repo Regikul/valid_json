@@ -96,6 +96,15 @@
 -define(REMOTE_BASE, <<"http://localhost:1234/">>).
 -define(REMOTES, 41).
 
+%% Встроенные метасхемы поднимает дерево приложения, и без него компиляция
+%% схемы не идёт.
+ensure_app() ->
+    {ok, _Started} = application:ensure_all_started(valid_json),
+    ok.
+
+eunit_wrapper_(Tests) ->
+    {setup, fun ensure_app/0, Tests}.
+
 validation_test_() ->
     {Loaded, Store} = remotes_store(),
     Tests = [file_tests(Store, Dir, Dialect, File)
@@ -205,7 +214,7 @@ suite_dir() ->
             {error, _} -> [filename:join(Relative)];
             AppDir     -> [filename:join([AppDir | Relative]), filename:join(Relative)]
         end,
-    case lists:search(fun filelib:is_dir/1, Candidates) of
-        {value, Dir} -> Dir;
-        false        -> erlang:error({suite_not_found, Candidates})
+    case [Dir || Dir <- Candidates, filelib:is_dir(Dir)] of
+        [Dir | _] -> Dir;
+        []        -> erlang:error({suite_not_found, Candidates})
     end.

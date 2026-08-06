@@ -14,7 +14,7 @@ run(#{root := Root} = Compiled, Instance, Format) ->
                             keyword_location  = [],
                             instance_location = {0, []},
                             dynamic_scope     = [Root],
-                            guard             = sets:new([{version, 2}]),
+                            guard             = sets:new(),
                             format            = Format,
                             coverage          = false},
     case eval({Root, <<>>}, Instance, Context) of

@@ -8,12 +8,18 @@ on:
 jobs:
   test:
     name: OTP ${{ matrix.otp }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     strategy:
       fail-fast: false
       matrix:
-        otp: ['27', '28']
+        include:
+          - {otp: '24', rebar3: '3.23.0'}
+          - {otp: '25', rebar3: '3.24.0'}
+          - {otp: '26', rebar3: '3.26.0'}
+          - {otp: '27', rebar3: '3.27.0'}
+          - {otp: '28', rebar3: '3.27.0'}
+          - {otp: '29', rebar3: '3.27.0'}
 
     steps:
       - uses: actions/checkout@v7
@@ -21,15 +27,54 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{ matrix.otp }}
-          rebar3-version: '3.27.0'
+          rebar3-version: ${{ matrix.rebar3 }}
 
       - name: Compile
-        run: rebar3 as ci compile
+        run: env -u DEBUG rebar3 as ci compile
 
       # Conformance runs first: it is the suite that answers whether the
       # library implements the specification, so it should report early.
       - name: Conformance profiles
-        run: rebar3 as ci conformance
+        run: env -u DEBUG rebar3 as ci conformance
 
       - name: Full EUnit suite
-        run: rebar3 as ci eunit
+        run: env -u DEBUG rebar3 as ci eunit
+
+  legacy:
+    name: OTP ${{ matrix.otp }} (Docker)
+    runs-on: ubuntu-24.04
+    container:
+      image: erlang:${{ matrix.image }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {otp: '20', image: '20.3.8.26', rebar3: '3.15.2'}
+          - {otp: '21', image: '21.3.8.24', rebar3: '3.15.2'}
+          - {otp: '22', image: '22.3.4.27', rebar3: '3.18.0'}
+          - {otp: '23', image: '23.3.4.20', rebar3: '3.20.0'}
+
+    defaults:
+      run:
+        shell: sh
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install rebar3
+        run: |
+          curl -fsSL "https://github.com/erlang/rebar3/releases/download/${{ matrix.rebar3 }}/rebar3" \
+            -o /usr/local/bin/rebar3
+          chmod +x /usr/local/bin/rebar3
+
+      - name: Compile
+        run: env -u DEBUG rebar3 as ci compile
+
+      # Conformance runs first: it is the suite that answers whether the
+      # library implements the specification, so it should report early.
+      - name: Conformance profiles
+        run: env -u DEBUG rebar3 as ci conformance
+
+      - name: Full EUnit suite
+        run: env -u DEBUG rebar3 as ci eunit

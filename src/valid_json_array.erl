@@ -79,7 +79,9 @@ prefix(Keyword, [Addr | Addrs], [Element | Elements], Index, Acc) ->
 elements(_Keyword, undefined, _Elements, _Index) ->
     undefined;
 elements(Keyword, Addr, Elements, Index) ->
-    [{[Keyword], I, Element, Addr} || {I, Element} <- lists:enumerate(Index, Elements)].
+    [{[Keyword], I, Element, Addr} ||
+        {I, Element} <- lists:zip(lists:seq(Index, Index + length(Elements) - 1),
+                                  Elements)].
 
 %% Обрыв разрешён только в режиме flag; в остальных режимах выполняются оба
 %% keyword'а, потому что дерево units должно быть полным.

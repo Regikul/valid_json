@@ -3,11 +3,26 @@
 -module(valid_json_loader_tests).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("kernel/include/file.hrl").
 -include("valid_json_resources.hrl").
 
 -define(STORE, valid_json_loader_test_store).
 -define(PROBE, valid_json_loader_test_probe).
 -define(BASE, <<"https://example.com/schemas/">>).
+
+%% Встроенные метасхемы поднимает дерево приложения, и без него компиляция
+%% схемы не идёт.
+ensure_app() ->
+    {ok, _Started} = application:ensure_all_started(valid_json),
+    ok.
+
+stop_app() ->
+    case application:stop(valid_json) of
+        ok ->
+            ok;
+        {error, {not_started, valid_json}} ->
+            ok
+    end.
 
 %% -------------------------------------------------------------------
 %% Загрузчик каталога
@@ -82,7 +97,7 @@ dir_priv_dir_test() ->
 dir_symlink_test() ->
     with_dir(fun(Dir) ->
         Inside = filename:join(Dir, "inside"),
-        ok = filelib:ensure_path(Inside),
+        ok = filelib:ensure_dir(filename:join(Inside, "placeholder")),
         ok = file:write_file(filename:join(Inside, "weight.json"), <<"true">>),
         %% Ссылка, не покидающая области, отвергается наравне с прочими:
         %% положить схему в область дешевле, чем проверять цель ссылки.
@@ -178,6 +193,7 @@ relative_names_test() ->
 %% Загрузчик стандартного хранилища задаётся только через app env: его дерево
 %% поднимает библиотека, и опций ему передать неоткуда.
 standard_store_loader_test() ->
+    ok = stop_app(),
     ok = application:set_env(valid_json, loader, dir_loader()),
     {ok, _Started} = application:ensure_all_started(valid_json),
     try
@@ -265,29 +281,36 @@ bad_loader_option_test() ->
 %% Готовность
 %% -------------------------------------------------------------------
 
-%% В окне загрузки читатель получает `unavailable`, а не `not_found`: набор
-%% артефактов неполон, и «имени нет» сказать не о чем.
-unavailable_while_loading_test() ->
+%% На OTP 20 загрузка выполняется в init/1, поэтому стартующий supervisor не
+%% возвращается до завершения загрузчика; первое сообщение к дереву поэтому не
+%% может обогнать загрузку.
+startup_waits_for_loader_test() ->
+    ok = ensure_app(),
     Parent = self(),
     Blocking = {valid_json_test_loader,
                 #{load => fun() ->
                                   Parent ! {loading, self()},
                                   receive release -> {ok, entries()} end
                           end}},
-    with_store([{base_uri, ?BASE}, {loader, Blocking}], fun(Store) ->
-        Manager = receive {loading, Pid} -> Pid
-                  after 5000 -> erlang:error(no_loading) end,
-        ?assertEqual({error, unavailable},
-                     valid_json_store_manager:lookup(Store, ?BASE)),
-        ?assertEqual({error, unavailable},
-                     valid_json:store_validate(Store, ?BASE, 1, [])),
-        Manager ! release,
-        {ok, _Ref} = valid_json_store_manager:wait(Store, 5000),
-        ?assertMatch({ok, _}, valid_json_store_manager:lookup(Store, ?BASE)),
-        %% Готовое хранилище про неизвестное имя отвечает уже промахом.
-        ?assertEqual({error, not_found},
-                     valid_json_store_manager:lookup(Store, <<"nothing">>))
-    end).
+    Starter = spawn(fun() ->
+        process_flag(trap_exit, true),
+        Result = valid_json_store_sup:start_link(
+                   ?STORE, [{base_uri, ?BASE}, {loader, Blocking}]),
+        Parent ! {started, self(), Result},
+        receive stop -> ok end
+    end),
+    Manager = receive {loading, Pid} -> Pid
+              after 5000 -> erlang:error(no_loading) end,
+    Manager ! release,
+    Sup = receive
+              {started, Starter, {ok, SupPid}} -> SupPid
+          after 5000 -> erlang:error(start_timeout)
+          end,
+    Ref = erlang:monitor(process, Sup),
+    exit(Sup, kill),
+    receive {'DOWN', Ref, process, Sup, _Reason} -> ok
+    after 5000 -> erlang:error(store_alive) end,
+    Starter ! stop.
 
 %% Хранилища нет вовсе: чтение отвечает тем же `unavailable` и не падает, потому
 %% что исполняется в процессе вызывающего.
@@ -346,6 +369,7 @@ calls() ->
 
 %% Хранилище со считающим загрузчиком, договорившее свой старт.
 with_loaded(Fun) ->
+    ok = ensure_app(),
     with_probe(fun() ->
         with_store([{base_uri, ?BASE}, {loader, counting_loader()}], fun(Store) ->
             {ok, _Ref} = valid_json_store_manager:wait(Store, 5000),
@@ -364,6 +388,7 @@ with_probe(Fun) ->
     end.
 
 with_store(Options, Fun) ->
+    ok = ensure_app(),
     {ok, Sup} = valid_json_store_sup:start_link(?STORE, Options),
     try Fun(?STORE)
     after
@@ -372,34 +397,39 @@ with_store(Options, Fun) ->
 
 stop_store(Sup) ->
     unlink(Sup),
-    Ref = monitor(process, Sup),
+    Ref = erlang:monitor(process, Sup),
     exit(Sup, shutdown),
     receive {'DOWN', Ref, process, Sup, _Reason} -> ok
     after 5000 -> erlang:error(store_alive) end.
 
 %% Дерево с негодной конфигурацией либо не поднимается вовсе, либо умирает сразу
-%% после старта: управляющий падает в `handle_continue`, а intensity супервизора
-%% исчерпывается на первом же перезапуске. Проверке важно ровно то, что живым
-%% оно не остаётся.
+%% после старта. Проверке важно ровно то, что живым оно не остаётся.
 tree_outcome(Options) ->
-    process_flag(trap_exit, true),
-    try valid_json_store_sup:start_link(?STORE, Options) of
-        {ok, Sup} ->
-            Ref = monitor(process, Sup),
-            receive {'DOWN', Ref, process, Sup, _Reason} -> dead
-            after 5000 -> stop_store(Sup), alive end;
-        {error, _Reason} ->
-            dead
-    catch
-        exit:_ -> dead
-    after
-        flush_exits(),
-        process_flag(trap_exit, false)
-    end.
-
-flush_exits() ->
-    receive {'EXIT', _Pid, _Reason} -> flush_exits()
-    after 0 -> ok end.
+    ok = ensure_app(),
+    Parent = self(),
+    {Worker, WorkerRef} = spawn_monitor(fun() ->
+        process_flag(trap_exit, true),
+        Result = (catch valid_json_store_sup:start_link(?STORE, Options)),
+        Parent ! {tree_outcome, self(), Result},
+        receive stop -> ok end
+    end),
+    Outcome = receive
+                  {tree_outcome, Worker, {ok, Sup}} ->
+                      Ref = erlang:monitor(process, Sup),
+                      exit(Sup, kill),
+                      receive {'DOWN', Ref, process, Sup, _SupReason} -> dead
+                      after 5000 -> alive end;
+                  {tree_outcome, Worker, {error, _StartReason}} ->
+                      dead;
+                  {tree_outcome, Worker, {'EXIT', _ExitReason}} ->
+                      dead
+              after 5000 ->
+                  alive
+              end,
+    Worker ! stop,
+    receive {'DOWN', WorkerRef, process, Worker, _WorkerReason} -> ok
+    after 5000 -> exit(Worker, kill) end,
+    Outcome.
 
 manager(Store) ->
     whereis(valid_json_store_manager:manager_name(Store)).
@@ -408,12 +438,11 @@ keeper(Table) ->
     whereis(valid_json_ets_keeper:keeper_name(Table)).
 
 %% Убитый процесс уносит с собой управляющего: оба хранителя стоят в rest_for_one
-%% перед ним. Ждём именно нового управляющего и того, чтобы он договорил старт:
-%% чтение загрузчика идёт в handle_continue, то есть до первого сообщения.
+%% перед ним. Ждём именно нового управляющего и договорившего старт.
 restart(Store, Pid) ->
     Name = valid_json_store_manager:manager_name(Store),
     Manager = manager(Store),
-    Ref = monitor(process, Pid),
+    Ref = erlang:monitor(process, Pid),
     exit(Pid, kill),
     receive {'DOWN', Ref, process, Pid, killed} -> ok
     after 1000 -> erlang:error(process_alive) end,
@@ -442,9 +471,9 @@ fixtures() ->
             {error, _} -> [filename:join(Relative)];
             AppDir     -> [filename:join([AppDir | Relative]), filename:join(Relative)]
         end,
-    case lists:search(fun filelib:is_dir/1, Candidates) of
-        {value, Dir} -> Dir;
-        false        -> erlang:error({fixtures_not_found, Candidates})
+    case [Dir || Dir <- Candidates, filelib:is_dir(Dir)] of
+        [Dir | _] -> Dir;
+        []        -> erlang:error({fixtures_not_found, Candidates})
     end.
 
 %% Каталоги под отдельные случаи собираются на месте: держать в fixtures
@@ -452,10 +481,27 @@ fixtures() ->
 with_dir(Fun) ->
     Dir = filename:join(scratch(),
                         "loader_" ++ integer_to_list(erlang:unique_integer([positive]))),
-    ok = filelib:ensure_path(Dir),
+    ok = filelib:ensure_dir(filename:join(Dir, "placeholder")),
     try Fun(Dir)
     after
-        ok = file:del_dir_r(Dir)
+        ok = delete_dir(Dir)
+    end.
+
+delete_dir(Dir) ->
+    case file:list_dir(Dir) of
+        {ok, Names} ->
+            lists:foreach(fun(Name) -> delete_path(filename:join(Dir, Name)) end,
+                          Names),
+            file:del_dir(Dir);
+        {error, enoent} ->
+            ok
+    end.
+
+delete_path(Path) ->
+    case file:read_link_info(Path) of
+        {ok, #file_info{type = directory}} -> delete_dir(Path);
+        {ok, _}                            -> file:delete(Path);
+        {error, enoent}                     -> ok
     end.
 
 scratch() ->

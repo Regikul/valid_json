@@ -5,8 +5,14 @@
 -include("valid_json_core.hrl").
 -include("valid_json_resources.hrl").
 
-%% Тесты модуля независимы, поэтому eunit прогоняет их параллельно.
-eunit_wrapper_(Tests) -> {inparallel, Tests}.
+%% Встроенные метасхемы поднимает дерево приложения, и без него компиляция
+%% схемы не идёт.
+ensure_app() ->
+    {ok, _Started} = application:ensure_all_started(valid_json),
+    ok.
+
+eunit_wrapper_(Tests) ->
+    {setup, fun ensure_app/0, {inparallel, Tests}}.
 
 -define(DIALECT, <<"https://json-schema.org/draft/2020-12/schema">>).
 -define(LEGACY, <<"https://json-schema.org/draft/2019-09/schema">>).

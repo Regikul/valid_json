@@ -169,7 +169,7 @@ compile_node(Other, Position, _State) ->
 output_markers(Schema) ->
     [{marker, Keyword}
      || Keyword <- [<<"$defs">>, <<"definitions">>],
-        is_map_key(Keyword, Schema)].
+        maps:is_key(Keyword, Schema)].
 
 %% Значения unknown keywords не являются schema positions: discovery их уже не
 %% посещал, а emitter лишь сохраняет исходное JSON value как annotation в
@@ -301,7 +301,7 @@ constraints(Schema, Position, State) ->
     Step = fun(_Group, {error, _} = Error) ->
                    Error;
               (Group, {ok, Acc, Built}) ->
-                   case lists:any(fun(Keyword) -> is_map_key(Keyword, Schema) end,
+                   case lists:any(fun(Keyword) -> maps:is_key(Keyword, Schema) end,
                                   active_keywords(Group, Built#state.profile)) of
                        false ->
                            {ok, Acc, Built};
@@ -545,7 +545,7 @@ array(Schema, Position, #state{profile = #profile{draft = Draft}} = State) ->
 %% schema position, и общий emission её обработает.
 -spec layout(dialect(), #{binary() => json()}) -> prefix | array | single | none.
 layout(?DRAFT_2020_12, Schema) ->
-    case is_map_key(<<"prefixItems">>, Schema) of
+    case maps:is_key(<<"prefixItems">>, Schema) of
         true  -> prefix;
         false -> single
     end;

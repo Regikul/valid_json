@@ -10,6 +10,15 @@
 -define(STORE, valid_json_test_managed_store).
 -define(BASE, <<"https://example.com/schemas/">>).
 
+%% Встроенные метасхемы поднимает дерево приложения, и без него компиляция
+%% схемы не идёт.
+ensure_app() ->
+    {ok, _Started} = application:ensure_all_started(valid_json),
+    ok.
+
+eunit_wrapper_(Tests) ->
+    {setup, fun ensure_app/0, Tests}.
+
 %% Добавленный документ публикуется под своим именем и годен к вычислению сразу.
 add_test() ->
     with_store([{base_uri, ?BASE}], fun(Store) ->
@@ -250,21 +259,15 @@ default_dialect_test() ->
 
 %% Незнакомая опция — ошибка конфигурации: хранилище не поднимается вовсе.
 unknown_option_test() ->
-    process_flag(trap_exit, true),
     ?assertMatch({error, _},
-                 valid_json_store_sup:start_link(?STORE, [{base_uri, ?BASE},
-                                                          {oops, 1}])),
-    process_flag(trap_exit, false).
+                 isolated_start([{base_uri, ?BASE}, {oops, 1}])).
 
 %% Хранилищу без `base_uri` нечем называть свои схемы, и это та же ошибка
 %% конфигурации: подставить умолчание за разработчика нельзя.
 missing_base_uri_test() ->
-    process_flag(trap_exit, true),
-    ?assertMatch({error, _}, valid_json_store_sup:start_link(?STORE, [])),
+    ?assertMatch({error, _}, isolated_start([])),
     ?assertMatch({error, _},
-                 valid_json_store_sup:start_link(?STORE,
-                                                 [{assert_format, true}])),
-    process_flag(trap_exit, false).
+                 isolated_start([{assert_format, true}])).
 
 %% Короткое имя разрешается и на чтении: артефакт лежит под каноническим именем,
 %% а вызывающий вправе называть документ так же, как называл при регистрации.
@@ -286,6 +289,7 @@ short_name_lookup_test() ->
 %% замечают, новый управляющий забирает их по claim, поднимает реестр из его
 %% таблицы и снова пишет. Сирот при этом не остаётся — прежний документ реестру
 %% известен, и снять его можно как обычно.
+-ifdef(CAP_ETS_INFO_ID).
 restart_manager_test() ->
     with_store([{base_uri, ?BASE}], fun(Store) ->
         Old = <<"https://example.com/old">>,
@@ -348,6 +352,7 @@ restart_registry_keeper_test() ->
                      valid_json_store_manager:add_at(
                        Store, [{Uri, #{<<"type">> => <<"integer">>}}]))
     end).
+-endif.
 
 with_store(Options, Fun) ->
     {ok, Sup} = valid_json_store_sup:start_link(?STORE, Options),
@@ -360,18 +365,40 @@ with_store(Options, Fun) ->
 %% бы проверку и следующая не смогла бы создать таблицу под тем же именем.
 stop_store(Sup) ->
     unlink(Sup),
-    Ref = monitor(process, Sup),
+    Ref = erlang:monitor(process, Sup),
     exit(Sup, shutdown),
     receive {'DOWN', Ref, process, Sup, _Reason} -> ok
     after 5000 -> erlang:error(store_alive) end.
 
+isolated_start(Options) ->
+    Parent = self(),
+    {Worker, WorkerRef} = spawn_monitor(fun() ->
+        process_flag(trap_exit, true),
+        Result = (catch valid_json_store_sup:start_link(?STORE, Options)),
+        Parent ! {isolated_start, self(), Result},
+        receive stop -> ok end
+    end),
+    Result = receive
+                 {isolated_start, Worker, Value} -> Value
+             after 5000 -> {error, timeout}
+             end,
+    case Result of
+        {ok, Sup} -> exit(Sup, kill);
+        _          -> ok
+    end,
+    Worker ! stop,
+    receive {'DOWN', WorkerRef, process, Worker, _WorkerReason} -> ok
+    after 5000 -> exit(Worker, kill) end,
+    Result.
+
+-ifdef(CAP_ETS_INFO_ID).
 manager(Store) ->
     whereis(valid_json_store_manager:manager_name(Store)).
 
 %% Имя таблицы переживает пересоздание, а идентификатор — нет, поэтому
 %% пересозданную от переданной по heir отличают именно по нему.
 tables(Store) ->
-    {ets:whereis(artifacts_table(Store)), ets:whereis(registry_table(Store))}.
+    {ets:info(artifacts_table(Store), id), ets:info(registry_table(Store), id)}.
 
 keeper(Table) ->
     whereis(valid_json_ets_keeper:keeper_name(Table)).
@@ -384,12 +411,12 @@ registry_table(Store) ->
 
 %% Убитый процесс уносит с собой управляющего: оба хранителя стоят в rest_for_one
 %% перед ним. Поэтому ждём именно нового управляющего, а затем и того, чтобы он
-%% договорил свой старт: пересборка идёт в handle_continue, то есть до первого
+%% договорил свой старт: пересборка идёт в init/1, то есть до первого
 %% сообщения, и системный вызов встаёт в очередь за ней.
 restart(Store, Pid) ->
     Name = valid_json_store_manager:manager_name(Store),
     Manager = manager(Store),
-    Ref = monitor(process, Pid),
+    Ref = erlang:monitor(process, Pid),
     exit(Pid, kill),
     receive {'DOWN', Ref, process, Pid, killed} -> ok
     after 1000 -> erlang:error(process_alive) end,
@@ -408,6 +435,7 @@ wait_restart(Name, Old, Attempts) ->
         Old       -> timer:sleep(10), wait_restart(Name, Old, Attempts - 1);
         Pid       -> Pid
     end.
+-endif.
 
 valid(Store, Uri, Instance) ->
     {ok, Compiled} = valid_json_store_manager:lookup(Store, Uri),

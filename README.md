@@ -67,8 +67,9 @@ against jesse 1.8.2 and jsonschex 0.9.0 on 2026-08-05.
 
 ## Requirements
 
-- Erlang/OTP 27 or later — the library decodes JSON with the `json` module
-  from stdlib, which first appeared in OTP 27.
+- Erlang/OTP 20 or later — older releases use the vendored `json` and
+  `uri_string` compatibility sources; OTP 27 and later use the stdlib
+  implementations directly.
 - [rebar3](https://rebar3.org/)
 
 ## Build and test
@@ -103,9 +104,11 @@ rebar3 shell
 ### Validate against a schema value
 
 `run_schema/3` takes the schema itself instead of its name: it compiles the
-schema in the calling process and validates right away, without a store or a
-started application. Such a schema has to stand on its own — the documents of a
-store are not visible to it.
+schema in the calling process and validates right away, without a store. The
+application still has to be started: every compile checks the schema against its
+meta-schema, and the built-in meta-schemas are published by the supervision tree.
+Such a schema has to stand on its own — the documents of a store are not visible
+to it.
 
 ```erlang
 {ok, #{<<"valid">> := true}} =
