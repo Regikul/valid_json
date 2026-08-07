@@ -775,6 +775,38 @@ dependent_schemas_coverage_test_() ->
      %% Свойства нет — применять нечего, покрытия не появляется.
      ?_assertEqual(neutral(), coverage_of(Artifact, #{<<"b">> => 1}))].
 
+%% Draft 6/7 `dependencies`: property-форма требует имена, schema-форма применяет
+%% подсхему к тому же instance; keyword ограничивает только объекты.
+classic_dependencies_test_() ->
+    Artifact = classic_dependencies([{<<"a">>, [<<"b">>]},
+                                     {<<"c">>, [{required, [<<"d">>]}]}]),
+    [?_assert(verdict(Artifact, #{})),
+     ?_assert(verdict(Artifact, #{<<"b">> => 1})),
+     ?_assertNot(verdict(Artifact, #{<<"a">> => 1})),
+     ?_assert(verdict(Artifact, #{<<"a">> => 1, <<"b">> => 2})),
+     ?_assertNot(verdict(Artifact, #{<<"c">> => 1})),
+     ?_assert(verdict(Artifact, #{<<"c">> => 1, <<"d">> => 2})),
+     %% Пустой property-dependency массив разрешён.
+     ?_assert(verdict(classic_dependencies([{<<"a">>, []}]), #{<<"a">> => 1})),
+     %% Не-объект не ограничивается.
+     ?_assert(verdict(classic_dependencies([{<<"a">>, false}]), 1))].
+
+%% Units `dependencies` лежат на /dependencies/<Name>: parent unit — на самом
+%% keyword, entry property-формы и вложенные подсхемы — на имени зависимости.
+classic_dependencies_units_test_() ->
+    Artifact = classic_dependencies([{<<"a">>, [<<"b">>]},
+                                     {<<"c">>, [{required, [<<"d">>]}]}]),
+    [?_assertEqual([{<<"/dependencies/a">>, <<>>}],
+                   paired(collect(Artifact, #{<<"a">> => 1}, basic))),
+     ?_assertMatch([{<<"/dependencies/a">>, false, {error, _}}],
+                   printed(collect(Artifact, #{<<"a">> => 1}, basic))),
+     ?_assertEqual([{<<"/dependencies/c">>, <<>>},
+                    {<<"/dependencies/c/required">>, <<>>}],
+                   paired(collect(Artifact, #{<<"c">> => 1}, basic))),
+     ?_assertMatch([{<<"/dependencies/c">>, false, none},
+                    {<<"/dependencies/c/required">>, false, {error, _}}],
+                   printed(collect(Artifact, #{<<"c">> => 1}, basic)))].
+
 %% Одиночный `items` применяется ко всем элементам массива, `prefixItems` — к
 %% элементам с теми же индексами, а его хвостовой `items` — к остатку.
 items_test_() ->
@@ -1565,6 +1597,25 @@ dependent_schemas(Deps) ->
     Addrs = maps:from_list([{Name, addr(Pointer(Name))} || {Name, _Child} <- Deps]),
     branching([{dependent_schemas, Addrs}],
               [{Pointer(Name), Child} || {Name, Child} <- Deps]).
+
+%% Артефакт `dependencies` с обоими формами: property-зависимость хранится
+%% списком имён, schema-зависимость — адресом подсхемы на /dependencies/<Name>.
+classic_dependencies(Deps) ->
+    Step = fun({Name, Child}, {Addrs, Nodes}) when is_list(Child) ->
+                   case lists:all(fun is_binary/1, Child) of
+                       true ->
+                           {Addrs#{Name => Child}, Nodes};
+                       false ->
+                           Pointer = <<"/dependencies/", Name/binary>>,
+                           {Addrs#{Name => addr(Pointer)},
+                            [{Pointer, Child} | Nodes]}
+                   end;
+              ({Name, Child}, {Addrs, Nodes}) ->
+                   Pointer = <<"/dependencies/", Name/binary>>,
+                   {Addrs#{Name => addr(Pointer)}, [{Pointer, Child} | Nodes]}
+           end,
+    {Addrs, Nodes} = lists:foldl(Step, {#{}, []}, Deps),
+    branching([{dependencies, Addrs}], Nodes).
 
 %% Своего сегмента у ветви нет: она стоит на самом keyword.
 items(Child) ->

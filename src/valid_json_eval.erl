@@ -193,6 +193,8 @@ dispatch({if_then_else, _, _, _} = Constraint, Instance, Context) ->
     valid_json_apply:check(Constraint, Instance, Context);
 dispatch({dependent_schemas, _} = Constraint, Instance, Context) ->
     valid_json_apply:check(Constraint, Instance, Context);
+dispatch({dependencies, _} = Constraint, Instance, Context) ->
+    valid_json_apply:check(Constraint, Instance, Context);
 dispatch({ref, Addr}, Instance, Context) ->
     reference(<<"$ref">>, Addr, Instance, Context);
 dispatch({dynamic_ref, Name, Lexical}, Instance, Context) ->

@@ -34,6 +34,7 @@
                 <<"maxItems">>, <<"minItems">>, <<"uniqueItems">>,
                 <<"maxProperties">>, <<"minProperties">>,
                 <<"required">>, <<"dependentRequired">>,
+                <<"dependencies">>,
                 [<<"prefixItems">>, <<"items">>, <<"additionalItems">>],
                 [<<"contains">>, <<"minContains">>, <<"maxContains">>],
                 [<<"properties">>, <<"patternProperties">>,
@@ -431,6 +432,12 @@ constraint(<<"dependentSchemas">> = Keyword, Schema, Position, State) ->
         {ok, Addrs, Built}  -> {ok, {dependent_schemas, Addrs}, Built};
         {error, _} = Error -> Error
     end;
+constraint(<<"dependencies">> = Keyword, Schema, Position, State) ->
+    case dependencies(maps:get(Keyword, Schema), below(Keyword, Position),
+                      State) of
+        {ok, Constraint, Built} -> {ok, Constraint, Built};
+        {error, _} = Error      -> Error
+    end;
 constraint(<<"allOf">> = Keyword, Schema, Position, State) ->
     branches(all_of, Keyword, maps:get(Keyword, Schema), Position, State);
 constraint(<<"anyOf">> = Keyword, Schema, Position, State) ->
@@ -708,7 +715,47 @@ named(Value, Position, State) when is_map(Value) ->
                    end
            end,
     lists:foldl(Step, {ok, #{}, State}, lists:sort(maps:keys(Value)));
-named(Value, Position, _State) ->
+    named(Value, Position, _State) ->
+    {error, schema_error({bad_keyword_value, Value}, Position)}.
+
+%% Draft 6/7: `dependencies` объединяет обе формы — property dependency (массив
+%% имён) и schema dependency (подсхема). Значения уже допустимой формы
+%% компилируются напрямую; формальную корректность значения оставляет метасхема.
+-spec dependencies(json(), position(), state()) ->
+          {ok, constraint(), state()} | {error, #schema_error{}}.
+dependencies(Value, Position, State) when is_map(Value) ->
+    Step = fun(_Name, {error, _} = Error) ->
+                   Error;
+              (Name, {ok, Acc, Built}) ->
+                   case maps:get(Name, Value) of
+                       Dependency when is_map(Dependency); is_boolean(Dependency) ->
+                           case subschema(Dependency, below(Name, Position),
+                                          Built) of
+                               {ok, Addr, Grown} ->
+                                   {ok, Acc#{Name => Addr}, Grown};
+                               {error, _} = Error ->
+                                   Error
+                           end;
+                       Names when is_list(Names) ->
+                           case lists:all(fun is_binary/1, Names) of
+                               true  -> {ok, Acc#{Name => Names}, Built};
+                               false ->
+                                   {error, schema_error(
+                                             {bad_keyword_value, Names},
+                                             below(Name, Position))}
+                           end;
+                       Other ->
+                           {error, schema_error({bad_keyword_value, Other},
+                                                below(Name, Position))}
+                   end
+           end,
+    case lists:foldl(Step, {ok, #{}, State}, lists:sort(maps:keys(Value))) of
+        {ok, Dependencies, Built} ->
+            {ok, {dependencies, Dependencies}, Built};
+        {error, _} = Error ->
+            Error
+    end;
+dependencies(Value, Position, _State) ->
     {error, schema_error({bad_keyword_value, Value}, Position)}.
 
 %% Сегмент локации — исходный текст паттерна. Порядок списка задан сортировкой

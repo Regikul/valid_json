@@ -48,10 +48,104 @@ check({dependent_schemas, Schemas}, Instance, Context) when is_map(Instance) ->
     Present = [{Name, maps:get(Name, Schemas)}
                || Name <- lists:sort(maps:keys(Schemas)), maps:is_key(Name, Instance)],
     dependent(Present, Instance, Context);
+%% Draft 6/7 `dependencies` — обе формы в одном constraint: property dependency
+%% (массив имён) и schema dependency (подсхема). Вердикт — конъюнкция, как у
+%% `dependentSchemas`; keyword применяется только к объекту, а units entry
+%% лежат на /dependencies/<Name>.
+check({dependencies, Dependencies}, Instance, Context) when is_map(Instance) ->
+    Present = [{Name, maps:get(Name, Dependencies)}
+               || Name <- lists:sort(maps:keys(Dependencies)),
+                  maps:is_key(Name, Instance)],
+    legacy_dependencies(Present, Instance, Context);
+check({dependencies, _Dependencies}, _Instance, Context) ->
+    result(<<"dependencies">>, true, none, valid_json_evaluated:neutral(),
+           [], Context);
 %% Keyword применяется только к объекту: другое значение даёт успешный unit без
 %% error и annotation, а не отказ.
 check({dependent_schemas, _Schemas}, _Instance, Context) ->
     result(<<"dependentSchemas">>, true, none, valid_json_evaluated:neutral(), [], Context).
+
+%% Зависимости конъюнктивны: провал любого entry проваливает весь keyword.
+%% Собственного unit на самом keyword нет: units entry лежат node-уровнем на
+%% /dependencies/<Name>, как ветви schema-формы, и чередование уровней output
+%% дерева оставляет их видимыми.
+-spec legacy_dependencies([{binary(), [binary()] | addr()}], json(),
+                          #eval_context{}) -> #eval_result{}.
+legacy_dependencies(Present, Instance, Context) ->
+    case legacy_dependencies(Present, Instance, Context,
+                             #eval_result{valid = true,
+                                          evaluated =
+                                              valid_json_evaluated:neutral(),
+                                          units = []}) of
+        #eval_result{valid = undefined} = Error ->
+            Error;
+        #eval_result{} = Result ->
+            Result
+    end.
+
+-spec legacy_dependencies([{binary(), [binary()] | addr()}], json(),
+                          #eval_context{}, #eval_result{}) -> #eval_result{}.
+legacy_dependencies([], _Instance, _Context, Result) ->
+    Result;
+legacy_dependencies([{Name, {_Rid, _Pointer} = Addr} | Rest], Instance,
+                    Context, Result) ->
+    case branch(Addr, <<"dependencies">>, [Name], Instance, Context) of
+        #eval_result{valid = undefined} = Error ->
+            Error;
+        #eval_result{units = Units} = Branch ->
+            %% Node-уровень entry и его keyword units лежат на одном уровне:
+            %% чередование output дерева иначе спрятало бы диагностику
+            %% применённой подсхемы.
+            Merged = valid_json_eval:conjoin(
+                       Result, Branch#eval_result{units = entry_units(Units)}),
+            legacy_continue(Merged, Rest, Instance, Context)
+    end;
+legacy_dependencies([{Name, Required} | Rest], Instance, Context, Result) ->
+    Merged = valid_json_eval:conjoin(
+               Result,
+               property_dependency(Name, Required, Instance, Context)),
+    legacy_continue(Merged, Rest, Instance, Context).
+
+-spec entry_units([#output_unit{}]) -> [#output_unit{}].
+entry_units(Units) ->
+    lists:append([[Unit | Unit#output_unit.nested]
+                  || #output_unit{} = Unit <- Units]).
+
+-spec legacy_continue(#eval_result{}, [{binary(), [binary()] | addr()}], json(),
+                      #eval_context{}) -> #eval_result{}.
+legacy_continue(Merged, Rest, Instance, Context) ->
+    case Merged#eval_result.valid =:= false andalso
+         Context#eval_context.format =:= flag of
+        true  -> Merged;
+        false -> legacy_dependencies(Rest, Instance, Context, Merged)
+    end.
+
+%% Property-форма: присутствие имени требует присутствия каждого имени списка.
+%% Unit entry лежит node-уровнем на /dependencies/<Name>.
+-spec property_dependency(binary(), [binary()], json(), #eval_context{}) ->
+          #eval_result{}.
+property_dependency(Name, Required, Instance, Context) ->
+    Missing = [N || N <- Required, not maps:is_key(N, Instance)],
+    Valid = Missing =:= [],
+    Detail = case Missing of
+                 [] -> none;
+                 _  -> {error, absent(Missing)}
+             end,
+    case Context#eval_context.format of
+        flag ->
+            #eval_result{valid = Valid,
+                         evaluated = valid_json_evaluated:neutral(),
+                         units = []};
+        _ ->
+            Entry = Context#eval_context{
+                      keyword_location =
+                          [Name, <<"dependencies">>
+                           | Context#eval_context.keyword_location]},
+            Unit = valid_json_unit:schema(Valid, Detail, [], Entry),
+            #eval_result{valid = Valid,
+                         evaluated = valid_json_evaluated:neutral(),
+                         units = [Unit]}
+    end.
 
 %% Зависимости конъюнктивны, как ветви `allOf`, и покрытие каждой идёт наверх:
 %% подсхема применяется к тому же instance. Провалившаяся своё покрытие очистила
@@ -237,3 +331,20 @@ result(Keyword, Valid, Message, Evaluated, Units, Context) ->
 -spec detail(boolean(), binary() | none) -> detail().
 detail(true, _Message)  -> none;
 detail(false, Message) -> {error, Message}.
+
+%% Сообщение property-зависимости называет недостающие свойства, как
+%% `dependentRequired`: печать произвольного instance стоила бы дороже самой
+%% проверки, а тексты suite не закрепляет.
+-spec absent([binary()]) -> binary().
+absent([Name]) ->
+    <<"object is missing required property ", (quoted(Name))/binary>>;
+absent(Names) ->
+    <<"object is missing required properties ", (join(Names))/binary>>.
+
+-spec join([binary()]) -> binary().
+join(Names) ->
+    iolist_to_binary(lists:join(<<", ">>, [quoted(Name) || Name <- Names])).
+
+-spec quoted(binary()) -> binary().
+quoted(Name) ->
+    <<$", Name/binary, $">>.

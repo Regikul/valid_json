@@ -425,7 +425,7 @@ enter_resource(#{<<"$id">> := Id} = Schema, Rid, Location, Contexts, child,
     IdLocation = keyword_addr(Rid, Location, <<"$id">>),
     case classic_id(Id, Rid, Draft) of
         {ok, resource} ->
-            enter_id_resource(Schema, Rid, Location, Contexts, Profile, State,
+            enter_id_resource(Schema, Rid, Contexts, Profile, State,
                               IdLocation);
         {ok, {plain_name, Name}} ->
             Addr = addr(Rid, Location),
@@ -433,9 +433,9 @@ enter_resource(#{<<"$id">> := Id} = Schema, Rid, Location, Contexts, child,
         {error, Reason} ->
             {error, schema_error(Reason, IdLocation)}
     end;
-enter_resource(#{<<"$id">> := Id} = Schema, Rid, Location, Contexts, child,
+enter_resource(#{<<"$id">> := _} = Schema, Rid, Location, Contexts, child,
                Profile, State) ->
-    enter_id_resource(Schema, Rid, Location, Contexts, Profile, State,
+    enter_id_resource(Schema, Rid, Contexts, Profile, State,
                       keyword_addr(Rid, Location, <<"$id">>));
 %% `$schema` разрешён только в корне schema resource; в остальных подсхемах он
 %% запрещён обоими dialects (core.txt:1377 в 2020-12, core.txt:1320 в 2019-09).
@@ -453,11 +453,10 @@ enter_resource(_Schema, Rid, Location, Contexts, child, Profile, State) ->
 
 %% Общий путь `$id`, меняющего resource boundary. Вынесен из клаузы, чтобы
 %% classic-ветка могла выбрать между plain-name идентификатором и boundary.
--spec enter_id_resource(json(), rid(), location(), [context()], profile(),
-                        state(), addr()) ->
+-spec enter_id_resource(json(), rid(), [context()], profile(), state(), addr()) ->
           {ok, rid(), location(), [context()], profile(), state()} |
           {error, #schema_error{}}.
-enter_id_resource(Schema, Rid, Location, Contexts, Profile, State, IdLocation) ->
+enter_id_resource(Schema, Rid, Contexts, Profile, State, IdLocation) ->
     case resolve_id(maps:get(<<"$id">>, Schema), Rid) of
         {ok, NewRid} ->
             case resource_profile(Schema, NewRid, Profile, State) of

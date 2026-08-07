@@ -1157,9 +1157,20 @@ classic_dependencies_discovery_test() ->
         trusted_compile(
           Store,
           #{<<"dependencies">> =>
-                #{<<"foo">> => [<<"bar">>, #{<<"$id">> => Child}]}},
+                #{<<"foo">> => [<<"bar">>, <<"baz">>]}},
           [{default_dialect, ?DRAFT_06}]),
-    ?assertNot(maps:is_key(Child, maps:get(resources, ArrayForm))).
+    ?assertEqual([anonymous], maps:keys(maps:get(resources, ArrayForm))),
+    %% Элемент property-зависимости обязан быть строкой: негодная форма
+    %% останавливает компиляцию, как и в modern `dependentRequired`.
+    ?assertEqual(
+       schema_error({bad_keyword_value,
+                     [<<"bar">>, #{<<"$id">> => Child}]},
+                    <<"/dependencies/foo">>),
+       trusted_compile(
+         Store,
+         #{<<"dependencies">> =>
+               #{<<"foo">> => [<<"bar">>, #{<<"$id">> => Child}]}},
+         [{default_dialect, ?DRAFT_06}])).
 
 %% Modern dialects plain-name `$id` не принимают: fragment в `$id` остаётся
 %% ошибкой, как и до classic-ветки.
@@ -1198,6 +1209,21 @@ modern_ref_keeps_siblings_test() ->
                   {ref, {anonymous, <<"/definitions/target">>}},
                   {type, [string]}],
                  root_constraints(Schema)).
+
+%% Draft 6/7: `dependencies` обеих форм в одном constraint — property-зависимость
+%% остаётся списком имён, schema-зависимость становится адресом подсхемы.
+classic_dependencies_constraint_test() ->
+    Schema = #{<<"dependencies">> =>
+                   #{<<"foo">> => [<<"bar">>],
+                     <<"baz">> => #{<<"type">> => <<"integer">>}}},
+    {ok, #{resources := Resources}} =
+        valid_json_compile:compile_unchecked(Schema, ?DRAFT_06),
+    #resource{nodes = Nodes} = maps:get(anonymous, Resources),
+    ?assertEqual(
+       [{dependencies,
+         #{<<"foo">> => [<<"bar">>],
+           <<"baz">> => {anonymous, <<"/dependencies/baz">>}}}],
+       constraints(<<>>, Nodes)).
 
 %% Подсхема с `$id` начинает новый resource: адрес в parent constraint сразу
 %% канонический, а указатели внутри child считаются от его собственного корня.

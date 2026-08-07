@@ -54,6 +54,7 @@
     | {max_properties, non_neg_integer()} | {min_properties, non_neg_integer()}
     | {required, [binary()]}
     | {dependent_required, #{binary() => [binary()]}}
+    | {dependencies, #{binary() => [binary()] | addr()}}
     | {type, [json_type()]}
     | {enum, [json()]}
     | {const, json()}
