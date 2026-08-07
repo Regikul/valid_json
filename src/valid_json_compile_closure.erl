@@ -34,6 +34,16 @@ supported_dialect(Dialect) ->
             {ok, Normalized};
         {ok, ?DRAFT_2019_09 = Normalized, root} ->
             {ok, Normalized};
+        {ok, ?DRAFT_06 = Normalized, root} ->
+            {ok, Normalized};
+        {ok, ?DRAFT_07 = Normalized, root} ->
+            {ok, Normalized};
+        %% https-написания канонических http-URI Draft 6/7 — явные алиасы, а не
+        %% следствие общего URI normalizer'а.
+        {ok, <<"https://json-schema.org/draft-06/schema">>, root} ->
+            {ok, ?DRAFT_06};
+        {ok, <<"https://json-schema.org/draft-07/schema">>, root} ->
+            {ok, ?DRAFT_07};
         _ ->
             {error, #schema_error{reason = {unknown_dialect, Dialect},
                                   location = undefined}}
@@ -161,6 +171,14 @@ dialect_profile(Dialect, Store, Default, Seen) ->
             {ok, valid_json_vocabulary:canonical(Canonical), undefined};
         {ok, ?DRAFT_2019_09 = Canonical, root} ->
             {ok, valid_json_vocabulary:canonical(Canonical), undefined};
+        {ok, ?DRAFT_06 = Canonical, root} ->
+            {ok, valid_json_vocabulary:canonical(Canonical), undefined};
+        {ok, ?DRAFT_07 = Canonical, root} ->
+            {ok, valid_json_vocabulary:canonical(Canonical), undefined};
+        {ok, <<"https://json-schema.org/draft-06/schema">>, root} ->
+            {ok, valid_json_vocabulary:canonical(?DRAFT_06), undefined};
+        {ok, <<"https://json-schema.org/draft-07/schema">>, root} ->
+            {ok, valid_json_vocabulary:canonical(?DRAFT_07), undefined};
         {ok, Uri, root} when Uri =/= anonymous ->
             metaschema_profile(Uri, Store, Default, Seen);
         _ ->

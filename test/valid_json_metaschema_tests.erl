@@ -30,22 +30,38 @@ published_bundles_test() ->
     %% дерево, и фолбэка на ленивую публикацию больше нет.
     Modern = valid_json_metaschema:compiled(?DRAFT_2020_12),
     Legacy = valid_json_metaschema:compiled(?DRAFT_2019_09),
+    Classic06 = valid_json_metaschema:compiled(?DRAFT_06),
+    Classic07 = valid_json_metaschema:compiled(?DRAFT_07),
     [{bundles, Bundles}] = ets:lookup(valid_json_metaschema, bundles),
     ModernBundle = maps:get(?DRAFT_2020_12, Bundles),
     LegacyBundle = maps:get(?DRAFT_2019_09, Bundles),
+    Classic06Bundle = maps:get(?DRAFT_06, Bundles),
+    Classic07Bundle = maps:get(?DRAFT_07, Bundles),
     ?assertEqual(8, map_size(maps:get(resources, Modern))),
     ?assertEqual(7, map_size(maps:get(resources, Legacy))),
+    ?assertEqual(1, map_size(maps:get(resources, Classic06))),
+    ?assertEqual(1, map_size(maps:get(resources, Classic07))),
     ?assertEqual([], maps:get(sources, Modern)),
     ?assertEqual([], maps:get(sources, Legacy)),
+    ?assertEqual([], maps:get(sources, Classic06)),
+    ?assertEqual([], maps:get(sources, Classic07)),
     %% Format-Assertion входит в immutable документы, но не в root closure.
     ?assertEqual(9, map_size(maps:get(documents, ModernBundle))),
     ?assertEqual(7, map_size(maps:get(documents, LegacyBundle))),
+    ?assertEqual(1, map_size(maps:get(documents, Classic06Bundle))),
+    ?assertEqual(1, map_size(maps:get(documents, Classic07Bundle))),
     ?assertEqual(Modern, maps:get(compiled, ModernBundle)),
-    ?assertEqual(Legacy, maps:get(compiled, LegacyBundle)).
+    ?assertEqual(Legacy, maps:get(compiled, LegacyBundle)),
+    ?assertEqual(Classic06, maps:get(compiled, Classic06Bundle)),
+    ?assertEqual(Classic07, maps:get(compiled, Classic07Bundle)).
 
 builtin_documents_are_published_test() ->
     ?assertMatch(#document{canonical = ?DRAFT_2020_12},
                  valid_json_metaschema:fetch(?DRAFT_2020_12)),
+    ?assertMatch(#document{canonical = ?DRAFT_06},
+                 valid_json_metaschema:fetch(?DRAFT_06)),
+    ?assertMatch(#document{canonical = ?DRAFT_07},
+                 valid_json_metaschema:fetch(?DRAFT_07)),
     ?assertMatch(
        #document{canonical =
                      <<"https://json-schema.org/draft/2020-12/meta/format-assertion">>},
@@ -62,7 +78,84 @@ builtin_metaschemas_compile_through_public_api_test_() ->
                      Store, ?DRAFT_2020_12, [{schema_validation, flag}])),
      ?_assertMatch({ok, #{root := ?DRAFT_2019_09, sources := []}},
                    valid_json_compile:compile_uri(
-                     Store, ?DRAFT_2019_09, [{schema_validation, flag}]))].
+                     Store, ?DRAFT_2019_09, [{schema_validation, flag}])),
+     ?_assertMatch({ok, #{root := ?DRAFT_06, sources := []}},
+                   valid_json_compile:compile_uri(
+                     Store, ?DRAFT_06, [{schema_validation, flag}])),
+     ?_assertMatch({ok, #{root := ?DRAFT_07, sources := []}},
+                   valid_json_compile:compile_uri(
+                     Store, ?DRAFT_07, [{schema_validation, flag}]))].
+
+%% Draft 6/7 распознаются по собственному `$schema`, включая trailing `#` в
+%% официальной записи и явные https-алиасы канонических http-URI.
+classic_dialect_recognition_test_() ->
+    Store = valid_json_store:temporary(),
+    Schema = fun(SchemaUri) ->
+                     #{<<"$schema">> => SchemaUri,
+                       <<"type">> => <<"integer">>}
+             end,
+    [?_assertMatch(
+        {ok, #{root := anonymous,
+               resources := #{anonymous := #resource{dialect = ?DRAFT_06}}}},
+                   valid_json_compile:compile(
+                     Store, Schema(<<"http://json-schema.org/draft-06/schema#">>),
+                     [])),
+     ?_assertMatch(
+        {ok, #{root := anonymous,
+               resources := #{anonymous := #resource{dialect = ?DRAFT_07}}}},
+                   valid_json_compile:compile(
+                     Store, Schema(<<"http://json-schema.org/draft-07/schema">>),
+                     [])),
+     ?_assertMatch(
+        {ok, #{root := anonymous,
+               resources := #{anonymous := #resource{dialect = ?DRAFT_06}}}},
+                   valid_json_compile:compile(
+                     Store, Schema(<<"https://json-schema.org/draft-06/schema">>),
+                     [])),
+     ?_assertMatch(
+        {ok, #{root := anonymous,
+               resources := #{anonymous := #resource{dialect = ?DRAFT_07}}}},
+                   valid_json_compile:compile(
+                     Store, Schema(<<"https://json-schema.org/draft-07/schema#">>),
+                     []))].
+
+classic_default_dialect_test_() ->
+    Store = valid_json_store:temporary(),
+    Schema = #{<<"type">> => <<"integer">>},
+    [?_assertMatch(
+        {ok, #{root := anonymous,
+               resources := #{anonymous := #resource{dialect = ?DRAFT_06}}}},
+                   valid_json_compile:compile(
+                     Store, Schema, [{default_dialect, ?DRAFT_06}])),
+     ?_assertMatch(
+        {ok, #{root := anonymous,
+               resources := #{anonymous := #resource{dialect = ?DRAFT_07}}}},
+                   valid_json_compile:compile(
+                     Store, Schema, [{default_dialect, ?DRAFT_07}])),
+     ?_assertMatch(
+        {ok, #{root := anonymous,
+               resources := #{anonymous := #resource{dialect = ?DRAFT_06}}}},
+                   valid_json_compile:compile(
+                     Store, Schema,
+                     [{default_dialect, <<"https://json-schema.org/draft-06/schema">>}]))].
+
+%% Схема валидируется собственной метасхемой: `type: []` не проходит под Draft
+%% 6/7 так же, как под modern dialects.
+classic_metaschema_rejection_test_() ->
+    Store = valid_json_store:temporary(),
+    Schema = #{<<"type">> => []},
+    [?_assertMatch(
+        {error, #schema_error{reason = schema_invalid,
+                              validation_output = #{<<"valid">> := false},
+                              location = {anonymous, <<>>}}},
+        valid_json_compile:compile(
+          Store, Schema, [{default_dialect, ?DRAFT_06}])),
+     ?_assertMatch(
+        {error, #schema_error{reason = schema_invalid,
+                              validation_output = #{<<"valid">> := false},
+                              location = {anonymous, <<>>}}},
+        valid_json_compile:compile(
+          Store, Schema, [{default_dialect, ?DRAFT_07}]))].
 
 canonical_metaschema_rejection_test_() ->
     [?_test(assert_schema_invalid(

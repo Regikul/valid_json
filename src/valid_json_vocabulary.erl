@@ -46,13 +46,25 @@
 -define(CANONICAL_2019_09,
         [applicator, content, core, meta_data, validation]).
 
+%% Draft 6/7 не имеют vocabulary-модели Draft 2019-09/2020-12: профиль —
+%% фиксированный плоский набор известных keywords, а не объявленные
+%% vocabularies. Draft 7 добавляет к Draft 6 content-аннотации.
+-define(CANONICAL_06,
+        [applicator, core, format, meta_data, validation]).
+-define(CANONICAL_07,
+        [applicator, content, core, format, meta_data, validation]).
+
 %% Профиль канонического dialect встроен: его метасхема известна заранее и
 %% читать её ради `$vocabulary` незачем.
 -spec canonical(dialect()) -> #profile{}.
 canonical(?DRAFT_2020_12 = Draft) ->
     #profile{uri = Draft, draft = Draft, vocabularies = ?CANONICAL_2020_12};
 canonical(?DRAFT_2019_09 = Draft) ->
-    #profile{uri = Draft, draft = Draft, vocabularies = ?CANONICAL_2019_09}.
+    #profile{uri = Draft, draft = Draft, vocabularies = ?CANONICAL_2019_09};
+canonical(?DRAFT_06 = Draft) ->
+    #profile{uri = Draft, draft = Draft, vocabularies = ?CANONICAL_06};
+canonical(?DRAFT_07 = Draft) ->
+    #profile{uri = Draft, draft = Draft, vocabularies = ?CANONICAL_07}.
 
 %% Профиль, объявленный пользовательской метасхемой. Draft приходит от dialect
 %% самой метасхемы: он решает, какие URI vocabularies вообще существуют и как
@@ -60,6 +72,12 @@ canonical(?DRAFT_2019_09 = Draft) ->
 %% vocabularies своего draft: Core этого требует прямо, остальные — правилом
 %% «as if its URI were present with a value of true» из своих разделов.
 -spec declared(uri(), json(), dialect()) -> {ok, #profile{}} | {error, reason()}.
+%% Draft 6/7 не имеют vocabulary-модели: `$vocabulary` внутри их схем — обычный
+%% неизвестный keyword, он не меняет profile и не объявляет vocabularies.
+declared(Uri, _Metaschema, Draft)
+  when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
+    #profile{vocabularies = Vocabularies} = canonical(Draft),
+    {ok, #profile{uri = Uri, draft = Draft, vocabularies = Vocabularies}};
 declared(Uri, #{<<"$vocabulary">> := Declared}, Draft) when is_map(Declared) ->
     case names(lists:sort(maps:keys(Declared)), Declared, Draft, []) of
         {ok, Active} ->
@@ -135,6 +153,47 @@ active(Keyword, #profile{draft = Draft, vocabularies = Active}) ->
 %% Keyword, отсутствующий в таблице своего draft, является неизвестным: так
 %% `prefixItems` не работает в Draft 2019-09, а `additionalItems` — в 2020-12.
 -spec vocabulary(binary(), dialect()) -> atom() | unknown.
+%% Draft 6/7 — явные ветки, а не catch-all: future dialect не получит legacy
+%% semantics молча. Draft 7 добавляет keywords, которых нет в Draft 6, а
+%% modern-only keywords остаются неизвестными в обоих. Блок стоит до generic
+%% `_Draft`-клауз: иначе они перекрыли бы его первыми.
+vocabulary(<<"$anchor">>, ?DRAFT_06)          -> unknown;
+vocabulary(<<"$anchor">>, ?DRAFT_07)          -> unknown;
+vocabulary(<<"$defs">>, ?DRAFT_06)            -> unknown;
+vocabulary(<<"$defs">>, ?DRAFT_07)            -> unknown;
+vocabulary(<<"$vocabulary">>, ?DRAFT_06)      -> unknown;
+vocabulary(<<"$vocabulary">>, ?DRAFT_07)      -> unknown;
+vocabulary(<<"$comment">>, ?DRAFT_06)         -> unknown;
+vocabulary(<<"$comment">>, ?DRAFT_07)         -> core;
+vocabulary(<<"additionalItems">>, ?DRAFT_06)  -> applicator;
+vocabulary(<<"additionalItems">>, ?DRAFT_07)  -> applicator;
+vocabulary(<<"dependentSchemas">>, ?DRAFT_06) -> unknown;
+vocabulary(<<"dependentSchemas">>, ?DRAFT_07) -> unknown;
+vocabulary(<<"dependentRequired">>, ?DRAFT_06) -> unknown;
+vocabulary(<<"dependentRequired">>, ?DRAFT_07) -> unknown;
+vocabulary(<<"minContains">>, ?DRAFT_06)      -> unknown;
+vocabulary(<<"minContains">>, ?DRAFT_07)      -> unknown;
+vocabulary(<<"maxContains">>, ?DRAFT_06)      -> unknown;
+vocabulary(<<"maxContains">>, ?DRAFT_07)      -> unknown;
+vocabulary(<<"contentSchema">>, ?DRAFT_06)    -> unknown;
+vocabulary(<<"contentSchema">>, ?DRAFT_07)    -> unknown;
+vocabulary(<<"if">>, ?DRAFT_06)               -> unknown;
+vocabulary(<<"if">>, ?DRAFT_07)               -> applicator;
+vocabulary(<<"then">>, ?DRAFT_06)             -> unknown;
+vocabulary(<<"then">>, ?DRAFT_07)             -> applicator;
+vocabulary(<<"else">>, ?DRAFT_06)             -> unknown;
+vocabulary(<<"else">>, ?DRAFT_07)             -> applicator;
+vocabulary(<<"readOnly">>, ?DRAFT_06)         -> unknown;
+vocabulary(<<"readOnly">>, ?DRAFT_07)         -> meta_data;
+vocabulary(<<"writeOnly">>, ?DRAFT_06)        -> unknown;
+vocabulary(<<"writeOnly">>, ?DRAFT_07)        -> meta_data;
+vocabulary(<<"contentEncoding">>, ?DRAFT_06)  -> unknown;
+vocabulary(<<"contentEncoding">>, ?DRAFT_07)  -> content;
+vocabulary(<<"contentMediaType">>, ?DRAFT_06) -> unknown;
+vocabulary(<<"contentMediaType">>, ?DRAFT_07) -> content;
+vocabulary(<<"format">>, ?DRAFT_06)           -> format;
+vocabulary(<<"format">>, ?DRAFT_07)           -> format;
+
 vocabulary(<<"$id">>, _Draft)               -> core;
 vocabulary(<<"$schema">>, _Draft)           -> core;
 vocabulary(<<"$ref">>, _Draft)              -> core;

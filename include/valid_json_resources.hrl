@@ -19,6 +19,13 @@
 -define(DRAFT_2019_09,
         <<"https://json-schema.org/draft/2019-09/schema">>).
 
+%% Канонические URI classic drafts. Официальные метасхемы Draft 6/7 называют
+%% себя http-URI (с trailing `#`), поэтому внутренней канонической формой служит
+%% http-URI без fragment; https-написания принимаются явными алиасами в
+%% compile_closure, а не произвольной эквивалентностью схем в normalizer.
+-define(DRAFT_06, <<"http://json-schema.org/draft-06/schema">>).
+-define(DRAFT_07, <<"http://json-schema.org/draft-07/schema">>).
+
 %% Профиль компиляции: dialect и активные vocabularies. `uri` — то, что написано
 %% в `$schema` либо выбрано опцией, `draft` — каноническая база, задающая состав
 %% и имена keywords. В compiled() профиль не попадает: различия впечатываются в

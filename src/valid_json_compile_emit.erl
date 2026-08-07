@@ -173,8 +173,8 @@ output_markers(Schema) ->
 
 %% Значения unknown keywords не являются schema positions: discovery их уже не
 %% посещал, а emitter лишь сохраняет исходное JSON value как annotation в
-%% 2020-12. В 2019-09 неизвестные keywords не дают IR. Сортировка делает
-%% annotation order независимым от устройства map.
+%% 2020-12. В classic drafts (6, 7 и 2019-09) неизвестные keywords не дают IR.
+%% Сортировка делает annotation order независимым от устройства map.
 -spec extra_constraints(#{binary() => json()}, profile()) -> [constraint()].
 extra_constraints(Schema, #profile{draft = Draft} = Profile) ->
     Active = lists:append([active_keywords(Group, Profile) || Group <- ?ORDER]) ++
@@ -188,6 +188,10 @@ extra_constraints(Schema, #profile{draft = Draft} = Profile) ->
 unknown_constraints(Keywords, Schema, ?DRAFT_2020_12) ->
     [{annotation, Keyword, maps:get(Keyword, Schema)} || Keyword <- Keywords];
 unknown_constraints(_Keywords, _Schema, ?DRAFT_2019_09) ->
+    [];
+unknown_constraints(_Keywords, _Schema, ?DRAFT_06) ->
+    [];
+unknown_constraints(_Keywords, _Schema, ?DRAFT_07) ->
     [].
 
 -spec place(position(), schema_node(), state()) -> state().

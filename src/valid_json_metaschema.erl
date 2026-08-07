@@ -1,5 +1,5 @@
 %% Неизменяемая область встроенных JSON Schema meta-schemas. Все документы
-%% читаются один раз, две корневые метасхемы компилируются доверенным
+%% читаются один раз, четыре корневые метасхемы компилируются доверенным
 %% bootstrap-путём и ложатся в защищённую ETS одной записью.
 %%
 %% Этот же модуль владеет таблицей: в `init/1` он забирает её у хранителя,
@@ -78,14 +78,18 @@ publish() ->
         [{?BUNDLES, _Bundles}] ->
             ok;
         [] ->
-            %% Сначала строим обе записи целиком. Если bootstrap второй
-            %% метасхемы провалится, в таблицу не ляжет и первая, и приложение
+            %% Сначала строим все четыре записи целиком. Если bootstrap любой
+            %% метасхемы провалится, в таблицу не ляжет ни одна, и приложение
             %% не увидит половинчатую встроенную область.
             Modern = bundle(?DRAFT_2020_12, modern_documents()),
             Legacy = bundle(?DRAFT_2019_09, legacy_documents()),
+            Classic06 = bundle(?DRAFT_06, classic_documents(?DRAFT_06)),
+            Classic07 = bundle(?DRAFT_07, classic_documents(?DRAFT_07)),
             true = ets:insert(?TABLE, {?BUNDLES,
                                        #{?DRAFT_2020_12 => Modern,
-                                         ?DRAFT_2019_09 => Legacy}}),
+                                         ?DRAFT_2019_09 => Legacy,
+                                         ?DRAFT_06 => Classic06,
+                                         ?DRAFT_07 => Classic07}}),
             ok
     end.
 
@@ -94,6 +98,10 @@ publish() ->
 compiled(?DRAFT_2020_12 = Draft) ->
     maps:get(compiled, published_bundle(Draft));
 compiled(?DRAFT_2019_09 = Draft) ->
+    maps:get(compiled, published_bundle(Draft));
+compiled(?DRAFT_06 = Draft) ->
+    maps:get(compiled, published_bundle(Draft));
+compiled(?DRAFT_07 = Draft) ->
     maps:get(compiled, published_bundle(Draft)).
 
 -spec fetch(uri()) -> #document{} | undefined.
@@ -169,7 +177,9 @@ priv_dir() ->
 
 -spec builtin(uri()) -> {dialect(), file:filename()} | undefined.
 builtin(Uri) ->
-    case lists:keyfind(Uri, 1, modern_documents() ++ legacy_documents()) of
+    case lists:keyfind(Uri, 1,
+                       modern_documents() ++ legacy_documents()
+                       ++ classic_documents()) of
         {Uri, Relative} -> {manifest_draft(Uri), Relative};
         false           -> undefined
     end.
@@ -178,7 +188,11 @@ builtin(Uri) ->
 manifest_draft(<<"https://json-schema.org/draft/2020-12/", _/binary>>) ->
     ?DRAFT_2020_12;
 manifest_draft(<<"https://json-schema.org/draft/2019-09/", _/binary>>) ->
-    ?DRAFT_2019_09.
+    ?DRAFT_2019_09;
+manifest_draft(<<"http://json-schema.org/draft-06/", _/binary>>) ->
+    ?DRAFT_06;
+manifest_draft(<<"http://json-schema.org/draft-07/", _/binary>>) ->
+    ?DRAFT_07.
 
 -spec modern_documents() -> [{uri(), file:filename()}].
 modern_documents() ->
@@ -215,3 +229,13 @@ legacy_documents() ->
       "draft-2019-09/meta/format.json"},
      {<<"https://json-schema.org/draft/2019-09/meta/content">>,
       "draft-2019-09/meta/content.json"}].
+
+-spec classic_documents() -> [{uri(), file:filename()}].
+classic_documents() ->
+    classic_documents(?DRAFT_06) ++ classic_documents(?DRAFT_07).
+
+-spec classic_documents(dialect()) -> [{uri(), file:filename()}].
+classic_documents(?DRAFT_06) ->
+    [{?DRAFT_06, "draft-06/schema.json"}];
+classic_documents(?DRAFT_07) ->
+    [{?DRAFT_07, "draft-07/schema.json"}].
