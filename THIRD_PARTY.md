@@ -1,6 +1,6 @@
 # Third-party code
 
-This project vendors the following third-party files:
+This project vendors the following third-party code and test fixtures:
 
 | File | Upstream source | License |
 | --- | --- | --- |
@@ -8,6 +8,7 @@ This project vendors the following third-party files:
 | `vendor/json/json.hrl` | `lib/stdlib/src/json.hrl` (Erlang/OTP 28.1.1) | Apache License 2.0 |
 | `vendor/uri_string/uri_string.erl` | `lib/stdlib/src/uri_string.erl` (Erlang/OTP 28.1.1) | Apache License 2.0 |
 | `test/valid_json_eunit_progress.erl` | `vendor/eunit_formatters/src/eunit_progress.erl` (rebar3 3.27.0) | Apache License 2.0 |
+| `test/fixtures/json-schema-test-suite/` | `json-schema-org/JSON-Schema-Test-Suite` (commit in `UPSTREAM.json`) | MIT License |
 
 ## Erlang/OTP
 
