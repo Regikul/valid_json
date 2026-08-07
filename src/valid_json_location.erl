@@ -1,16 +1,27 @@
-%% Печать локаций. Внутри вычисления локация — обратный стек сегментов, поэтому
-%% escaping и percent-encoding делаются здесь, один раз, при проекции output.
+%% Печать локаций. Пути instance/keyword внутри вычисления — обратные стеки,
+%% адрес schema node уже содержит compiled pointer. Escaping и percent-encoding
+%% выполняются здесь при проекции output.
 %% Правила заданы в okf/architecture/validator-core.md, раздел «Output unit и
 %% локации».
 -module(valid_json_location).
 
 -include("valid_json_core.hrl").
 
--export([pointer/1, segments/1, fragment/1]).
+-export([pointer/1, segments/1, fragment/1, fragment/2]).
 
 %% Символы, разрешённые во fragment без экранирования: pchar плюс "/" и "?"
 %% (rfc3986.txt:1308). Буквы и цифры проверяются отдельно диапазонами.
--define(FRAGMENT_SAFE, "-._~!$&'()*+,;=:@/?").
+-define(IS_FRAGMENT_SAFE(Byte),
+        (((Byte) >= $A andalso (Byte) =< $Z) orelse
+         ((Byte) >= $a andalso (Byte) =< $z) orelse
+         ((Byte) >= $0 andalso (Byte) =< $9) orelse
+         (Byte) =:= $- orelse (Byte) =:= $. orelse (Byte) =:= $_ orelse
+         (Byte) =:= $~ orelse (Byte) =:= $! orelse (Byte) =:= $$ orelse
+         (Byte) =:= $& orelse (Byte) =:= $' orelse (Byte) =:= $( orelse
+         (Byte) =:= $) orelse (Byte) =:= $* orelse (Byte) =:= $+ orelse
+         (Byte) =:= $, orelse (Byte) =:= $; orelse (Byte) =:= $= orelse
+         (Byte) =:= $: orelse (Byte) =:= $@ orelse (Byte) =:= $/ orelse
+         (Byte) =:= $?)).
 
 %% JSON Pointer от корня: сегменты идут от последнего к первому, каждому
 %% предшествует "/", пустой стек печатается пустым указателем.
@@ -33,15 +44,27 @@ segments(<<"/", Pointer/binary>>) ->
 fragment({Uri, Segments}) ->
     <<Uri/binary, "#", (percent(pointer(Segments)))/binary>>.
 
+%% Быстрый вход для output projection: Pointer уже прошёл JSON Pointer escaping
+%% при компиляции. Schema unit не добавляет сегмент, keyword unit дописывает
+%% только имя самого keyword. Разбирать Pointer обратно в сегменты не нужно.
+-spec fragment({uri(), pointer()}, none | binary()) -> uri().
+fragment({Uri, Pointer}, none) ->
+    <<Uri/binary, "#", (percent(Pointer))/binary>>;
+fragment({Uri, Pointer}, Segment) ->
+    <<Uri/binary, "#", (percent(Pointer))/binary,
+      "/", (percent(escape(Segment)))/binary>>.
+
 %% "~" и "/" — единственные символы, экранируемые в сегменте (rfc6901.txt:95).
-%% Обход побайтовый: продолжения UTF-8 не меньше 0x80 и с ними не совпадают.
+%% Обычный сегмент возвращается без копирования. Медленный путь встречается
+%% только при реальном escaping; порядок замен сохраняет смысл "~01".
 -spec escape(binary()) -> binary().
 escape(Segment) ->
-    << <<(escaped(Byte))/binary>> || <<Byte>> <= Segment >>.
-
-escaped($~) -> <<"~0">>;
-escaped($/) -> <<"~1">>;
-escaped(Byte) -> <<Byte>>.
+    case binary:match(Segment, [<<"~">>, <<"/">>]) of
+        nomatch -> Segment;
+        {_Position, _Length} ->
+            binary:replace(binary:replace(Segment, <<"~">>, <<"~0">>, [global]),
+                           <<"/">>, <<"~1">>, [global])
+    end.
 
 %% "~1" разбирается раньше "~0", иначе "~01" в имени свойства превратилось бы в
 %% косую черту (rfc6901.txt:95).
@@ -52,17 +75,26 @@ unescape(Segment) ->
 
 -spec percent(binary()) -> binary().
 percent(Text) ->
-    << <<(encoded(Byte))/binary>> || <<Byte>> <= Text >>.
+    case fragment_safe(Text) of
+        true  -> Text;
+        false -> << <<(encoded(Byte))/binary>> || <<Byte>> <= Text >>
+    end.
 
-encoded(Byte) when Byte >= $A, Byte =< $Z;
-                   Byte >= $a, Byte =< $z;
-                   Byte >= $0, Byte =< $9 ->
+%% Большинство schema pointers состоят только из fragment-safe ASCII. Этот
+%% проход ничего не выделяет и позволяет итоговой сборке URI скопировать такой
+%% pointer ровно один раз.
+-spec fragment_safe(binary()) -> boolean().
+fragment_safe(<<>>) ->
+    true;
+fragment_safe(<<Byte, Rest/binary>>) when ?IS_FRAGMENT_SAFE(Byte) ->
+    fragment_safe(Rest);
+fragment_safe(_Text) ->
+    false.
+
+encoded(Byte) when ?IS_FRAGMENT_SAFE(Byte) ->
     <<Byte>>;
 encoded(Byte) ->
-    case lists:member(Byte, ?FRAGMENT_SAFE) of
-        true  -> <<Byte>>;
-        false -> <<"%", (hex(Byte bsr 4)), (hex(Byte band 15))>>
-    end.
+    <<"%", (hex(Byte bsr 4)), (hex(Byte band 15))>>.
 
 hex(Digit) when Digit < 10 -> $0 + Digit;
 hex(Digit)                 -> $A + Digit - 10.

@@ -53,8 +53,8 @@ basic_location_test_() ->
 %% отдельным ключом в URI fragment identifier form.
 basic_absolute_test_() ->
     Unit = (error_unit([<<"type">>], []))#output_unit{
-             absolute_location = {<<"https://example.com/s">>,
-                                  [<<"type">>, <<"~a/b">>, <<"properties">>]}},
+             schema_location = {<<"https://example.com/s">>,
+                                <<"/properties/~0a~1b">>}},
     #{<<"errors">> := [Printed]} = project(basic, root(false, [Unit])),
     ?_assertEqual(<<"https://example.com/s#/properties/~0a~1b/type">>,
                   maps:get(<<"absoluteKeywordLocation">>, Printed)).
@@ -259,8 +259,8 @@ root(Valid, Nested) ->
 branch(Valid, Keywords, Instance, Detail, Nested) ->
     #output_unit{kind              = schema,
                  valid             = Valid,
+                 schema_location   = {anonymous, <<>>},
                  keyword_location  = Keywords,
-                 absolute_location = undefined,
                  instance_location = Instance,
                  detail            = Detail,
                  nested            = Nested}.

@@ -379,8 +379,8 @@ unevaluated_indexes({P, S}, L) ->
 -record(output_unit, {
     kind              :: schema | keyword,
     valid             :: boolean(),
+    schema_location   :: addr(),
     keyword_location  :: [binary()],
-    absolute_location :: {uri(), [binary()]} | undefined,
     instance_location :: [binary()],
     detail            :: {error, binary()} | {annotation, json()} | none,
     nested            :: [#output_unit{}]
@@ -391,9 +391,9 @@ Units образуют дерево, и уровни в нём чередуют�
 
 Собственный unit schema object не несёт ни сообщения, ни аннотации. Он говорит только о том, что подсхема применялась и чем это кончилось, а причину провала называют его дети; спецификация прямо освобождает узлы ветвления от сообщения ([core.txt:3150](../references/json-schema/draft-2020-12/core.txt)). Сообщение появляется у node лишь там, где детей нет вовсе, — у boolean `false`.
 
-Локации — обратные стеки сегментов: push/pop выполняется за O(1), JSON Pointer escaping и URI percent-encoding делаются при печати. `keywordLocation` проходит сквозь ссылки; `absoluteKeywordLocation` строится из канонического resource URI и печатается всегда, кроме anonymous resource.
+`keywordLocation` и `instanceLocation` — обратные стеки сегментов: push/pop выполняется за O(1), JSON Pointer escaping делается при печати. `schema_location` хранит адрес физического schema node как готовый compiled pointer. `keywordLocation` проходит сквозь ссылки; `absoluteKeywordLocation` материализуется из `schema_location` только при печати и присутствует всегда, кроме anonymous resource.
 
-Эти две локации живут по-разному. `keywordLocation` — накопленный стек: обход добавляет к нему сегмент за сегментом и продолжает его через `$ref`. `absoluteKeywordLocation` ничего не накапливает и выводится из адреса node в момент построения unit: канонический URI даёт `rid`, путь внутри resource — pointer, а последним сегментом идёт имя keyword. У reference это даёт два наблюдаемых уровня: keyword unit называет physical `$ref`/`$dynamicRef`/`$recursiveRef`, а вложенный schema unit — canonical target после dereference. У анонимного resource абсолютная локация отсутствует сама собой, потому что `id` у него не определён.
+Эти две локации живут по-разному. `keywordLocation` — накопленный стек: обход добавляет к нему сегмент за сегментом и продолжает его через `$ref`. Для `absoluteKeywordLocation` unit сохраняет только адрес node: канонический URI уже лежит в `rid`, а путь внутри resource — в готовом pointer. После фильтрации `basic`/`detailed` проекция дописывает имя keyword, не разбирая pointer обратно в сегменты, и сериализует URI fragment. У reference это даёт два наблюдаемых уровня: keyword unit называет physical `$ref`/`$dynamicRef`/`$recursiveRef`, а вложенный schema unit — canonical target после dereference. У анонимного resource абсолютная локация отсутствует сама собой, потому что его `rid = anonymous`.
 
 Сериализация разделена явно:
 
@@ -450,7 +450,7 @@ output fixtures и output schema требуют JSON Pointer; compatibility poli
 -type frame() :: {addr(), [binary()]}.
 ```
 
-`node` — адрес вычисляемого сейчас node. Отдельного поля под текущий resource нет: это первая половина адреса, и граница определяется её сравнением. Вторая половина, pointer, задаёт путь от корня resource и потому полностью определяет абсолютную локацию всех units этого node. Обработчик получает контекст целиком, поэтому строит её сам и ни от кого не наследует.
+`node` — адрес вычисляемого сейчас node. Отдельного поля под текущий resource нет: это первая половина адреса, и граница определяется её сравнением. Вторая половина, pointer, задаёт путь от корня resource и потому полностью определяет абсолютную локацию всех units этого node. Обработчик сохраняет этот адрес в unit, а проекция позднее материализует публичную локацию; от родителя она не наследуется.
 
 `coverage` говорит, ждёт ли покрытие этого поддерева какой-нибудь `unevaluated*` выше по обходу. Одного взгляда на собственный `#node.unevaluated` для этого мало: покрытие поднимается по цепочке in-place applicators, поэтому запрет обрыва обязан идти вниз по ней же. Флаг поднимается на входе в node с непустым `unevaluated` и гаснет при спуске в дочернюю schema через `properties`, `items`, `contains`, `propertyNames` и сами `unevaluated*`: покрытие такой schema принадлежит ей самой и наверх не идёт, а значит под ней обрыв снова разрешён.
 

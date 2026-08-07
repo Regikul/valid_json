@@ -160,19 +160,22 @@ reference(#output_unit{}) ->
 
 -spec unit(#output_unit{}) -> output().
 unit(#output_unit{valid = Valid, keyword_location = Keywords,
-                  absolute_location = Absolute, instance_location = Instance,
-                  detail = Detail}) ->
+                  instance_location = Instance, detail = Detail} = OutputUnit) ->
     Unit = #{<<"valid">>            => Valid,
              <<"keywordLocation">>  => valid_json_location:pointer(Keywords),
              <<"instanceLocation">> => valid_json_location:pointer(Instance)},
-    detail(Detail, absolute(Absolute, Unit)).
+    detail(Detail, absolute(OutputUnit, Unit)).
 
 %% Анонимный resource URI не синтезирует, поэтому ключ просто отсутствует.
--spec absolute({uri(), [binary()]} | undefined, output()) -> output().
-absolute(undefined, Unit) ->
+-spec absolute(#output_unit{}, output()) -> output().
+absolute(#output_unit{schema_location = {anonymous, _Pointer}}, Unit) ->
     Unit;
-absolute(Location, Unit) ->
-    Unit#{<<"absoluteKeywordLocation">> => valid_json_location:fragment(Location)}.
+absolute(#output_unit{kind = schema, schema_location = Location}, Unit) ->
+    Unit#{<<"absoluteKeywordLocation">> => valid_json_location:fragment(Location, none)};
+absolute(#output_unit{kind = keyword, schema_location = Location,
+                      keyword_location = [Keyword | _]}, Unit) ->
+    Unit#{<<"absoluteKeywordLocation">> =>
+              valid_json_location:fragment(Location, Keyword)}.
 
 -spec detail(detail(), output()) -> output().
 detail({error, Message}, Unit)    -> Unit#{<<"error">> => Message};

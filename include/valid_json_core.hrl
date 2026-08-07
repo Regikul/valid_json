@@ -99,8 +99,8 @@
 -record(output_unit, {
     kind              :: unit_kind(),
     valid             :: boolean(),
+    schema_location   :: addr(),
     keyword_location  :: [binary()],
-    absolute_location :: {uri(), [binary()]} | undefined,
     instance_location :: [binary()],
     detail            :: detail(),
     nested            :: [#output_unit{}]

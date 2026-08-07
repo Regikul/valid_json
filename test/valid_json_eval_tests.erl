@@ -382,12 +382,12 @@ ref_location_test() ->
     [TargetUnit] = RefUnit#output_unit.nested,
     [TypeUnit] = TargetUnit#output_unit.nested,
     ?assertEqual([<<"$ref">>], RefUnit#output_unit.keyword_location),
-    ?assertEqual({Source, [<<"$ref">>]},
-                 RefUnit#output_unit.absolute_location),
+    ?assertEqual({Source, <<>>},
+                 RefUnit#output_unit.schema_location),
     ?assertEqual([<<"type">>, <<"$ref">>],
                  TypeUnit#output_unit.keyword_location),
-    ?assertEqual({Target, [<<"type">>, <<"value">>, <<"$defs">>]},
-                 TypeUnit#output_unit.absolute_location).
+    ?assertEqual({Target, <<"/$defs/value">>},
+                 TypeUnit#output_unit.schema_location).
 
 %% Имя ищется по dynamic scope, и побеждает самый внешний resource, который его
 %% объявил: внутренняя цель переопределяется внешней (core.txt, 8.2.3.2).
@@ -456,8 +456,8 @@ dynamic_ref_location_test() ->
     [DynamicUnit] = InnerUnit#output_unit.nested,
     ?assertEqual([<<"$dynamicRef">>, <<"$ref">>],
                  DynamicUnit#output_unit.keyword_location),
-    ?assertEqual({<<"https://example.com/inner">>, [<<"$dynamicRef">>]},
-                 DynamicUnit#output_unit.absolute_location).
+    ?assertEqual({<<"https://example.com/inner">>, <<>>},
+                 DynamicUnit#output_unit.schema_location).
 
 %% Лексическая цель помечена, поэтому recursive reference выбирает самый
 %% внешний помеченный resource. Внешнее `required` применяется и к `next`.
@@ -512,8 +512,8 @@ recursive_ref_location_test() ->
         [Unit || Unit <- keywords(collect(Artifact, Instance, basic)),
                  Unit#output_unit.keyword_location =:= RecursiveLocation],
     ?assertEqual({<<"https://example.com/inner-recursive">>,
-                  [<<"$recursiveRef">>, <<"next">>, <<"properties">>]},
-                 RecursiveUnit#output_unit.absolute_location),
+                  <<"/properties/next">>},
+                 RecursiveUnit#output_unit.schema_location),
     ?assertEqual([<<"next">>], RecursiveUnit#output_unit.instance_location).
 
 %% Логические applicators спускаются в дочерние nodes общим входом evaluator'а и
@@ -1295,19 +1295,19 @@ applicator_units_test_() ->
 %% поэтому у названного resource она появляется сама и печатается вместе с unit.
 absolute_test_() ->
     Assertion = schema_node([{type, [string]}]),
-    [?_assertEqual([undefined], absolute(artifact(Assertion), 1)),
-     ?_assertEqual([{?RESOURCE, [<<"type">>]}], absolute(named(Assertion), 1)),
+    [?_assertEqual([{anonymous, <<>>}], schema_locations(artifact(Assertion), 1)),
+     ?_assertEqual([{?RESOURCE, <<>>}], schema_locations(named(Assertion), 1)),
      %% У boolean-схемы собственного сегмента нет: она стоит в корне resource,
      %% и keywords, к чьим units можно было бы приглядеться, у неё тоже нет.
-     ?_assertEqual({?RESOURCE, []},
-                   (node_unit(named(false), 1))#output_unit.absolute_location),
+     ?_assertEqual({?RESOURCE, <<>>},
+                   (node_unit(named(false), 1))#output_unit.schema_location),
      ?_assertEqual(<<"https://example.com/s#/type">>,
                    printed_absolute(named(Assertion), 1)),
      %% У вложенного node указатель непустой, и путь внутри resource берётся
      %% из него, а не из накопленной локации обхода.
-     ?_assertEqual([{?RESOURCE, [<<"allOf">>]},
-                    {?RESOURCE, [<<"type">>, <<"0">>, <<"allOf">>]}],
-                   absolute(nested_named(), 1)),
+     ?_assertEqual([{?RESOURCE, <<>>},
+                    {?RESOURCE, <<"/allOf/0">>}],
+                   schema_locations(nested_named(), 1)),
      ?_assertEqual(<<"https://example.com/s#/allOf/0/type">>,
                    valid_json_location:fragment({?RESOURCE, [<<"type">>, <<"0">>,
                                                              <<"allOf">>]}))].
@@ -1653,9 +1653,9 @@ addr(Pointer) ->
 tripwire() ->
     schema_node([{ref, addr(<<"/missing">>)}]).
 
-absolute(Artifact, Instance) ->
+schema_locations(Artifact, Instance) ->
     {ok, #eval_result{units = Units}} = valid_json_eval:run(Artifact, Instance, basic),
-    [Location || #output_unit{absolute_location = Location} <- keywords(Units)].
+    [Location || #output_unit{schema_location = Location} <- keywords(Units)].
 
 %% Проекция печатает ту же локацию отдельным ключом.
 printed_absolute(Artifact, Instance) ->

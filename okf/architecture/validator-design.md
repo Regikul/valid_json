@@ -42,7 +42,7 @@ status: draft
 | Инвариант | Следствие |
 | --- | --- |
 | Результат не сводится к boolean | отдельно хранятся эффективное покрытие для `unevaluated*` и полное диагностическое дерево |
-| Каждый output unit знает три локации | `keywordLocation`, `absoluteKeywordLocation` и `instanceLocation` строятся во время обхода |
+| Каждый output unit знает три локации | `keywordLocation` и `instanceLocation` накапливаются во время обхода, а для поздней материализации `absoluteKeywordLocation` сохраняется адрес schema node |
 | Все форматы — проекции одного дерева | `flag` разрешает не строить дерево, остальные используют общий внутренний формат |
 | Dynamic scope входит в контекст | `$dynamicRef` и `$recursiveRef` разрешаются по стеку ресурсов |
 | Keywords параметризованы dialect/vocabulary | различия Draft 2020-12 и Draft 2019-09 снимаются компилятором, не evaluator'ом |

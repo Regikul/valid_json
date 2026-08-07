@@ -67,3 +67,21 @@ fragment_test_() ->
      %% Не-ASCII кодируется побайтово в UTF-8.
      ?_assertEqual(<<"https://example.com/s#/%D1%84">>,
                    valid_json_location:fragment({Uri, [<<"ф"/utf8>>]}))].
+
+%% Проекция получает готовый compiled pointer и дописывает максимум один raw
+%% keyword segment. Результат обязан совпадать с общим путём через стек.
+compiled_fragment_test_() ->
+    Uri = <<"https://example.com/s">>,
+    Cases = [{[], none},
+             {[<<"~a/b">>, <<"properties">>], none},
+             {[], <<>>},
+             {[<<"~a/b">>, <<"properties">>], <<"type">>},
+             {[<<"base">>], <<"~1 /%#">>},
+             {[<<"base">>], <<"ф"/utf8>>}],
+    [?_assertEqual(valid_json_location:fragment({Uri, tail(Tail, Stack)}),
+                   valid_json_location:fragment(
+                     {Uri, valid_json_location:pointer(Stack)}, Tail))
+     || {Stack, Tail} <- Cases].
+
+tail(none, Stack) -> Stack;
+tail(Segment, Stack) -> [Segment | Stack].

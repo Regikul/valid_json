@@ -1,5 +1,5 @@
-%% Построение output units из контекста вычисления. Локации остаются обратными
-%% стеками: печать и escaping делает valid_json_location при проекции.
+%% Построение output units из контекста вычисления. Локации остаются адресом
+%% schema node и обратными стеками: печать и escaping выполняются при проекции.
 -module(valid_json_unit).
 
 -include("valid_json_core.hrl").
@@ -19,7 +19,7 @@ keyword(Keyword, Valid, Detail, Context) ->
 -spec keyword(binary(), boolean(), detail(), [#output_unit{}], #eval_context{}) ->
           #output_unit{}.
 keyword(Keyword, Valid, Detail, Nested, #eval_context{keyword_location = Location} = Context) ->
-    build(keyword, Valid, [Keyword | Location], [Keyword], Detail, Nested, Context).
+    build(keyword, Valid, [Keyword | Location], Detail, Nested, Context).
 
 %% Applicator в режиме flag units не собирает вовсе: ответ исчерпывается
 %% вердиктом (validator-core.md, «Проекции output»).
@@ -38,33 +38,25 @@ keyword_units(Keyword, Valid, Detail, Nested, Context) ->
           #output_unit{}.
 reference(Keyword, _Addr, Valid, Nested,
           #eval_context{keyword_location = Location} = Context) ->
-    build(keyword, Valid, [Keyword | Location], [Keyword], none, Nested, Context).
+    build(keyword, Valid, [Keyword | Location], none, Nested, Context).
 
 %% Unit самого node: своего сегмента у него нет, он стоит там же, где схема, и
 %% держит внутри units своих keywords.
 -spec schema(boolean(), detail(), [#output_unit{}], #eval_context{}) -> #output_unit{}.
 schema(Valid, Detail, Nested, #eval_context{keyword_location = Location} = Context) ->
-    build(schema, Valid, Location, [], Detail, Nested, Context).
+    build(schema, Valid, Location, Detail, Nested, Context).
 
-%% keyword location накапливается обходом, абсолютная выводится из адреса node:
-%% путь внутри resource уже лежит в pointer, и к нему дописывается имя keyword.
--spec build(unit_kind(), boolean(), [binary()], [binary()], detail(), [#output_unit{}],
+%% Адрес node сохраняется без разбора compiled pointer. Проекция материализует
+%% absoluteKeywordLocation только для оставшихся после фильтрации units; у
+%% keyword его собственное имя уже лежит в голове keyword_location.
+-spec build(unit_kind(), boolean(), [binary()], detail(), [#output_unit{}],
             #eval_context{}) -> #output_unit{}.
-build(Kind, Valid, Location, Tail, Detail, Nested,
-      #eval_context{instance_location = {_Depth, Instance}} = Context) ->
+build(Kind, Valid, Location, Detail, Nested,
+      #eval_context{node = Node, instance_location = {_Depth, Instance}}) ->
     #output_unit{kind              = Kind,
                  valid             = Valid,
+                 schema_location   = Node,
                  keyword_location  = Location,
-                 absolute_location = absolute(Tail, Context),
                  instance_location = Instance,
                  detail            = Detail,
                  nested            = Nested}.
-
-%% Анонимный resource URI не имеет, поэтому и абсолютной локации у него нет
-%% (validator-core.md, «Представление скомпилированной схемы»).
--spec absolute([binary()], #eval_context{}) -> {uri(), [binary()]} | undefined.
-absolute(Tail, #eval_context{node = {Rid, Pointer}, schema = #{resources := Resources}}) ->
-    case maps:get(Rid, Resources) of
-        #resource{id = undefined} -> undefined;
-        #resource{id = Uri}       -> {Uri, Tail ++ valid_json_location:segments(Pointer)}
-    end.
