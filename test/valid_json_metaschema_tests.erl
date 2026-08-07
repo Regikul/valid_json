@@ -30,18 +30,30 @@ published_bundles_test() ->
     %% дерево, и фолбэка на ленивую публикацию больше нет.
     Modern = valid_json_metaschema:compiled(?DRAFT_2020_12),
     Legacy = valid_json_metaschema:compiled(?DRAFT_2019_09),
+    Draft7 = valid_json_metaschema:compiled(?DRAFT_07),
+    Draft6 = valid_json_metaschema:compiled(?DRAFT_06),
     [{bundles, Bundles}] = ets:lookup(valid_json_metaschema, bundles),
     ModernBundle = maps:get(?DRAFT_2020_12, Bundles),
     LegacyBundle = maps:get(?DRAFT_2019_09, Bundles),
+    Draft7Bundle = maps:get(?DRAFT_07, Bundles),
+    Draft6Bundle = maps:get(?DRAFT_06, Bundles),
     ?assertEqual(8, map_size(maps:get(resources, Modern))),
     ?assertEqual(7, map_size(maps:get(resources, Legacy))),
+    ?assertEqual(1, map_size(maps:get(resources, Draft7))),
+    ?assertEqual(1, map_size(maps:get(resources, Draft6))),
     ?assertEqual([], maps:get(sources, Modern)),
     ?assertEqual([], maps:get(sources, Legacy)),
+    ?assertEqual([], maps:get(sources, Draft7)),
+    ?assertEqual([], maps:get(sources, Draft6)),
     %% Format-Assertion входит в immutable документы, но не в root closure.
     ?assertEqual(9, map_size(maps:get(documents, ModernBundle))),
     ?assertEqual(7, map_size(maps:get(documents, LegacyBundle))),
+    ?assertEqual(1, map_size(maps:get(documents, Draft7Bundle))),
+    ?assertEqual(1, map_size(maps:get(documents, Draft6Bundle))),
     ?assertEqual(Modern, maps:get(compiled, ModernBundle)),
-    ?assertEqual(Legacy, maps:get(compiled, LegacyBundle)).
+    ?assertEqual(Legacy, maps:get(compiled, LegacyBundle)),
+    ?assertEqual(Draft7, maps:get(compiled, Draft7Bundle)),
+    ?assertEqual(Draft6, maps:get(compiled, Draft6Bundle)).
 
 builtin_documents_are_published_test() ->
     ?assertMatch(#document{canonical = ?DRAFT_2020_12},
@@ -51,6 +63,10 @@ builtin_documents_are_published_test() ->
                      <<"https://json-schema.org/draft/2020-12/meta/format-assertion">>},
        valid_json_metaschema:fetch(
          <<"https://json-schema.org/draft/2020-12/meta/format-assertion">>)),
+    ?assertMatch(#document{canonical = ?DRAFT_07},
+                 valid_json_metaschema:fetch(?DRAFT_07)),
+    ?assertMatch(#document{canonical = ?DRAFT_06},
+                 valid_json_metaschema:fetch(?DRAFT_06)),
     ?assertEqual(undefined,
                  valid_json_metaschema:fetch(
                    <<"https://json-schema.org/draft/2020-12/output/schema">>)).
@@ -62,7 +78,20 @@ builtin_metaschemas_compile_through_public_api_test_() ->
                      Store, ?DRAFT_2020_12, [{schema_validation, flag}])),
      ?_assertMatch({ok, #{root := ?DRAFT_2019_09, sources := []}},
                    valid_json_compile:compile_uri(
-                     Store, ?DRAFT_2019_09, [{schema_validation, flag}]))].
+                     Store, ?DRAFT_2019_09, [{schema_validation, flag}])),
+     ?_assertMatch({ok, #{root := ?DRAFT_07, sources := []}},
+                   valid_json_compile:compile_uri(
+                     Store, ?DRAFT_07, [{schema_validation, flag}])),
+     ?_assertMatch({ok, #{root := ?DRAFT_06, sources := []}},
+                   valid_json_compile:compile_uri(
+                     Store, ?DRAFT_06, [{schema_validation, flag}]))].
+
+legacy_metaschemas_validate_dependencies_test_() ->
+    Bad = #{<<"dependencies">> => #{<<"a">> => 1}},
+    [?_assertMatch({error, #schema_error{reason = schema_invalid}},
+                   valid_json_compile:compile(valid_json_store:temporary(), Bad,
+                                              [{default_dialect, Draft}]))
+     || Draft <- [?DRAFT_06, ?DRAFT_07]].
 
 canonical_metaschema_rejection_test_() ->
     [?_test(assert_schema_invalid(

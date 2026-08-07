@@ -1,9 +1,9 @@
 %% Неизменяемая область встроенных JSON Schema meta-schemas. Все документы
-%% читаются один раз, две корневые метасхемы компилируются доверенным
+%% читаются один раз, четыре корневые метасхемы компилируются доверенным
 %% bootstrap-путём и ложатся в защищённую ETS одной записью.
 %%
 %% Этот же модуль владеет таблицей: в `init/1` он забирает её у хранителя,
-%% публикует bundle и держит владение до конца жизни. Порядок «хранитель перед
+%% публикует bundles и держит владение до конца жизни. Порядок «хранитель перед
 %% владельцем» задан в valid_json_metaschema_sup, поэтому здесь нет ни ожидания
 %% таблицы, ни блокировок: писать в неё может только владелец, и он один.
 %%
@@ -26,7 +26,7 @@
 
 %% В bundle остаются и декодированные документы: обычный `$ref` на встроенную
 %% метасхему должен получить исходный JSON, но повторно читать priv для этого не
-%% нужно. В ETS лежит одна запись с обоими dialect bundles.
+%% нужно. В ETS лежит одна запись с bundles всех поддерживаемых dialects.
 -type bundle() :: #{compiled := compiled(),
                     documents := #{uri() => #document{}}}.
 
@@ -78,14 +78,18 @@ publish() ->
         [{?BUNDLES, _Bundles}] ->
             ok;
         [] ->
-            %% Сначала строим обе записи целиком. Если bootstrap второй
-            %% метасхемы провалится, в таблицу не ляжет и первая, и приложение
+            %% Сначала строим все записи целиком. Если bootstrap одной
+            %% метасхемы провалится, в таблицу не ляжет ни одна, и приложение
             %% не увидит половинчатую встроенную область.
             Modern = bundle(?DRAFT_2020_12, modern_documents()),
             Legacy = bundle(?DRAFT_2019_09, legacy_documents()),
+            Draft7 = bundle(?DRAFT_07, draft7_documents()),
+            Draft6 = bundle(?DRAFT_06, draft6_documents()),
             true = ets:insert(?TABLE, {?BUNDLES,
                                        #{?DRAFT_2020_12 => Modern,
-                                         ?DRAFT_2019_09 => Legacy}}),
+                                         ?DRAFT_2019_09 => Legacy,
+                                         ?DRAFT_07 => Draft7,
+                                         ?DRAFT_06 => Draft6}}),
             ok
     end.
 
@@ -94,6 +98,10 @@ publish() ->
 compiled(?DRAFT_2020_12 = Draft) ->
     maps:get(compiled, published_bundle(Draft));
 compiled(?DRAFT_2019_09 = Draft) ->
+    maps:get(compiled, published_bundle(Draft));
+compiled(?DRAFT_07 = Draft) ->
+    maps:get(compiled, published_bundle(Draft));
+compiled(?DRAFT_06 = Draft) ->
     maps:get(compiled, published_bundle(Draft)).
 
 -spec fetch(uri()) -> #document{} | undefined.
@@ -169,7 +177,8 @@ priv_dir() ->
 
 -spec builtin(uri()) -> {dialect(), file:filename()} | undefined.
 builtin(Uri) ->
-    case lists:keyfind(Uri, 1, modern_documents() ++ legacy_documents()) of
+    case lists:keyfind(Uri, 1, modern_documents() ++ legacy_documents() ++
+                            draft7_documents() ++ draft6_documents()) of
         {Uri, Relative} -> {manifest_draft(Uri), Relative};
         false           -> undefined
     end.
@@ -178,7 +187,11 @@ builtin(Uri) ->
 manifest_draft(<<"https://json-schema.org/draft/2020-12/", _/binary>>) ->
     ?DRAFT_2020_12;
 manifest_draft(<<"https://json-schema.org/draft/2019-09/", _/binary>>) ->
-    ?DRAFT_2019_09.
+    ?DRAFT_2019_09;
+manifest_draft(<<"http://json-schema.org/draft-07/", _/binary>>) ->
+    ?DRAFT_07;
+manifest_draft(<<"http://json-schema.org/draft-06/", _/binary>>) ->
+    ?DRAFT_06.
 
 -spec modern_documents() -> [{uri(), file:filename()}].
 modern_documents() ->
@@ -215,3 +228,11 @@ legacy_documents() ->
       "draft-2019-09/meta/format.json"},
      {<<"https://json-schema.org/draft/2019-09/meta/content">>,
       "draft-2019-09/meta/content.json"}].
+
+-spec draft7_documents() -> [{uri(), file:filename()}].
+draft7_documents() ->
+    [{?DRAFT_07, "draft-07/schema.json"}].
+
+-spec draft6_documents() -> [{uri(), file:filename()}].
+draft6_documents() ->
+    [{?DRAFT_06, "draft-06/schema.json"}].

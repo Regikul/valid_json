@@ -14,15 +14,15 @@ if your schemas use them the outcome is the same either way.
 | Keyword | valid_json | jesse | jsonschex |
 | --- | --- | --- | --- |
 | `$schema` | yes, selects the dialect; a default can be configured | read to pick a draft, defaults to draft 03 when absent | yes, 2020-12 is built in, others need a loader |
-| `$id` | yes | draft 04 `id` is skipped; the README states id-based references are unsupported | yes |
+| `$id` | yes, including Draft 6/7 fragment-only targets | draft 04 `id` is skipped; the README states id-based references are unsupported | yes |
 | `$ref` | yes, resolved at compile time | yes, resolved while validating | yes |
-| `$defs` / `definitions` | both | neither as a keyword; `#/definitions/...` pointers still resolve | `$defs` |
+| `$defs` / `definitions` | `$defs` in Draft 2019-09+, `definitions` in all four dialects | neither as a keyword; `#/definitions/...` pointers still resolve | `$defs` |
 | `$anchor` | yes | no | yes |
 | `$dynamicRef` / `$dynamicAnchor` | yes | no | yes |
 | `$recursiveRef` / `$recursiveAnchor` | yes, Draft 2019-09 | no | no |
 | `$vocabulary` | yes, including user meta-schemas taken from the store | no | yes, the meta-schema comes from your loader |
 | `$comment` | ignored | ignored | ignored |
-| Cross-draft references | yes, 2020-12 and 2019-09 in one closure | not applicable | excluded from the test suite run |
+| Cross-draft references | yes, Draft 6, 7, 2019-09, and 2020-12 in one closure | not applicable | excluded from the test suite run |
 
 ## Assertions
 
@@ -44,13 +44,13 @@ if your schemas use them the outcome is the same either way.
 | Keyword | valid_json | jesse | jsonschex |
 | --- | --- | --- | --- |
 | `allOf`, `anyOf`, `oneOf`, `not` | yes | yes | yes |
-| `if` / `then` / `else` | yes | no | yes |
+| `if` / `then` / `else` | yes, Draft 7+ | no | yes |
 | `dependentSchemas` | yes | no, `dependencies` covers the draft-04 form | yes |
-| `dependencies` (pre-2019 form) | no, and it is not a keyword of either dialect | yes | yes, as a compatibility keyword |
+| `dependencies` (pre-2019 form) | yes, both property and schema forms in Draft 6/7 | yes | yes, as a compatibility keyword |
 | `properties`, `patternProperties`, `additionalProperties` | yes | yes | yes |
 | `propertyNames` | yes | yes | yes |
-| `items`, schema form | yes, both dialects | yes | yes |
-| `items` array form and `additionalItems` | yes, Draft 2019-09 | yes | not applicable |
+| `items`, schema form | yes, all four dialects | yes | yes |
+| `items` array form and `additionalItems` | yes, Draft 6/7/2019-09 | yes | not applicable |
 | `prefixItems` and trailing `items` | yes, Draft 2020-12 | no | yes |
 | `contains` | yes | yes | yes |
 | `minContains`, `maxContains` | yes | no | yes |
@@ -118,10 +118,10 @@ that optional dependency is present.
 
 ## Conformance testing
 
-`valid_json` runs every mandatory file of the official JSON Schema Test Suite
-for both Draft 2020-12 and Draft 2019-09, plus the official output tests; the
-deviations it knows about are listed in the "Not supported" section of the
-[README](../../README.md).
+`valid_json` runs the declared validation profile of the official JSON Schema
+Test Suite for Draft 6, Draft 7, Draft 2019-09, and Draft 2020-12, plus the
+official output tests where the drafts define them. The deviations it knows
+about are listed in the "Not supported" section of the [README](../../README.md).
 
 jsonschex reports passing 100% of the Draft 2020-12 suite with
 `optional/cross-draft` excluded, and ships the suite as a submodule.

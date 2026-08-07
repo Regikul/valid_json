@@ -6,6 +6,12 @@
     },
     "2019-09": {
       "commit": "c8eb3d320f60eca7cfb18da25337a426ceb40eaa"
+    },
+    "draft-07": {
+      "schema": "http://json-schema.org/draft-07/schema"
+    },
+    "draft-06": {
+      "schema": "http://json-schema.org/draft-06/schema"
     }
   }
 }

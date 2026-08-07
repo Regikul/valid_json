@@ -41,6 +41,18 @@ set of documents that reference one another must be registered in one call:
 {ok, _} = valid_json:add([SchemaA, SchemaB]).
 ```
 
+The closure may cross Draft 6, Draft 7, Draft 2019-09, and Draft 2020-12. Each
+document uses its own root `$schema`; a reference never makes its target inherit
+the dialect of its caller.
+
+Draft 6 and Draft 7 retain two legacy rules inside their own resources. A
+fragment-only child `$id`, such as `"$id": "#address"`, names a plain target in
+the current resource rather than creating a nested resource. And an object
+containing `$ref` is evaluated as `$ref` alone: every sibling, including a
+schema container or `$id`, is ignored. Those rules stop at the resource's
+dialect boundary, so a reference into a newer-draft document uses that target's
+normal rules.
+
 Once a document is registered, validation is a lookup by canonical name; the
 compiled artifact is self-contained and needs no registry access.
 

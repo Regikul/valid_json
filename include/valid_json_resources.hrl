@@ -18,6 +18,10 @@
         <<"https://json-schema.org/draft/2020-12/schema">>).
 -define(DRAFT_2019_09,
         <<"https://json-schema.org/draft/2019-09/schema">>).
+-define(DRAFT_07,
+        <<"http://json-schema.org/draft-07/schema">>).
+-define(DRAFT_06,
+        <<"http://json-schema.org/draft-06/schema">>).
 
 %% Профиль компиляции: dialect и активные vocabularies. `uri` — то, что написано
 %% в `$schema` либо выбрано опцией, `draft` — каноническая база, задающая состав

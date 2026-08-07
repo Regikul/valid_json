@@ -439,6 +439,33 @@
 - [ ] Приёмка P8: выбранные optional profiles проходят без необъявленных
   исключений.
 
+## P9 — Draft 6, Draft 7 и legacy cross-dialect ссылки
+
+- [x] **Фаза P9 завершена**
+- [x] Добавить канонические profiles Draft 6 и Draft 7, встроенные
+  meta-schemas и их schema validation; legacy dialect не использует
+  `$vocabulary`, поэтому custom meta-schema наследует полный фиксированный
+  набор keywords своего draft.
+- [x] Реализовать legacy resource semantics: fragment-only `$id` подсхемы
+  создаёт plain-name target в текущем resource, а не новый resource; `$ref` в
+  Draft 6/7 игнорирует все соседние keywords и не открывает вложенные schema
+  positions.
+- [x] Реализовать обе формы `dependencies` одним составным constraint и
+  развести active/unknown keywords Draft 6 и Draft 7, включая conditional
+  только в Draft 7.
+- [x] Подключить закреплённые official validation/remotes fixtures Draft 6 и
+  Draft 7 и cross-draft capability cases; census должен покрывать все четыре
+  dialect.
+- [x] Добавить точную матрицу переходов Draft 6, Draft 7, Draft 2019-09 и
+  Draft 2020-12, в том числе refs на legacy fragment-only `$id`, relative
+  remotes и `$ref`-only sibling semantics.
+- [x] Обновить README, conformance policy и assets documentation фактически
+  подтверждённым набором dialects и границами legacy compatibility.
+- [x] Приёмка P9: основной conformance-набор Draft 6 и Draft 7 проходит с
+  задокументированными исключениями, cross-dialect closure для всех четырёх
+  dialect подтверждён, `rebar3 as ci compile`, `rebar3 as ci conformance` и
+  `rebar3 as ci eunit` зелёные.
+
 ## Runtime — хранение и эксплуатация
 
 Runtime не входит в conformance-фазы и развивается отдельным чеклистом.

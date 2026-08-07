@@ -93,6 +93,10 @@ metaschema(#profile{uri = ?DRAFT_2020_12}, _Store, _Mode, Cache) ->
     {ok, valid_json_metaschema:compiled(?DRAFT_2020_12), Cache, []};
 metaschema(#profile{uri = ?DRAFT_2019_09}, _Store, _Mode, Cache) ->
     {ok, valid_json_metaschema:compiled(?DRAFT_2019_09), Cache, []};
+metaschema(#profile{uri = ?DRAFT_07}, _Store, _Mode, Cache) ->
+    {ok, valid_json_metaschema:compiled(?DRAFT_07), Cache, []};
+metaschema(#profile{uri = ?DRAFT_06}, _Store, _Mode, Cache) ->
+    {ok, valid_json_metaschema:compiled(?DRAFT_06), Cache, []};
 metaschema(#profile{uri = Uri, draft = Draft}, Store, Mode, Cache) ->
     case maps:find(Uri, Cache) of
         {ok, Compiled} ->

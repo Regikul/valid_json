@@ -46,13 +46,25 @@
 -define(CANONICAL_2019_09,
         [applicator, content, core, meta_data, validation]).
 
+%% Draft 6 и 7 предшествуют механизму `$vocabulary`, но всё равно задают
+%% фиксированный язык schema. Внутренние имена здесь не являются URI
+%% vocabularies: они только сохраняют общий интерфейс `active/2`.
+-define(CANONICAL_07,
+        [applicator, content, core, format, meta_data, validation]).
+-define(CANONICAL_06,
+        [applicator, core, format, meta_data, validation]).
+
 %% Профиль канонического dialect встроен: его метасхема известна заранее и
 %% читать её ради `$vocabulary` незачем.
 -spec canonical(dialect()) -> #profile{}.
 canonical(?DRAFT_2020_12 = Draft) ->
     #profile{uri = Draft, draft = Draft, vocabularies = ?CANONICAL_2020_12};
 canonical(?DRAFT_2019_09 = Draft) ->
-    #profile{uri = Draft, draft = Draft, vocabularies = ?CANONICAL_2019_09}.
+    #profile{uri = Draft, draft = Draft, vocabularies = ?CANONICAL_2019_09};
+canonical(?DRAFT_07 = Draft) ->
+    #profile{uri = Draft, draft = Draft, vocabularies = ?CANONICAL_07};
+canonical(?DRAFT_06 = Draft) ->
+    #profile{uri = Draft, draft = Draft, vocabularies = ?CANONICAL_06}.
 
 %% Профиль, объявленный пользовательской метасхемой. Draft приходит от dialect
 %% самой метасхемы: он решает, какие URI vocabularies вообще существуют и как
@@ -60,6 +72,10 @@ canonical(?DRAFT_2019_09 = Draft) ->
 %% vocabularies своего draft: Core этого требует прямо, остальные — правилом
 %% «as if its URI were present with a value of true» из своих разделов.
 -spec declared(uri(), json(), dialect()) -> {ok, #profile{}} | {error, reason()}.
+declared(Uri, _Metaschema, Draft)
+  when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
+    #profile{vocabularies = Vocabularies} = canonical(Draft),
+    {ok, #profile{uri = Uri, draft = Draft, vocabularies = Vocabularies}};
 declared(Uri, #{<<"$vocabulary">> := Declared}, Draft) when is_map(Declared) ->
     case names(lists:sort(maps:keys(Declared)), Declared, Draft, []) of
         {ok, Active} ->
@@ -118,7 +134,8 @@ name(Uri, Draft) ->
 %% определяется своей vocabulary; выключенный `format` всё равно доходит до
 %% аннотации неизвестным keyword, поэтому наблюдаемый unit тот же.
 -spec active(binary(), #profile{}) -> boolean().
-active(<<"format">>, #profile{draft = ?DRAFT_2019_09}) ->
+active(<<"format">>, #profile{draft = Draft})
+  when Draft =:= ?DRAFT_2019_09; Draft =:= ?DRAFT_07; Draft =:= ?DRAFT_06 ->
     true;
 %% `definitions` — не vocabulary keyword, а compatibility-имя из корневых
 %% стандартных метасхем обоих dialects; оно резервирует те же locations, что
@@ -138,31 +155,47 @@ active(Keyword, #profile{draft = Draft, vocabularies = Active}) ->
 vocabulary(<<"$id">>, _Draft)               -> core;
 vocabulary(<<"$schema">>, _Draft)           -> core;
 vocabulary(<<"$ref">>, _Draft)              -> core;
-vocabulary(<<"$anchor">>, _Draft)           -> core;
-vocabulary(<<"$defs">>, _Draft)             -> core;
-vocabulary(<<"$comment">>, _Draft)          -> core;
-vocabulary(<<"$vocabulary">>, _Draft)       -> core;
+vocabulary(<<"$anchor">>, ?DRAFT_2020_12)   -> core;
+vocabulary(<<"$anchor">>, ?DRAFT_2019_09)   -> core;
+vocabulary(<<"$defs">>, ?DRAFT_2020_12)     -> core;
+vocabulary(<<"$defs">>, ?DRAFT_2019_09)     -> core;
+vocabulary(<<"$comment">>, ?DRAFT_2020_12)  -> core;
+vocabulary(<<"$comment">>, ?DRAFT_2019_09)  -> core;
+vocabulary(<<"$comment">>, ?DRAFT_07)       -> core;
+vocabulary(<<"$vocabulary">>, ?DRAFT_2020_12) -> core;
+vocabulary(<<"$vocabulary">>, ?DRAFT_2019_09) -> core;
 vocabulary(<<"$dynamicRef">>, ?DRAFT_2020_12)     -> core;
 vocabulary(<<"$dynamicAnchor">>, ?DRAFT_2020_12)  -> core;
 vocabulary(<<"$recursiveRef">>, ?DRAFT_2019_09)   -> core;
 vocabulary(<<"$recursiveAnchor">>, ?DRAFT_2019_09) -> core;
 
 vocabulary(<<"prefixItems">>, ?DRAFT_2020_12)      -> applicator;
-vocabulary(<<"additionalItems">>, ?DRAFT_2019_09)  -> applicator;
+vocabulary(<<"additionalItems">>, Draft)
+  when Draft =:= ?DRAFT_2019_09; Draft =:= ?DRAFT_07; Draft =:= ?DRAFT_06 ->
+    applicator;
 vocabulary(<<"items">>, _Draft)             -> applicator;
 vocabulary(<<"contains">>, _Draft)          -> applicator;
 vocabulary(<<"properties">>, _Draft)        -> applicator;
 vocabulary(<<"patternProperties">>, _Draft) -> applicator;
 vocabulary(<<"additionalProperties">>, _Draft) -> applicator;
 vocabulary(<<"propertyNames">>, _Draft)     -> applicator;
-vocabulary(<<"dependentSchemas">>, _Draft)  -> applicator;
+vocabulary(<<"dependentSchemas">>, ?DRAFT_2020_12) -> applicator;
+vocabulary(<<"dependentSchemas">>, ?DRAFT_2019_09) -> applicator;
 vocabulary(<<"allOf">>, _Draft)             -> applicator;
 vocabulary(<<"anyOf">>, _Draft)             -> applicator;
 vocabulary(<<"oneOf">>, _Draft)             -> applicator;
 vocabulary(<<"not">>, _Draft)               -> applicator;
-vocabulary(<<"if">>, _Draft)                -> applicator;
-vocabulary(<<"then">>, _Draft)              -> applicator;
-vocabulary(<<"else">>, _Draft)              -> applicator;
+vocabulary(<<"if">>, Draft)
+  when Draft =:= ?DRAFT_2020_12; Draft =:= ?DRAFT_2019_09; Draft =:= ?DRAFT_07 ->
+    applicator;
+vocabulary(<<"then">>, Draft)
+  when Draft =:= ?DRAFT_2020_12; Draft =:= ?DRAFT_2019_09; Draft =:= ?DRAFT_07 ->
+    applicator;
+vocabulary(<<"else">>, Draft)
+  when Draft =:= ?DRAFT_2020_12; Draft =:= ?DRAFT_2019_09; Draft =:= ?DRAFT_07 ->
+    applicator;
+vocabulary(<<"dependencies">>, ?DRAFT_07)   -> applicator;
+vocabulary(<<"dependencies">>, ?DRAFT_06)   -> applicator;
 
 %% Отдельная vocabulary для unevaluated keywords появилась только в Draft
 %% 2020-12; в Draft 2019-09 они входят в applicator.
@@ -185,26 +218,41 @@ vocabulary(<<"pattern">>, _Draft)           -> validation;
 vocabulary(<<"maxItems">>, _Draft)          -> validation;
 vocabulary(<<"minItems">>, _Draft)          -> validation;
 vocabulary(<<"uniqueItems">>, _Draft)       -> validation;
-vocabulary(<<"maxContains">>, _Draft)       -> validation;
-vocabulary(<<"minContains">>, _Draft)       -> validation;
+vocabulary(<<"maxContains">>, ?DRAFT_2020_12) -> validation;
+vocabulary(<<"maxContains">>, ?DRAFT_2019_09) -> validation;
+vocabulary(<<"minContains">>, ?DRAFT_2020_12) -> validation;
+vocabulary(<<"minContains">>, ?DRAFT_2019_09) -> validation;
 vocabulary(<<"maxProperties">>, _Draft)     -> validation;
 vocabulary(<<"minProperties">>, _Draft)     -> validation;
 vocabulary(<<"required">>, _Draft)          -> validation;
-vocabulary(<<"dependentRequired">>, _Draft) -> validation;
+vocabulary(<<"dependentRequired">>, ?DRAFT_2020_12) -> validation;
+vocabulary(<<"dependentRequired">>, ?DRAFT_2019_09) -> validation;
 
 vocabulary(<<"title">>, _Draft)             -> meta_data;
 vocabulary(<<"description">>, _Draft)       -> meta_data;
 vocabulary(<<"default">>, _Draft)           -> meta_data;
-vocabulary(<<"deprecated">>, _Draft)        -> meta_data;
-vocabulary(<<"readOnly">>, _Draft)          -> meta_data;
-vocabulary(<<"writeOnly">>, _Draft)         -> meta_data;
+vocabulary(<<"deprecated">>, ?DRAFT_2020_12) -> meta_data;
+vocabulary(<<"deprecated">>, ?DRAFT_2019_09) -> meta_data;
+vocabulary(<<"readOnly">>, Draft)
+  when Draft =:= ?DRAFT_2020_12; Draft =:= ?DRAFT_2019_09; Draft =:= ?DRAFT_07 ->
+    meta_data;
+vocabulary(<<"writeOnly">>, Draft)
+  when Draft =:= ?DRAFT_2020_12; Draft =:= ?DRAFT_2019_09; Draft =:= ?DRAFT_07 ->
+    meta_data;
 vocabulary(<<"examples">>, _Draft)          -> meta_data;
 
 vocabulary(<<"format">>, ?DRAFT_2020_12)    -> format_annotation;
 vocabulary(<<"format">>, ?DRAFT_2019_09)    -> format;
+vocabulary(<<"format">>, ?DRAFT_07)         -> format;
+vocabulary(<<"format">>, ?DRAFT_06)         -> format;
 
-vocabulary(<<"contentEncoding">>, _Draft)   -> content;
-vocabulary(<<"contentMediaType">>, _Draft)  -> content;
-vocabulary(<<"contentSchema">>, _Draft)     -> content;
+vocabulary(<<"contentEncoding">>, Draft)
+  when Draft =:= ?DRAFT_2020_12; Draft =:= ?DRAFT_2019_09; Draft =:= ?DRAFT_07 ->
+    content;
+vocabulary(<<"contentMediaType">>, Draft)
+  when Draft =:= ?DRAFT_2020_12; Draft =:= ?DRAFT_2019_09; Draft =:= ?DRAFT_07 ->
+    content;
+vocabulary(<<"contentSchema">>, ?DRAFT_2020_12) -> content;
+vocabulary(<<"contentSchema">>, ?DRAFT_2019_09) -> content;
 
 vocabulary(_Keyword, _Draft)                -> unknown.

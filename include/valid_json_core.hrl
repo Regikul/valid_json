@@ -62,6 +62,7 @@
     | {'not', addr()}
     | {if_then_else, addr(), addr() | undefined, addr() | undefined}
     | {dependent_schemas, #{binary() => addr()}}
+    | {dependencies, #{binary() => [binary()] | addr()}}
 
     | {properties, #{binary() => addr()} | undefined,
                    [{regex(), addr()}] | undefined,

@@ -35,13 +35,13 @@ official test suite for that dialect, with `optional/cross-draft` excluded. It
 is an Elixir library: usable from Erlang, but it brings the Elixir toolchain and
 a struct-shaped API with it.
 
-**valid_json** implements Draft 2020-12 and Draft 2019-09, including references
-across the two, and reports results in the four output formats of the
-specification. It is built as an OTP application: schemas are compiled once when
-they are registered, artifacts live in ETS under supervision, and the registry
-never touches the network. A schema needed just once does not have to be
-registered at all — `run_schema/3` compiles and evaluates it in the calling
-process.
+**valid_json** implements Draft 6, Draft 7, Draft 2019-09, and Draft 2020-12,
+including references across all four, and reports results in the four output
+formats of the specification. It is built as an OTP application: schemas are
+compiled once when they are registered, artifacts live in ETS under supervision,
+and the registry never touches the network. A schema needed just once does not
+have to be registered at all — `run_schema/3` compiles and evaluates it in the
+calling process.
 
 ## Checklist
 
@@ -49,7 +49,7 @@ process.
 | --- | --- | --- | --- |
 | Language | Erlang/OTP 20+ | Erlang | Elixir ~> 1.14 |
 | License | Apache 2.0 | Apache 2.0 | MIT |
-| Dialects | 2020-12, 2019-09, cross-draft | draft 03, 04, 06 | 2020-12 |
+| Dialects | 2020-12, 2019-09, 7, 6; cross-draft | draft 03, 04, 06 | 2020-12 |
 | Runtime dependencies | none | none | optional `jason`, `decimal`, `idna` |
 | Result of a validation | standard `flag`, `basic`, `detailed`, `verbose` output | own error tuples | own error structs |
 | Annotations | collected | not collected | not collected |
@@ -79,8 +79,8 @@ sharp edges filed down: ECMA-262 regular expressions, decimal `multipleOf`,
 internationalized formats, content assertions, and an entry point into a
 fragment of a larger document such as an OpenAPI file.
 
-Take **valid_json** if you are writing Erlang and need Draft 2020-12 or Draft
-2019-09, if you want the standard output formats rather than a bespoke error
+Take **valid_json** if you are writing Erlang and need Draft 6 through Draft
+2020-12, if you want the standard output formats rather than a bespoke error
 shape, or if your schemas should be a supervised, offline part of a release
 rather than something fetched at validation time. A schema that arrives with the
 request is not shut out — `run_schema/3` takes it — but it pays for compilation

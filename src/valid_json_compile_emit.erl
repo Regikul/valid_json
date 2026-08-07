@@ -41,7 +41,7 @@
                 <<"propertyNames">>,
                 <<"allOf">>, <<"anyOf">>, <<"oneOf">>, <<"not">>,
                 [<<"if">>, <<"then">>, <<"else">>],
-                <<"dependentSchemas">>,
+                <<"dependentSchemas">>, <<"dependencies">>,
                 <<"format">> | ?ANNOTATIONS ++ ?CONTENT]).
 
 %% Constraints, которые обязаны выполняться после всех остальных: они читают
@@ -142,34 +142,55 @@ compile_node(Schema, Position, State) when is_boolean(Schema) ->
     {ok, place(Position, Schema, State)};
 compile_node(Schema, Position, #state{profile = Profile} = State)
   when is_map(Schema) ->
-    case definition_containers(Schema, Position, State) of
-        {ok, WithDefinitions} ->
-            case node_constraints(Schema, Position, WithDefinitions) of
-                {ok, Constraints, Unevaluated, Built} ->
-                    Markers = output_markers(Schema),
-                    Extras = extra_constraints(Schema, Profile),
-                    Node = #node{constraints = Markers ++ Constraints ++ Extras,
-                                 unevaluated = Unevaluated},
-                    {ok, place(Position, Node, Built)};
-                {error, _} = Error ->
-                    Error
-            end;
-        {error, _} = Error ->
-            Error
+    %% Draft 6/7 предписывают обрабатывать объект с `$ref` как содержащий
+    %% только `$ref`: даже malformed definition container рядом с ним не
+    %% становится compiler error.
+    case legacy_ref_only(Schema, Profile) of
+        true ->
+            emit_node(Schema, Position, Profile, State, false);
+        false ->
+            compile_regular_node(Schema, Position, Profile, State)
     end;
 %% На позиции schema стоит значение, которое schema не является. Для slot IR оно
 %% невозможно, а называет его собственная локация.
 compile_node(Other, Position, _State) ->
     {error, schema_error({bad_keyword_value, Other}, Position)}.
 
+-spec compile_regular_node(#{binary() => json()}, position(), profile(), state()) ->
+          {ok, state()} | {error, #schema_error{}}.
+compile_regular_node(Schema, Position, Profile, State) ->
+    case definition_containers(Schema, Position, Profile, State) of
+        {ok, WithDefinitions} ->
+            emit_node(Schema, Position, Profile, WithDefinitions, true);
+        {error, _} = Error ->
+            Error
+    end.
+
+-spec emit_node(#{binary() => json()}, position(), profile(), state(), boolean()) ->
+          {ok, state()} | {error, #schema_error{}}.
+emit_node(Schema, Position, Profile, State, IncludeSiblings) ->
+    case node_constraints(Schema, Position, State) of
+        {ok, Constraints, Unevaluated, Built} ->
+            {Markers, Extras} = case IncludeSiblings of
+                                    true -> {output_markers(Schema, Profile),
+                                             extra_constraints(Schema, Profile)};
+                                    false -> {[], []}
+                                end,
+            Node = #node{constraints = Markers ++ Constraints ++ Extras,
+                         unevaluated = Unevaluated},
+            {ok, place(Position, Node, Built)};
+        {error, _} = Error ->
+            Error
+    end.
+
 %% Definition containers не вычисляют instance, но являются видимыми
 %% успешными keyword results в normative verbose example. Marker ничего не
 %% меняет в validity/coverage и остаётся невидимым в плоском basic.
--spec output_markers(#{binary() => json()}) -> [constraint()].
-output_markers(Schema) ->
+-spec output_markers(#{binary() => json()}, profile()) -> [constraint()].
+output_markers(Schema, Profile) ->
     [{marker, Keyword}
      || Keyword <- [<<"$defs">>, <<"definitions">>],
-        maps:is_key(Keyword, Schema)].
+        maps:is_key(Keyword, Schema), valid_json_vocabulary:active(Keyword, Profile)].
 
 %% Значения unknown keywords не являются schema positions: discovery их уже не
 %% посещал, а emitter лишь сохраняет исходное JSON value как annotation в
@@ -187,7 +208,7 @@ extra_constraints(Schema, #profile{draft = Draft} = Profile) ->
           [constraint()].
 unknown_constraints(Keywords, Schema, ?DRAFT_2020_12) ->
     [{annotation, Keyword, maps:get(Keyword, Schema)} || Keyword <- Keywords];
-unknown_constraints(_Keywords, _Schema, ?DRAFT_2019_09) ->
+unknown_constraints(_Keywords, _Schema, _Dialect) ->
     [].
 
 -spec place(position(), schema_node(), state()) -> state().
@@ -199,22 +220,24 @@ place({Rid, Location}, Node, #state{resources = Resources} = State) ->
 %% `$defs` и совместимый `definitions` — schema containers без собственного
 %% constraint. Entries уже лежат в discovery map и будут выпущены общим
 %% проходом; здесь остаётся только проверка формы самих контейнеров.
--spec definition_containers(#{binary() => json()}, position(), state()) ->
+-spec definition_containers(#{binary() => json()}, position(), profile(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
-definition_containers(Schema, Position, State) ->
-    definition_containers([<<"$defs">>, <<"definitions">>], Schema,
-                          Position, State).
+definition_containers(Schema, Position, Profile, State) ->
+    Keywords = [Keyword || Keyword <- [<<"$defs">>, <<"definitions">>],
+                           valid_json_vocabulary:active(Keyword, Profile)],
+    definition_container_keywords(Keywords, Schema,
+                                  Position, State).
 
--spec definition_containers([binary()], #{binary() => json()}, position(), state()) ->
+-spec definition_container_keywords([binary()], #{binary() => json()}, position(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
-definition_containers([], _Schema, _Position, State) ->
+definition_container_keywords([], _Schema, _Position, State) ->
     {ok, State};
-definition_containers([Keyword | Rest], Schema, Position, State) ->
+definition_container_keywords([Keyword | Rest], Schema, Position, State) ->
     case maps:find(Keyword, Schema) of
         error ->
-            definition_containers(Rest, Schema, Position, State);
+            definition_container_keywords(Rest, Schema, Position, State);
         {ok, Definitions} when is_map(Definitions) ->
-            definition_containers(Rest, Schema, Position, State);
+            definition_container_keywords(Rest, Schema, Position, State);
         {ok, Other} ->
             {error, schema_error({bad_keyword_value, Other},
                                  below(Keyword, Position))}
@@ -298,6 +321,10 @@ unevaluated_tag(<<"unevaluatedProperties">>) -> unevaluated_properties.
 -spec constraints(#{binary() => json()}, position(), state()) ->
           {ok, [constraint()], state()} | {error, #schema_error{}}.
 constraints(Schema, Position, State) ->
+    Groups = case legacy_ref_only(Schema, State#state.profile) of
+                 true  -> [<<"$ref">>];
+                 false -> ?ORDER
+             end,
     Step = fun(_Group, {error, _} = Error) ->
                    Error;
               (Group, {ok, Acc, Built}) ->
@@ -313,7 +340,7 @@ constraints(Schema, Position, State) ->
                            end
                    end
            end,
-    case lists:foldl(Step, {ok, [], State}, ?ORDER) of
+    case lists:foldl(Step, {ok, [], State}, Groups) of
         {ok, Acc, Built}   -> {ok, lists:reverse(Acc), Built};
         {error, _} = Error -> Error
     end.
@@ -333,6 +360,13 @@ keywords(Group)                           -> Group.
 active_keywords(Group, Profile) ->
     [Keyword || Keyword <- keywords(Group),
                 valid_json_vocabulary:active(Keyword, Profile)].
+
+-spec legacy_ref_only(#{binary() => json()}, profile()) -> boolean().
+legacy_ref_only(#{<<"$ref">> := _}, #profile{draft = Draft})
+  when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
+    true;
+legacy_ref_only(_Schema, _Profile) ->
+    false.
 
 %% Разбор идёт по элементу ?ORDER целиком, а не по написанному подмножеству:
 %% элемент — статический литерал, и по нему видно, какой constraint собирается.
@@ -399,6 +433,8 @@ constraint(<<"dependentSchemas">> = Keyword, Schema, Position, State) ->
         {ok, Addrs, Built}  -> {ok, {dependent_schemas, Addrs}, Built};
         {error, _} = Error -> Error
     end;
+constraint(<<"dependencies">> = Keyword, Schema, Position, State) ->
+    dependencies(maps:get(Keyword, Schema), below(Keyword, Position), State);
 constraint(<<"allOf">> = Keyword, Schema, Position, State) ->
     branches(all_of, Keyword, maps:get(Keyword, Schema), Position, State);
 constraint(<<"anyOf">> = Keyword, Schema, Position, State) ->
@@ -434,6 +470,42 @@ constraint(Keyword, Schema, Position, State) ->
     case lists:member(Keyword, ?ANNOTATIONS) of
         true  -> {ok, {annotation, Keyword, maps:get(Keyword, Schema)}, State};
         false -> content(Keyword, Schema, Position, State)
+    end.
+
+%% Draft 6/7 `dependencies` объединяет два разных вида правила под одним
+%% keyword. Список имён остаётся в IR, schema value немедленно канонизируется
+%% так же, как любой in-place applicator.
+-spec dependencies(json(), position(), state()) ->
+          {ok, constraint(), state()} | {error, #schema_error{}}.
+dependencies(Value, Position, State) when is_map(Value) ->
+    dependency_entries(lists:sort(maps:keys(Value)), Value, Position, State, #{});
+dependencies(Value, Position, _State) ->
+    {error, schema_error({bad_keyword_value, Value}, Position)}.
+
+-spec dependency_entries([binary()], #{binary() => json()}, position(), state(),
+                         #{binary() => [binary()] | addr()}) ->
+          {ok, constraint(), state()} | {error, #schema_error{}}.
+dependency_entries([], _Values, _Position, State, Entries) ->
+    {ok, {dependencies, Entries}, State};
+dependency_entries([Name | Rest], Values, Position, State, Entries) ->
+    Value = maps:get(Name, Values),
+    Child = below(Name, Position),
+    case Value of
+        Names when is_list(Names) ->
+            case lists:all(fun is_binary/1, Names) of
+                true -> dependency_entries(Rest, Values, Position, State,
+                                           Entries#{Name => Names});
+                false -> {error, schema_error({bad_keyword_value, Value}, Child)}
+            end;
+        Schema when is_boolean(Schema); is_map(Schema) ->
+            case subschema(Schema, Child, State) of
+                {ok, Addr, Built} ->
+                    dependency_entries(Rest, Values, Position, Built,
+                                       Entries#{Name => Addr});
+                {error, _} = Error -> Error
+            end;
+        _ ->
+            {error, schema_error({bad_keyword_value, Value}, Child)}
     end.
 
 %% Значение content keyword уходит в IR как есть, по тем же причинам, что и у

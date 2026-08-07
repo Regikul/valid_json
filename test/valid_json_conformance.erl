@@ -5,7 +5,9 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -define(DIALECTS, [{"draft2020-12", <<"https://json-schema.org/draft/2020-12/schema">>},
-                   {"draft2019-09", <<"https://json-schema.org/draft/2019-09/schema">>}]).
+                   {"draft2019-09", <<"https://json-schema.org/draft/2019-09/schema">>},
+                   {"draft7", <<"http://json-schema.org/draft-07/schema">>},
+                   {"draft6", <<"http://json-schema.org/draft-06/schema">>}]).
 
 %% Файл подключается, когда компилируются схемы почти всех его групп; единичные
 %% группы, написанные через keywords следующих фаз, перечислены в ?PENDING.
@@ -57,6 +59,36 @@
                         {"draft2019-09",
                          ["additionalItems.json", "recursiveRef.json"]}]).
 
+%% Draft 6 и 7 не имеют vocabulary/unevaluated/dynamic/recursive files нового
+%% профиля. Их обязательные files образуют отдельный список вместо вычитания из
+%% ?FILES: так отсутствие позднего файла не маскируется пустым прогоном.
+-define(HISTORIC_FILES,
+        [{"draft6",
+          ["boolean_schema.json", "type.json", "const.json", "enum.json",
+           "multipleOf.json", "maximum.json", "exclusiveMaximum.json",
+           "minimum.json", "exclusiveMinimum.json", "maxLength.json",
+           "minLength.json", "pattern.json", "maxItems.json", "minItems.json",
+           "maxProperties.json", "minProperties.json", "required.json",
+           "properties.json", "patternProperties.json", "additionalProperties.json",
+           "propertyNames.json", "items.json", "additionalItems.json",
+           "uniqueItems.json", "contains.json", "allOf.json", "anyOf.json",
+           "oneOf.json", "not.json", "default.json", "format.json",
+           "definitions.json", "dependencies.json", "ref.json", "refRemote.json",
+           "infinite-loop-detection.json"]},
+         {"draft7",
+          ["boolean_schema.json", "type.json", "const.json", "enum.json",
+           "multipleOf.json", "maximum.json", "exclusiveMaximum.json",
+           "minimum.json", "exclusiveMinimum.json", "maxLength.json",
+           "minLength.json", "pattern.json", "maxItems.json", "minItems.json",
+           "maxProperties.json", "minProperties.json", "required.json",
+           "properties.json", "patternProperties.json", "additionalProperties.json",
+           "propertyNames.json", "items.json", "additionalItems.json",
+           "uniqueItems.json", "contains.json", "allOf.json", "anyOf.json",
+           "oneOf.json", "not.json", "if-then-else.json", "default.json",
+           "format.json", "definitions.json", "dependencies.json", "ref.json",
+           "refRemote.json", "infinite-loop-detection.json",
+           "optional/cross-draft.json"]}]).
+
 %% Группы подключённых files, которые ждут keywords следующих фаз: их схемы пока
 %% не компилируются вовсе. Фаза, снимающая группу, вычёркивает свою строку
 %% вместе с работой — так же, как отмечает выполненный пункт роадмапа.
@@ -87,14 +119,14 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES,
 %% ?EXCLUDED и ?OUT_OF_PROFILE, и менять его иначе нельзя.
--define(CENSUS, {792, 3547}).
+-define(CENSUS, {1282, 5315}).
 
 %% Сьют адресует свои remote documents относительно этого base, повторяя в URI
 %% раскладку директории `remotes`. Число документов закреплено по той же
 %% причине, что и перепись: потерянная директория не должна давать зелёный
 %% прогон, в котором remote refs просто перестали проверяться.
 -define(REMOTE_BASE, <<"http://localhost:1234/">>).
--define(REMOTES, 41).
+-define(REMOTES, 58).
 
 %% Встроенные метасхемы поднимает дерево приложения, и без него компиляция
 %% схемы не идёт.
@@ -129,7 +161,10 @@ remote_uri(Path) ->
 
 %% Общий список плюс files, подключённые только к этому dialect.
 files(Dir) ->
-    ?FILES ++ proplists:get_value(Dir, ?DIALECT_FILES, []).
+    case proplists:get_value(Dir, ?HISTORIC_FILES) of
+        undefined -> ?FILES ++ proplists:get_value(Dir, ?DIALECT_FILES, []);
+        Files     -> Files
+    end.
 
 %% Перепись идёт по уже построенным тестам, а не по второму обходу сьюта:
 %% считается ровно то, что будет запущено.

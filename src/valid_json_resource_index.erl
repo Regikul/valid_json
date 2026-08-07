@@ -73,7 +73,7 @@ discover(Schema, Retrieval0, #profile{} = Profile, Resolve)
        is_function(Resolve, 1) ->
     case normalize_retrieval(Retrieval0) of
         {ok, Retrieval} ->
-            case root_id(Schema, Retrieval) of
+            case root_id(Schema, Retrieval, Profile) of
                 {ok, Root} ->
                     discover_root(Schema, Retrieval, Root, Profile, Resolve);
                 {error, Reason} ->
@@ -329,11 +329,18 @@ normalize_retrieval(Retrieval) ->
     end.
 
 %% Корень без `$id` получает retrieval URI; только inline schema без `$id`
-%% остаётся anonymous. Fragment в `$id` запрещён тем же правилом, что в store.
--spec root_id(json(), rid()) -> {ok, rid()} | {error, reason()}.
-root_id(#{<<"$id">> := Id}, Retrieval) ->
-    resolve_id(Id, Retrieval);
-root_id(_Schema, Retrieval) ->
+%% остаётся anonymous. Fragment-only `$id` Draft 6/7 не меняет корень, а
+%% индексируется как named target его root node.
+-spec root_id(json(), rid(), profile()) -> {ok, rid()} | {error, reason()}.
+root_id(#{<<"$id">> := Id}, Retrieval, Profile) ->
+    case resolve_id(Id, Retrieval, Profile) of
+        {resource, Rid} -> {ok, Rid};
+        %% A root document keeps its retrieval identity. The fragment names
+        %% its root node and is added to the anchor index during place/5.
+        {anchor, _Name} -> {ok, Retrieval};
+        {error, _} = Error -> Error
+    end;
+root_id(_Schema, Retrieval, _Profile) ->
     {ok, Retrieval}.
 
 -spec root_declaration(json(), rid(), rid()) -> addr().
@@ -414,11 +421,23 @@ walk(Other, Rid, Location, Contexts, _RootOrChild, Profile, State) ->
           {error, #schema_error{}}.
 enter_resource(_Schema, Rid, Location, Contexts, root, Profile, State) ->
     {ok, Rid, Location, Contexts, Profile, State};
+%% В Draft 6/7 `$ref` поглощает все sibling properties. В частности, `$id`
+%% здесь не меняет base, а `$schema` не становится misplaced keyword: оба
+%% свойства должны быть полностью проигнорированы вместе с schema positions.
+enter_resource(#{<<"$ref">> := _}, Rid, Location, Contexts, child,
+               #profile{draft = Draft} = Profile, State)
+  when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
+    {ok, Rid, Location, Contexts, Profile, State};
 enter_resource(#{<<"$id">> := Id} = Schema, Rid, Location, Contexts, child,
                Profile, State) ->
     IdLocation = keyword_addr(Rid, Location, <<"$id">>),
-    case resolve_id(Id, Rid) of
-        {ok, NewRid} ->
+    case resolve_id(Id, Rid, Profile) of
+        {resource, NewRid} ->
+            case legacy_subschema_dialect(Schema, Profile) of
+                true ->
+                    {error, schema_error({misplaced_keyword, <<"$schema">>},
+                                         keyword_addr(Rid, Location, <<"$schema">>))};
+                false ->
             case resource_profile(Schema, NewRid, Profile, State) of
                 {ok, NewProfile, Resolved} ->
                     case reserve_resource(NewRid, IdLocation, NewProfile,
@@ -431,6 +450,18 @@ enter_resource(#{<<"$id">> := Id} = Schema, Rid, Location, Contexts, child,
                     end;
                 {error, _} = Error ->
                     Error
+            end
+            end;
+        {anchor, _Name} ->
+            %% Legacy fragment-only `$id` is indexed by index_anchors/4 after
+            %% this node has acquired its physical address. It is still a
+            %% subschema, so `$schema` remains forbidden here.
+            case legacy_subschema_dialect(Schema, Profile) of
+                true ->
+                    {error, schema_error({misplaced_keyword, <<"$schema">>},
+                                         keyword_addr(Rid, Location, <<"$schema">>))};
+                false ->
+                    {ok, Rid, Location, Contexts, Profile, State}
             end;
         {error, Reason} ->
             {error, schema_error(Reason, IdLocation)}
@@ -468,20 +499,34 @@ resource_profile(#{<<"$schema">> := Other}, Rid, _Outer, _State) ->
 resource_profile(_Schema, _Rid, Outer, State) ->
     {ok, Outer, State}.
 
+-spec legacy_subschema_dialect(json(), profile()) -> boolean().
+legacy_subschema_dialect(#{<<"$schema">> := _}, #profile{draft = Draft})
+  when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
+    true;
+legacy_subschema_dialect(_Schema, _Profile) ->
+    false.
+
 -spec add_metaschema(uri() | undefined, state()) -> state().
 add_metaschema(undefined, State) ->
     State;
 add_metaschema(Uri, #state{metaschemas = Metaschemas} = State) ->
     State#state{metaschemas = ordsets:add_element(Uri, Metaschemas)}.
 
--spec resolve_id(json(), rid()) -> {ok, rid()} | {error, reason()}.
-resolve_id(Id, Base) when is_binary(Id) ->
+-spec resolve_id(json(), rid(), profile()) ->
+          {resource, rid()} | {anchor, binary()} | {error, reason()}.
+resolve_id(Id, Base, #profile{draft = Draft}) when is_binary(Id) ->
     case valid_json_uri:resolve(Id, Base) of
-        {ok, Rid, root} when Rid =/= anonymous -> {ok, Rid};
-        {ok, _Rid, _Fragment}                 -> {error, {bad_keyword_value, Id}};
-        {error, Reason}                       -> {error, Reason}
+        {ok, Rid, root} when Rid =/= anonymous -> {resource, Rid};
+        {ok, _Rid, {anchor, Name}}
+          when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
+            case fragment_only_id(Id) andalso valid_anchor(Name, Draft) of
+                true  -> {anchor, Name};
+                false -> {error, {bad_keyword_value, Id}}
+            end;
+        {ok, _Rid, _Fragment} -> {error, {bad_keyword_value, Id}};
+        {error, Reason}       -> {error, Reason}
     end;
-resolve_id(Id, _Base) ->
+resolve_id(Id, _Base, _Profile) ->
     {error, {bad_keyword_value, Id}}.
 
 -spec reserve_resource(uri(), addr(), profile(), state()) ->
@@ -525,8 +570,10 @@ place(Schema, {Rid, Pointer} = Addr, Contexts, Profile,
 %% is deterministic, so the last discovered declaration wins internally.
 -spec index_anchors(#{binary() => json()}, addr(), profile(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
-index_anchors(Schema, Addr, Profile, State) ->
-    case anchor_name(<<"$anchor">>, Schema, Addr, Profile) of
+index_anchors(Schema, Addr, Profile, State0) ->
+    case index_legacy_id_anchor(Schema, Addr, Profile, State0) of
+        {ok, State} ->
+    case active_anchor(Schema, Addr, Profile) of
         {ok, none} ->
             index_special_anchors(Schema, Addr, Profile, State);
         {ok, Name} ->
@@ -534,7 +581,51 @@ index_anchors(Schema, Addr, Profile, State) ->
                                   put_anchor(Name, Addr, State));
         {error, _} = Error ->
             Error
+    end;
+        {error, _} = Error ->
+            Error
     end.
+
+-spec active_anchor(#{binary() => json()}, addr(), profile()) ->
+          {ok, binary() | none} | {error, #schema_error{}}.
+active_anchor(Schema, Addr, Profile) ->
+    case valid_json_vocabulary:active(<<"$anchor">>, Profile) of
+        true  -> anchor_name(<<"$anchor">>, Schema, Addr, Profile);
+        false -> {ok, none}
+    end.
+
+%% Draft 6/7 give a fragment-only `$id` the role that `$anchor` acquired only
+%% later. It names the node within the current resource and never changes its
+%% base URI.
+-spec index_legacy_id_anchor(#{binary() => json()}, addr(), profile(), state()) ->
+          {ok, state()} | {error, #schema_error{}}.
+index_legacy_id_anchor(#{<<"$id">> := Id}, Addr,
+                       #profile{draft = Draft}, State)
+  when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
+    case valid_json_uri:resolve(Id, element(1, Addr)) of
+        {ok, _Rid, {anchor, Name}} ->
+            case fragment_only_id(Id) andalso valid_anchor(Name, Draft) of
+                true  -> {ok, put_anchor(Name, Addr, State)};
+                false -> {error, schema_error({bad_keyword_value, Id},
+                                               keyword_addr(element(1, Addr),
+                                                            valid_json_location:segments(
+                                                              element(2, Addr)),
+                                                            <<"$id">>))}
+            end;
+        {ok, _Rid, _Target} ->
+            {ok, State};
+        {error, Reason} ->
+            {error, schema_error(Reason,
+                                 keyword_addr(element(1, Addr),
+                                              valid_json_location:segments(element(2, Addr)),
+                                              <<"$id">>))}
+    end;
+index_legacy_id_anchor(_Schema, _Addr, _Profile, State) ->
+    {ok, State}.
+
+-spec fragment_only_id(binary()) -> boolean().
+fragment_only_id(<<"#", _/binary>>) -> true;
+fragment_only_id(_Id)                 -> false.
 
 -spec index_special_anchors(#{binary() => json()}, addr(), profile(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
@@ -625,6 +716,8 @@ put_dynamic_anchor(Name, {Rid, Pointer},
 valid_anchor(Name, Dialect) when is_binary(Name) ->
     Pattern = case Dialect of
                   ?DRAFT_2019_09 -> <<"\\A[A-Za-z][-A-Za-z0-9.:_]*\\z">>;
+                  ?DRAFT_07      -> <<"\\A[A-Za-z][-A-Za-z0-9.:_]*\\z">>;
+                  ?DRAFT_06      -> <<"\\A[A-Za-z][-A-Za-z0-9.:_]*\\z">>;
                   _              -> <<"\\A[A-Za-z_][-A-Za-z0-9._]*\\z">>
               end,
     re:run(Name, Pattern, [{capture, none}]) =:= match;
@@ -781,12 +874,15 @@ children(Schema, #profile{draft = Draft} = Profile) ->
     Active = maps:filter(fun(Keyword, _Value) ->
                                  valid_json_vocabulary:active(Keyword, Profile)
                          end, Schema),
-    lists:append([
+    case legacy_ref_only(Schema, Draft) of
+        true -> [];
+        false -> lists:append([
         named_children(<<"$defs">>, Active),
         named_children(<<"definitions">>, Active),
         named_children(<<"properties">>, Active),
         named_children(<<"patternProperties">>, Active),
         named_children(<<"dependentSchemas">>, Active),
+        dependencies_children(Active),
         ordered_children(<<"allOf">>, Active),
         ordered_children(<<"anyOf">>, Active),
         ordered_children(<<"oneOf">>, Active),
@@ -797,7 +893,28 @@ children(Schema, #profile{draft = Draft} = Profile) ->
                          <<"else">>, <<"unevaluatedProperties">>,
                          <<"unevaluatedItems">>], Active),
         additional_items_children(Active, Draft)
-    ]).
+    ])
+    end.
+
+%% Только schema-form dependency образует schema position. Массив имён —
+%% assertion над тем же object, обходить его элементы как схемы нельзя.
+-spec dependencies_children(#{binary() => json()}) -> [child()].
+dependencies_children(Schema) ->
+    case maps:get(<<"dependencies">>, Schema, undefined) of
+        Values when is_map(Values) ->
+            [{[<<"dependencies">>, Name], Value}
+             || {Name, Value} <- lists:sort(maps:to_list(Values)),
+                is_boolean(Value) orelse is_map(Value)];
+        _Other ->
+            []
+    end.
+
+-spec legacy_ref_only(#{binary() => json()}, dialect()) -> boolean().
+legacy_ref_only(#{<<"$ref">> := _}, Draft)
+  when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
+    true;
+legacy_ref_only(_Schema, _Draft) ->
+    false.
 
 -spec named_children(binary(), #{binary() => json()}) -> [child()].
 named_children(Keyword, Schema) ->

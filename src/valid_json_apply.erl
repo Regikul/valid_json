@@ -51,7 +51,13 @@ check({dependent_schemas, Schemas}, Instance, Context) when is_map(Instance) ->
 %% Keyword применяется только к объекту: другое значение даёт успешный unit без
 %% error и annotation, а не отказ.
 check({dependent_schemas, _Schemas}, _Instance, Context) ->
-    result(<<"dependentSchemas">>, true, none, valid_json_evaluated:neutral(), [], Context).
+    result(<<"dependentSchemas">>, true, none, valid_json_evaluated:neutral(), [], Context);
+check({dependencies, Dependencies}, Instance, Context) when is_map(Instance) ->
+    Present = [{Name, maps:get(Name, Dependencies)}
+               || Name <- lists:sort(maps:keys(Dependencies)), maps:is_key(Name, Instance)],
+    legacy_dependencies(Present, Instance, Context);
+check({dependencies, _Dependencies}, _Instance, Context) ->
+    result(<<"dependencies">>, true, none, valid_json_evaluated:neutral(), [], Context).
 
 %% Зависимости конъюнктивны, как ветви `allOf`, и покрытие каждой идёт наверх:
 %% подсхема применяется к тому же instance. Провалившаяся своё покрытие очистила
@@ -81,6 +87,49 @@ dependent([{Name, Addr} | Rest], Instance, Context, Result) ->
         true  -> Merged;
         false -> dependent(Rest, Instance, Context, Merged)
     end.
+
+%% Legacy `dependencies` is one keyword with two value forms. The property
+%% form has no child schema and therefore no nested unit; schema dependencies
+%% retain their branch tree and can contribute annotations to the caller.
+-spec legacy_dependencies([{binary(), [binary()] | addr()}], #{binary() => json()},
+                         #eval_context{}) -> #eval_result{}.
+legacy_dependencies(Present, Instance, Context) ->
+    case legacy_dependencies(Present, Instance, Context,
+                             #eval_result{valid = true,
+                                          evaluated = valid_json_evaluated:neutral(),
+                                          units = []}) of
+        #eval_result{valid = undefined} = Error ->
+            Error;
+        #eval_result{valid = Valid, evaluated = Evaluated, units = Units} ->
+            result(<<"dependencies">>, Valid,
+                   <<"object does not satisfy dependencies of a present property">>,
+                   Evaluated, Units, Context)
+    end.
+
+-spec legacy_dependencies([{binary(), [binary()] | addr()}], #{binary() => json()},
+                         #eval_context{}, #eval_result{}) -> #eval_result{}.
+legacy_dependencies([], _Instance, _Context, Result) ->
+    Result;
+legacy_dependencies([{_Name, Names} | Rest], Instance, Context, Result)
+  when is_list(Names) ->
+    Valid = lists:all(fun(Name) -> maps:is_key(Name, Instance) end, Names),
+    Property = #eval_result{valid = Valid,
+                            evaluated = valid_json_evaluated:neutral(), units = []},
+    next_legacy_dependencies(Rest, Instance, Context,
+                             valid_json_eval:conjoin(Result, Property));
+legacy_dependencies([{Name, Addr} | Rest], Instance, Context, Result) ->
+    Branch = branch(Addr, <<"dependencies">>, [Name], Instance, Context),
+    next_legacy_dependencies(Rest, Instance, Context,
+                             valid_json_eval:conjoin(Result, Branch)).
+
+-spec next_legacy_dependencies([{binary(), [binary()] | addr()}], #{binary() => json()},
+                               #eval_context{}, #eval_result{}) -> #eval_result{}.
+next_legacy_dependencies(_Rest, _Instance,
+                         #eval_context{format = flag},
+                         #eval_result{valid = false} = Result) ->
+    Result;
+next_legacy_dependencies(Rest, Instance, Context, Result) ->
+    legacy_dependencies(Rest, Instance, Context, Result).
 
 %% Вердикта `if` не меняет: он выбирает ветвь (core.txt:2388). Собственный unit
 %% он выпускает всегда и всегда успешный — ошибки у этого keyword не бывает, а

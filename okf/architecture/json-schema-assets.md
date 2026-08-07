@@ -9,10 +9,14 @@ tags: [json-schema, architecture, runtime-assets, test-fixtures]
 
 Директория [`priv/json_schema/`](../../priv/json_schema/) содержит ресурсы, которые поставляются вместе с OTP-приложением и доступны production-коду:
 
-* `draft-2020-12/schema.json` и `draft-2019-09/schema.json` — корневые meta-schemas поддерживаемых диалектов;
+* `draft-06/schema.json`, `draft-07/schema.json`, `draft-2019-09/schema.json` и `draft-2020-12/schema.json` — корневые meta-schemas поддерживаемых диалектов;
 * `draft-*/meta/*.json` — vocabulary meta-schemas;
 * `draft-*/output/schema.json` — схемы стандартных форматов результата валидации;
-* `UPSTREAM.json` — машиночитаемая привязка ресурсов к коммитам исходного репозитория.
+* `UPSTREAM.json` — машиночитаемая привязка ресурсов к коммитам исходного репозитория либо, для исторических Draft 6/7, к каноническому release URI.
+
+Draft 6 и Draft 7 не используют vocabulary meta-schemas и не задают схемы
+стандартных output formats, поэтому в их директориях поставляется только
+корневая meta-schema.
 
 Production-код загружает JSON Schema resources из `priv/json_schema/`. Идентичность schema resource определяется её `$id`; путь внутри `priv/` определяет локальное хранение.
 

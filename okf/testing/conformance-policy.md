@@ -1,18 +1,23 @@
 ---
 type: Test Policy
 title: JSON Schema conformance policy
-description: Правила проверки Draft 2020-12 и Draft 2019-09, cross-draft ссылок, профиля format и стандартных output formats.
+description: Правила проверки Draft 6, Draft 7, Draft 2019-09 и Draft 2020-12, cross-draft ссылок, профиля format и стандартных output formats.
 tags: [json-schema, testing, conformance, output]
 ---
 
 # Conformance-профиль
 
-Проект подтверждает поведение для двух JSON Schema dialects:
+Проект подтверждает поведение для четырёх JSON Schema dialects:
 
+* `http://json-schema.org/draft-06/schema`;
+* `http://json-schema.org/draft-07/schema`;
 * `https://json-schema.org/draft/2020-12/schema`;
 * `https://json-schema.org/draft/2019-09/schema`.
 
-Профиль включает validation, cross-draft ссылки между этими диалектами и форматы результата `flag`, `basic`, `detailed`, `verbose`.
+Профиль включает validation и cross-draft ссылки между всеми этими dialects.
+Форматы результата `flag`, `basic`, `detailed`, `verbose` остаются общим
+контрактом библиотеки; официальные output fixtures существуют только для Draft
+2019-09 и Draft 2020-12.
 
 Test case входит в профиль, если исходный dialect и все dialects, достигнутые через schema references, принадлежат этому набору. При отсутствии `$schema` исходный dialect задаётся директорией suite, из которой загружен test case.
 
@@ -21,17 +26,23 @@ Test case входит в профиль, если исходный dialect и �
 Test runner выполняет сценарии из:
 
 * `tests/draft2020-12/`;
-* `tests/draft2019-09/`.
+* `tests/draft2019-09/`;
+* `tests/draft7/`;
+* `tests/draft6/`.
 
-Файлы непосредственно в директории dialect составляют основной conformance-набор. Дополнительные capability profiles используют соответствующие сценарии из `optional/`. Cross-draft профиль выполняет сценарии, связывающие Draft 2020-12 и Draft 2019-09.
+Файлы непосредственно в директории dialect составляют основной
+conformance-набор. Дополнительные capability profiles используют
+соответствующие сценарии из `optional/`. Cross-draft профиль выполняет
+сценарии, чьи dialects остаются внутри набора из четырёх dialects.
 
-Legacy `definitions` поддерживается как совместимое имя `$defs` в обоих
-стандартных dialects. Capability profile
-`optional/dependencies-compatibility.json` в основной профиль не входит:
-поддержка старого `dependencies` будет объявлена отдельно, если для обеих его
-форм будет реализован единый наблюдаемый keyword unit. Recursive keywords
-исполняются только в Draft 2019-09; в Draft 2020-12 они остаются unknown
-annotations и не подменяются dynamic keywords.
+`definitions` является именем schema container во всех поддерживаемых
+dialects; `$defs` начинается с Draft 2019-09. В Draft 6/7 обе формы
+`dependencies` входят в основной профиль, fragment-only `$id` объявляет
+plain-name target текущего resource, а `$ref` игнорирует все siblings. В этих
+dialects нет `$vocabulary`, поэтому custom meta-schema наследует полный
+фиксированный набор keywords своего draft. Recursive keywords исполняются
+только в Draft 2019-09; в Draft 2020-12 они остаются unknown annotations и не
+подменяются dynamic keywords.
 
 Для каждого test case runner:
 
@@ -58,9 +69,14 @@ annotations и не подменяются dynamic keywords.
 
 Перед выполнением validation tests runner регистрирует выбранные файлы из `remotes/`. Retrieval URI строится как `http://localhost:1234/` плюс относительный путь файла внутри `remotes/`.
 
-Remote schema обрабатывается согласно собственному `$schema`. Это обеспечивает cross-draft переходы внутри заявленного conformance-профиля.
+Remote schema обрабатывается согласно собственному `$schema`. Это обеспечивает
+cross-draft переходы внутри заявленного conformance-профиля, включая переходы
+к Draft 6 и Draft 7.
 
-Собственного `$schema` нет у шести файлов снапшота — `nested-absolute-ref-to-string.json`, `urn-ref-string.json` и `different-id-ref-string.json` в обоих диалектах. Для них действует то же правило, что и для test case без `$schema`: dialect задаётся директорией. Каждый из шести адресуется только из `refRemote.json` своей директории, поэтому передачи dialect'а вместе с точкой входа компиляции достаточно и различать источник умолчания для точки входа и для втянутого по ссылке документа не требуется.
+Для remote document без собственного `$schema` действует то же правило, что и
+для test case без `$schema`: dialect задаётся директорией. Это сохраняет
+корректный контекст legacy resources и не смешивает dialect точки входа с
+dialect соседней директории.
 
 # Output tests
 
@@ -95,7 +111,8 @@ Test runner выполняет сценарии из:
 Conformance для dialect подтверждается, когда без провалов выполняются:
 
 * основной validation-набор dialect за вычетом перечисленных расхождений;
-* output tests dialect, закрепляющие формат `basic`;
+* output tests dialect, закрепляющие формат `basic`, если для него определены
+  официальные output fixtures (Draft 2019-09 и Draft 2020-12);
 * собственные golden tests для `flag`, `detailed` и `verbose`, которые официальный suite не покрывает;
 * cross-draft tests, чья цепочка dialects целиком входит в заявленный профиль.
 

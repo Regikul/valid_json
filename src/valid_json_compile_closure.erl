@@ -34,6 +34,10 @@ supported_dialect(Dialect) ->
             {ok, Normalized};
         {ok, ?DRAFT_2019_09 = Normalized, root} ->
             {ok, Normalized};
+        {ok, ?DRAFT_07 = Normalized, root} ->
+            {ok, Normalized};
+        {ok, ?DRAFT_06 = Normalized, root} ->
+            {ok, Normalized};
         _ ->
             {error, #schema_error{reason = {unknown_dialect, Dialect},
                                   location = undefined}}
@@ -160,6 +164,10 @@ dialect_profile(Dialect, Store, Default, Seen) ->
         {ok, ?DRAFT_2020_12 = Canonical, root} ->
             {ok, valid_json_vocabulary:canonical(Canonical), undefined};
         {ok, ?DRAFT_2019_09 = Canonical, root} ->
+            {ok, valid_json_vocabulary:canonical(Canonical), undefined};
+        {ok, ?DRAFT_07 = Canonical, root} ->
+            {ok, valid_json_vocabulary:canonical(Canonical), undefined};
+        {ok, ?DRAFT_06 = Canonical, root} ->
             {ok, valid_json_vocabulary:canonical(Canonical), undefined};
         {ok, Uri, root} when Uri =/= anonymous ->
             metaschema_profile(Uri, Store, Default, Seen);
