@@ -1169,6 +1169,36 @@ modern_rejects_plain_name_id_test() ->
        compile(#{<<"$defs">> =>
                      #{<<"A">> => #{<<"$id">> => <<"#foo">>}}})).
 
+%% Draft 6/7: `$ref`-объект — это ссылка, siblings игнорируются. Валидация
+%% идёт только по target, а в IR корня остаётся один ref constraint.
+classic_ref_ignores_siblings_test() ->
+    Store = valid_json_store:temporary(),
+    Schema = #{<<"$ref">> => <<"#/definitions/target">>,
+               <<"type">> => <<"string">>,
+               <<"definitions">> =>
+                   #{<<"target">> => #{<<"type">> => <<"integer">>}}},
+    {ok, Compiled} =
+        trusted_compile(Store, Schema, [{default_dialect, ?DRAFT_06}]),
+    #{anonymous := #resource{nodes = Nodes}} = maps:get(resources, Compiled),
+    ?assertEqual([{ref, {anonymous, <<"/definitions/target">>}}],
+                 constraints(<<>>, Nodes)),
+    ?assertEqual({ok, #{<<"valid">> => true}},
+                 valid_json_core:validate(Compiled, 3, [{output, flag}])),
+    ?assertEqual({ok, #{<<"valid">> => false}},
+                 valid_json_core:validate(Compiled, <<"x">>,
+                                          [{output, flag}])).
+
+%% Modern dialects сохраняют applicator-семантику `$ref`: siblings компилируются.
+modern_ref_keeps_siblings_test() ->
+    Schema = #{<<"$ref">> => <<"#/definitions/target">>,
+               <<"type">> => <<"string">>,
+               <<"definitions">> =>
+                   #{<<"target">> => #{<<"type">> => <<"integer">>}}},
+    ?assertEqual([{marker, <<"definitions">>},
+                  {ref, {anonymous, <<"/definitions/target">>}},
+                  {type, [string]}],
+                 root_constraints(Schema)).
+
 %% Подсхема с `$id` начинает новый resource: адрес в parent constraint сразу
 %% канонический, а указатели внутри child считаются от его собственного корня.
 embedded_resource_test() ->

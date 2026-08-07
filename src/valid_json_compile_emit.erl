@@ -142,25 +142,53 @@ compile_node(Schema, Position, State) when is_boolean(Schema) ->
     {ok, place(Position, Schema, State)};
 compile_node(Schema, Position, #state{profile = Profile} = State)
   when is_map(Schema) ->
-    case definition_containers(Schema, Position, State) of
-        {ok, WithDefinitions} ->
-            case node_constraints(Schema, Position, WithDefinitions) of
-                {ok, Constraints, Unevaluated, Built} ->
-                    Markers = output_markers(Schema),
-                    Extras = extra_constraints(Schema, Profile),
-                    Node = #node{constraints = Markers ++ Constraints ++ Extras,
-                                 unevaluated = Unevaluated},
-                    {ok, place(Position, Node, Built)};
+    case ref_only(Schema, Profile) of
+        true ->
+            compile_ref_node(Schema, Position, State);
+        false ->
+            case definition_containers(Schema, Position, State) of
+                {ok, WithDefinitions} ->
+                    case node_constraints(Schema, Position, WithDefinitions) of
+                        {ok, Constraints, Unevaluated, Built} ->
+                            Markers = output_markers(Schema),
+                            Extras = extra_constraints(Schema, Profile),
+                            Node = #node{constraints =
+                                             Markers ++ Constraints ++ Extras,
+                                         unevaluated = Unevaluated},
+                            {ok, place(Position, Node, Built)};
+                        {error, _} = Error ->
+                            Error
+                    end;
                 {error, _} = Error ->
                     Error
-            end;
-        {error, _} = Error ->
-            Error
+            end
     end;
 %% На позиции schema стоит значение, которое schema не является. Для slot IR оно
 %% невозможно, а называет его собственная локация.
 compile_node(Other, Position, _State) ->
     {error, schema_error({bad_keyword_value, Other}, Position)}.
+
+%% Draft 6/7: объект с `$ref` — это ссылка, и все прочие свойства объекта
+%% игнорируются (draft-07 core, 8.3; то же правило в Draft 6). Discovery уже
+%% посетил `$id`/`$schema` и structural children; emitter выпускает только
+%% reference semantics, чтобы общий evaluator остался без dialect-ветвей.
+-spec ref_only(#{binary() => json()}, profile()) -> boolean().
+ref_only(Schema, #profile{draft = Draft})
+  when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
+    maps:is_key(<<"$ref">>, Schema);
+ref_only(_Schema, _Profile) ->
+    false.
+
+-spec compile_ref_node(#{binary() => json()}, position(), state()) ->
+          {ok, state()} | {error, #schema_error{}}.
+compile_ref_node(Schema, Position, State) ->
+    case reference(<<"$ref">>, Schema, Position, State) of
+        {ok, _Target, Addr} ->
+            Node = #node{constraints = [{ref, Addr}], unevaluated = []},
+            {ok, place(Position, Node, State)};
+        {error, _} = Error ->
+            Error
+    end.
 
 %% Definition containers не вычисляют instance, но являются видимыми
 %% успешными keyword results в normative verbose example. Marker ничего не
