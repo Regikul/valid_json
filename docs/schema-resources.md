@@ -44,6 +44,15 @@ set of documents that reference one another must be registered in one call:
 Once a document is registered, validation is a lookup by canonical name; the
 compiled artifact is self-contained and needs no registry access.
 
+The dialect is a property of each schema resource, not of the whole document:
+an embedded resource chooses its own dialect with `$schema`, and a `$ref`
+target is compiled according to the dialect of the target resource while the
+`$ref` object itself keeps the semantics of its source dialect. This holds
+across all four supported dialects — Draft 2020-12, Draft 2019-09, Draft 7 and
+Draft 6 — including classic plain-name `$id` fragments (`"$id": "#name"`) in
+Draft 6/7 and modern `$anchor` targets, so references may cross dialects in any
+direction and over multi-hop chains.
+
 ## Registry policy: offline, no network
 
 The registry is deliberately offline. Documents reachable through `$ref` must

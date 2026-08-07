@@ -3,10 +3,11 @@
 Modern JSON Schema validation for Erlang/OTP.
 
 `valid_json` is an Erlang/OTP library that validates JSON instances against
-JSON Schema Draft 2020-12 and Draft 2019-09, including references across the
-two dialects. Schemas are compiled once when they are registered and are then
-validated against in one of the four standard output formats. The registry is
-offline — no network requests are made during validation.
+JSON Schema Draft 2020-12, Draft 2019-09, Draft 7 and Draft 6, including
+references across all four dialects. Schemas are compiled once when they are
+registered and are then validated against in one of the four standard output
+formats. The registry is offline — no network requests are made during
+validation.
 
 [![CI](https://github.com/Regikul/valid_json/actions/workflows/ci.yml/badge.svg)](https://github.com/Regikul/valid_json/actions/workflows/ci.yml)
 
@@ -18,16 +19,18 @@ not followed the specification past draft 06. [jsonschex](https://github.com/xin
 implements Draft 2020-12 in full, but it is an Elixir library: using it from
 Erlang brings the Elixir toolchain and a struct-shaped API into your build.
 
-If you are writing Erlang and need Draft 2019-09 or Draft 2020-12, `valid_json`
-provides modern JSON Schema support without requiring an Elixir-based
-validation stack.
+If you are writing Erlang and need any of Draft 2020-12, Draft 2019-09,
+Draft 7 or Draft 6, `valid_json` provides support for all four without
+requiring an Elixir-based validation stack.
 
 | Feature | valid_json | jesse | jsonschex |
 | --- | --- | --- | --- |
 | Erlang-native | yes | yes | no (Elixir) |
 | Draft 2020-12 | yes | no (drafts 03, 04, 06) | yes |
 | Draft 2019-09 | yes | no | no |
-| Cross-draft references | yes | no | no |
+| Draft 7 | yes | no | no |
+| Draft 6 | yes | yes | no |
+| Cross-draft references (all four) | yes | no | no |
 | `$dynamicRef` / `$recursiveRef` | yes | no | `$dynamicRef` only |
 | `unevaluatedProperties` / `unevaluatedItems` | yes | no | yes |
 | Standard output formats | `flag`, `basic`, `detailed`, `verbose` | own error tuples | own error structs |
@@ -104,15 +107,21 @@ of compiling it on every call.
 
 - JSON Schema Draft 2020-12
 - JSON Schema Draft 2019-09
-- Cross-draft references between the two
+- JSON Schema Draft 7
+- JSON Schema Draft 6
+- Cross-draft references between all four dialects
 
 ### References and schema resources
 
-- `$id`, `$anchor`, `$defs`, `$ref`
+- `$id`, `$anchor`, `$defs`, `$ref`, plus classic `$id` plain-name
+  identifiers (`"$id": "#name"`) in Draft 6/7 and `definitions` in all four
+  dialects
 - `$dynamicRef` / `$dynamicAnchor` (Draft 2020-12)
 - `$recursiveRef` / `$recursiveAnchor` (Draft 2019-09)
 - `$vocabulary`, built-in meta-schemas, and user-provided meta-schemas from the
   store
+- Draft 6/7 `$ref` objects ignore sibling keywords, as their specifications
+  require
 - References are resolved eagerly at compile time, so a reference closure is a
   finite, comparable value — cyclic schemas are not a problem
 
@@ -120,14 +129,16 @@ of compiling it on every call.
 
 - All standard assertion keywords: `type`, `enum`, `const`, numeric bounds,
   `pattern`, length and collection-size keywords, `uniqueItems`, `required`,
-  `dependentRequired`
+  `dependentRequired`, and the legacy `dependencies` keyword of Draft 6/7 in
+  both its property and schema forms
 - Applicators: `allOf`, `anyOf`, `oneOf`, `not`, `if` / `then` / `else`,
-  `dependentSchemas`
+  `dependentSchemas` (the former from Draft 7 onward, the latter from Draft
+  2019-09 onward)
 - Object applicators: `properties`, `patternProperties`,
   `additionalProperties`, `propertyNames`
 - Array applicators: `prefixItems`, `items`, `contains`, `minContains`,
-  `maxContains`, plus the Draft 2019-09 array form of `items` and
-  `additionalItems`
+  `maxContains`, plus the classic array form of `items` with `additionalItems`
+  (Draft 6, Draft 7 and Draft 2019-09)
 - `unevaluatedProperties` and `unevaluatedItems`
 
 ### Output
@@ -184,10 +195,10 @@ reporting `not_found`.
 
 `valid_json` runs the official
 [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite)
-for both dialects. The pinned conformance run executes **792 test groups and
-3547 test cases** — the whole validation suite, including the declared
+for all four dialects. The pinned conformance run executes **1291 test groups
+and 5967 test cases** — the whole validation suite, including the declared
 capability profiles, minus the declared exclusions — plus the **8 official
-output test cases** and 41 remote documents used by `refRemote` tests. Remote
+output test cases** and 58 remote documents used by `refRemote` tests. Remote
 documents are registered in advance; the validation run itself makes no network
 requests.
 
@@ -196,8 +207,9 @@ The declared capability profiles are:
 - `optional/` files whose schemas compile within the supported dialects,
   including `optional/id`, `optional/unknownKeyword`, and `optional/cross-draft`;
 - a `format` profile — the `optional/format/` files, compiled with
-  `{assert_format, true}` — covering 16 files per dialect (the four IDN/IRI
-  files are declared exclusions);
+  `{assert_format, true}` — with per-dialect file sets (the four IDN/IRI files
+  are declared exclusions, and Draft 7 `optional/content.json` is excluded
+  because content assertions are optional in its specification);
 - the official output tests, which pin the `basic` format; `flag`, `detailed`,
   and `verbose` are covered by the project's own golden tests, because the
   official suite does not exercise them.
@@ -299,11 +311,10 @@ tests. In CI, the `ci` profile turns compiler warnings into errors and runs
 
 ## Project status
 
-`valid_json` is version 0.2.2 and is under active development. Draft 2020-12
-and Draft 2019-09 are supported within the conformance profile declared above;
-the remaining work is tracked in [ROADMAP.md](ROADMAP.md) — the `format`
-profiles and optional capability profiles of phase P8, the HTTP loader, and
-the cross-cutting items.
+`valid_json` is version 0.2.2 and is under active development. Draft 2020-12,
+Draft 2019-09, Draft 7 and Draft 6 are supported within the conformance profile
+declared above; the remaining work is tracked in [ROADMAP.md](ROADMAP.md) — the
+HTTP loader and the cross-cutting items.
 
 The records' `reason` and `location` fields are the stable error contract; the
 wording produced by `format_error/1` is an implementation detail and may change.

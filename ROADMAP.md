@@ -439,6 +439,43 @@
 - [ ] Приёмка P8: выбранные optional profiles проходят без необъявленных
   исключений.
 
+## P9 — Draft 6 и Draft 7
+
+Поддержка classic dialects поверх существующей resource-level cross-draft
+модели: dialect принадлежит schema resource, target `$ref` компилируется по
+dialect target resource, evaluator остаётся общим.
+
+- [ ] **Фаза P9 завершена**
+- [x] Признание dialects Draft 6/7: канонические http-URI, явные https-алиасы,
+  `{default_dialect, ?DRAFT_06|07}`, схема валидируется собственной метасхемой.
+  Покрыто тестами recognition и default dialect.
+- [x] Встроенные метасхемы Draft 6/7: файлы из закреплённых upstream-коммитов
+  (json-schema-spec, ветки draft-06/draft-07), запись в UPSTREAM.json и
+  THIRD_PARTY.md, четыре published compiled bundles с `sources = []`, обе
+  метасхемы компилируются публичным API под собственным dialect.
+- [x] Семантика Draft 6: классический `$ref` (siblings игнорируются),
+  `dependencies` обеих форм с разрешённым пустым массивом, `$id` plain-name
+  фрагменты, `items`/`additionalItems` array-формы, `contains`, `propertyNames`;
+  modern-only keywords и `$vocabulary` остаются неизвестными. Обязательный
+  Draft 6 suite проходит без необъявленных исключений.
+- [x] Семантика Draft 7: `if`/`then`/`else`, `$comment`, `readOnly`/`writeOnly`,
+  `contentEncoding`/`contentMediaType` как аннотации, format-профиль Draft 7.
+  Обязательный Draft 7 suite проходит без необъявленных исключений;
+  `optional/content.json` Draft 7 не подключён по спецификационной причине
+  (content assertions в Draft 7 — MAY, validation.txt:1144).
+- [x] Cross-draft: полная собственная матрица 4x4, multi-hop цепочки и циклы
+  между всеми четырьмя dialects; официальные cross-draft группы проходят, и
+  прежнее исключение Draft 2019-09 снято.
+- [x] Официальный conformance Draft 6/7: snapshot `tests/draft6`,
+  `tests/draft7` и `remotes/draft6|7` из закреплённого коммита suite; runner
+  переведён на per-dialect файловые наборы; `?CENSUS` = {1291, 5967},
+  `?REMOTES` = 58 по фактическому прогону.
+- [~] Документация: README, docs/comparison/keywords.md,
+  docs/schema-resources.md и этот пункт ROADMAP обновлены. Не обновлены
+  нормативные документы `okf/` (conformance-policy, validator-resources-runtime,
+  format-attributes, playbook) — их правки согласуются отдельно по правилам
+  AGENTS.md.
+
 ## Runtime — хранение и эксплуатация
 
 Runtime не входит в conformance-фазы и развивается отдельным чеклистом.

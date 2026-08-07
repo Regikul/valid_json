@@ -14,15 +14,15 @@ if your schemas use them the outcome is the same either way.
 | Keyword | valid_json | jesse | jsonschex |
 | --- | --- | --- | --- |
 | `$schema` | yes, selects the dialect; a default can be configured | read to pick a draft, defaults to draft 03 when absent | yes, 2020-12 is built in, others need a loader |
-| `$id` | yes | draft 04 `id` is skipped; the README states id-based references are unsupported | yes |
-| `$ref` | yes, resolved at compile time | yes, resolved while validating | yes |
-| `$defs` / `definitions` | both | neither as a keyword; `#/definitions/...` pointers still resolve | `$defs` |
-| `$anchor` | yes | no | yes |
+| `$id` | yes, including plain-name fragment identifiers (`"$id": "#name"`) in Draft 6/7 | draft 04 `id` is skipped; the README states id-based references are unsupported | yes |
+| `$ref` | yes, resolved at compile time; in Draft 6/7 sibling keywords of a `$ref` object are ignored | yes, resolved while validating | yes |
+| `$defs` / `definitions` | both: `$defs` in 2019-09/2020-12, `definitions` as the real keyword of Draft 6/7 and a compatibility alias in modern drafts | neither as a keyword; `#/definitions/...` pointers still resolve | `$defs` |
+| `$anchor` | yes, 2019-09/2020-12; Draft 6/7 use `$id` plain-name fragments instead | no | yes |
 | `$dynamicRef` / `$dynamicAnchor` | yes | no | yes |
 | `$recursiveRef` / `$recursiveAnchor` | yes, Draft 2019-09 | no | no |
 | `$vocabulary` | yes, including user meta-schemas taken from the store | no | yes, the meta-schema comes from your loader |
-| `$comment` | ignored | ignored | ignored |
-| Cross-draft references | yes, 2020-12 and 2019-09 in one closure | not applicable | excluded from the test suite run |
+| `$comment` | ignored; unknown keyword in Draft 6 | ignored | ignored |
+| Cross-draft references | yes, all four dialects in one closure | not applicable | excluded from the test suite run |
 
 ## Assertions
 
@@ -37,20 +37,20 @@ if your schemas use them the outcome is the same either way.
 | `maxItems`, `minItems`, `uniqueItems` | yes | yes | yes |
 | `maxProperties`, `minProperties` | yes | yes | yes |
 | `required` | yes | yes | yes |
-| `dependentRequired` | yes | no, `dependencies` covers the draft-04 form | yes |
+| `dependentRequired` | yes, 2019-09/2020-12 | no, `dependencies` covers the draft-04 form | yes |
 
 ## Applicators
 
 | Keyword | valid_json | jesse | jsonschex |
 | --- | --- | --- | --- |
 | `allOf`, `anyOf`, `oneOf`, `not` | yes | yes | yes |
-| `if` / `then` / `else` | yes | no | yes |
-| `dependentSchemas` | yes | no, `dependencies` covers the draft-04 form | yes |
-| `dependencies` (pre-2019 form) | no, and it is not a keyword of either dialect | yes | yes, as a compatibility keyword |
+| `if` / `then` / `else` | yes, Draft 7 and later | no | yes |
+| `dependentSchemas` | yes, 2019-09/2020-12 | no, `dependencies` covers the draft-04 form | yes |
+| `dependencies` (classic form) | yes, Draft 6/7, in both property and schema forms | yes | yes, as a compatibility keyword |
 | `properties`, `patternProperties`, `additionalProperties` | yes | yes | yes |
 | `propertyNames` | yes | yes | yes |
 | `items`, schema form | yes, both dialects | yes | yes |
-| `items` array form and `additionalItems` | yes, Draft 2019-09 | yes | not applicable |
+| `items` array form and `additionalItems` | yes, Draft 6/7/2019-09 | yes | not applicable |
 | `prefixItems` and trailing `items` | yes, Draft 2020-12 | no | yes |
 | `contains` | yes | yes | yes |
 | `minContains`, `maxContains` | yes | no | yes |
