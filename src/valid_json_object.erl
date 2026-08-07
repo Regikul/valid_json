@@ -41,9 +41,7 @@ check({property_names, Addr}, _Instance, Context) ->
 -spec names([binary()], addr(), #eval_context{}) -> #eval_result{}.
 names(Names, Addr, Context) ->
     case scan(Names, Addr, Context,
-              #eval_result{valid = true,
-                           evaluated = valid_json_evaluated:neutral(),
-                           units = []}) of
+              valid_json_eval:empty_result(true)) of
         #eval_result{valid = undefined} = Error ->
             Error#eval_result{evaluated = valid_json_evaluated:neutral(), units = []};
         #eval_result{valid = Valid, units = Units} ->
@@ -119,7 +117,7 @@ additional(Addr, Rest) ->
           #eval_result{}.
 evaluate(Written, Instance, Context) ->
     evaluate(Written, Instance, Context,
-             #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []}).
+             valid_json_eval:empty_result(true)).
 
 evaluate([], _Instance, _Context, Result) ->
     Result;
@@ -139,9 +137,7 @@ evaluate([{Keyword, Applications} | Rest], Instance, Context, Result) ->
 keyword(Keyword, Applications, Instance, Context) ->
     {AppliedResult, Names} =
         apply_all(Applications, Instance, Context,
-                  #eval_result{valid = true,
-                               evaluated = valid_json_evaluated:neutral(),
-                               units = []}, []),
+                  valid_json_eval:empty_result(true), []),
     case AppliedResult of
         #eval_result{valid = undefined} = Error ->
             Error#eval_result{evaluated = valid_json_evaluated:neutral(), units = []};
@@ -204,7 +200,7 @@ message(<<"propertyNames">>) ->
 
 -spec inapplicable([{binary(), term()}], #eval_context{}) -> #eval_result{}.
 inapplicable(_Slots, #eval_context{format = flag}) ->
-    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
+    valid_json_eval:empty_result(true);
 inapplicable(Slots, Context) ->
     Units = [valid_json_unit:keyword(Keyword, true, none, Context)
              || {Keyword, Slot} <- Slots, Slot =/= undefined],

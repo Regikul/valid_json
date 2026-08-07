@@ -65,9 +65,7 @@ check({dependencies, _Dependencies}, _Instance, Context) ->
 -spec dependent([{binary(), addr()}], json(), #eval_context{}) -> #eval_result{}.
 dependent(Present, Instance, Context) ->
     case dependent(Present, Instance, Context,
-                   #eval_result{valid = true,
-                                evaluated = valid_json_evaluated:neutral(),
-                                units = []}) of
+                   valid_json_eval:empty_result(true)) of
         #eval_result{valid = undefined} = Error ->
             Error;
         #eval_result{valid = Valid, evaluated = Evaluated, units = Units} ->
@@ -95,9 +93,7 @@ dependent([{Name, Addr} | Rest], Instance, Context, Result) ->
                          #eval_context{}) -> #eval_result{}.
 legacy_dependencies(Present, Instance, Context) ->
     case legacy_dependencies(Present, Instance, Context,
-                             #eval_result{valid = true,
-                                          evaluated = valid_json_evaluated:neutral(),
-                                          units = []}) of
+                             valid_json_eval:empty_result(true)) of
         #eval_result{valid = undefined} = Error ->
             Error;
         #eval_result{valid = Valid, evaluated = Evaluated, units = Units} ->
@@ -113,8 +109,7 @@ legacy_dependencies([], _Instance, _Context, Result) ->
 legacy_dependencies([{_Name, Names} | Rest], Instance, Context, Result)
   when is_list(Names) ->
     Valid = lists:all(fun(Name) -> maps:is_key(Name, Instance) end, Names),
-    Property = #eval_result{valid = Valid,
-                            evaluated = valid_json_evaluated:neutral(), units = []},
+    Property = valid_json_eval:empty_result(Valid),
     next_legacy_dependencies(Rest, Instance, Context,
                              valid_json_eval:conjoin_acc(Result, Property));
 legacy_dependencies([{Name, Addr} | Rest], Instance, Context, Result) ->
@@ -277,6 +272,8 @@ branch(Addr, Keyword, Tail, Instance, #eval_context{keyword_location = Location}
 %% принадлежит keyword, который провалиться не может.
 -spec result(binary(), boolean(), binary() | none, evaluated(), [#output_unit{}],
              #eval_context{}) -> #eval_result{}.
+result(_Keyword, Valid, _Message, neutral, _Units, #eval_context{format = flag}) ->
+    valid_json_eval:empty_result(Valid);
 result(_Keyword, Valid, _Message, Evaluated, _Units, #eval_context{format = flag}) ->
     #eval_result{valid = Valid, evaluated = Evaluated, units = []};
 result(Keyword, Valid, Message, Evaluated, Units, Context) ->

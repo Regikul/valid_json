@@ -50,10 +50,7 @@ properties(Applications, Addr, Context) ->
     Keyword = <<"unevaluatedProperties">>,
     {AppliedResult, Applied} = apply_all(
                                  Applications, Addr, Keyword, Context,
-                                 #eval_result{
-                                   valid = true,
-                                   evaluated = valid_json_evaluated:neutral(),
-                                   units = []}, []),
+                                 valid_json_eval:empty_result(true), []),
     keyword_result(Keyword, AppliedResult,
                    valid_json_evaluated:properties(Applied),
                    {annotation, Applied}, Context).
@@ -66,10 +63,7 @@ items(Applications, Addr, Context) ->
     Keyword = <<"unevaluatedItems">>,
     {AppliedResult, Applied} = apply_all(
                                  Applications, Addr, Keyword, Context,
-                                 #eval_result{
-                                   valid = true,
-                                   evaluated = valid_json_evaluated:neutral(),
-                                   units = []}, []),
+                                 valid_json_eval:empty_result(true), []),
     SuccessDetail = case Applied of
                         [] -> none;
                         _  -> {annotation, true}
@@ -134,7 +128,7 @@ message(<<"unevaluatedItems">>) ->
 
 -spec inapplicable(binary(), #eval_context{}) -> #eval_result{}.
 inapplicable(_Keyword, #eval_context{format = flag}) ->
-    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
+    valid_json_eval:empty_result(true);
 inapplicable(Keyword, Context) ->
     #eval_result{valid     = true,
                  evaluated = valid_json_evaluated:neutral(),

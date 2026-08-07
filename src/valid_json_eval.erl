@@ -5,7 +5,8 @@
 -include("valid_json_core.hrl").
 
 -export([run/3, eval/3, resolve/2, conjoin/2, conjoin_acc/2,
-         conjoin_acc_discard_coverage/2, finish_acc/1, error_result/1]).
+         conjoin_acc_discard_coverage/2, finish_acc/1, empty_result/1,
+         error_result/1]).
 
 %% Единственный вход в вычисление. Cycle guard — единственная причина отказа.
 -spec run(compiled(), json(), format()) -> {ok, #eval_result{}} | {error, eval_error()}.
@@ -59,6 +60,15 @@ error_result(Error) ->
                  units = [],
                  error = Error}.
 
+%% Частый результат без покрытия, diagnostics и ошибки разделяется между
+%% вызовами как literal term. Значение неизменяемо, поэтому это не создаёт
+%% общей mutable state и снимает heap allocation с flag handlers и fold seeds.
+-spec empty_result(boolean()) -> #eval_result{}.
+empty_result(true) ->
+    #eval_result{valid = true, evaluated = neutral, units = []};
+empty_result(false) ->
+    #eval_result{valid = false, evaluated = neutral, units = []}.
+
 %% Конъюнкция используется schema object и container applicators. `false`
 %% окончательно определяет результат и потому поглощает no-progress другой
 %% ветви; без провала первая ошибка сохраняется в статическом порядке обхода.
@@ -87,6 +97,11 @@ conjoin_acc(Left, Right) ->
 %% покрытие применённой дочерней schema наружу не выходит. Такой fold сохраняет
 %% её verdict, ошибку и units, не объединяя заведомо невостребованную аннотацию.
 -spec conjoin_acc_discard_coverage(#eval_result{}, #eval_result{}) -> #eval_result{}.
+conjoin_acc_discard_coverage(
+  #eval_result{valid = LeftValid, units = [], error = undefined},
+  #eval_result{valid = RightValid, units = [], error = undefined})
+  when is_boolean(LeftValid), is_boolean(RightValid) ->
+    empty_result(LeftValid andalso RightValid);
 conjoin_acc_discard_coverage(Left, Right) ->
     Units = reverse_prepend(Right#eval_result.units, Left#eval_result.units),
     conjoined(Left, Right, valid_json_evaluated:neutral(), Units).
@@ -152,6 +167,10 @@ enter_node({Rid, _} = Addr, Guard,
 %% не производит, но остаётся обычным адресуемым node и потому выпускает
 %% собственный unit. Детей у него нет, поэтому сообщение о провале он несёт сам.
 -spec eval_node(schema_node(), json(), #eval_context{}) -> #eval_result{}.
+eval_node(true, _Instance, #eval_context{format = flag}) ->
+    empty_result(true);
+eval_node(false, _Instance, #eval_context{format = flag}) ->
+    empty_result(false);
 eval_node(true, _Instance, Context) ->
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(),
                  units = node_units(true, none, [], Context)};
@@ -211,9 +230,7 @@ node_units(Valid, Detail, Nested, Context) ->
           #eval_result{}.
 eval_constraints(Constraints, Instance, Context, Short) ->
     eval_constraints(Constraints, Instance, Context, Short,
-                     #eval_result{valid = true,
-                                  evaluated = valid_json_evaluated:neutral(),
-                                  units = []}).
+                     empty_result(true)).
 
 eval_constraints([], _Instance, _Context, _Short, Result) ->
     Result;
@@ -284,7 +301,7 @@ dispatch(Constraint, Instance, Context) ->
 %% но basic отфильтрует его как unit без detail.
 -spec marker(binary(), #eval_context{}) -> #eval_result{}.
 marker(_Keyword, #eval_context{format = flag}) ->
-    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
+    empty_result(true);
 marker(Keyword, Context) ->
     #eval_result{valid = true,
                  evaluated = valid_json_evaluated:neutral(),

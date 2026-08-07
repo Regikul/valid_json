@@ -89,7 +89,7 @@ elements(Keyword, Addr, Elements, Index) ->
                #eval_context{}) -> #eval_result{}.
 evaluate(Written, Length, Context) ->
     evaluate(Written, Length, Context,
-             #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []}).
+             valid_json_eval:empty_result(true)).
 
 evaluate([], _Length, _Context, Result) ->
     Result;
@@ -108,9 +108,7 @@ evaluate([{Keyword, Role, Applications} | Rest], Length, Context, Result) ->
 keyword(Keyword, Role, Applications, Length, Context) ->
     {AppliedResult, Applied} =
         apply_all(Applications, Context,
-                  #eval_result{valid = true,
-                               evaluated = valid_json_evaluated:neutral(),
-                               units = []}, 0),
+                  valid_json_eval:empty_result(true), 0),
     case AppliedResult of
         #eval_result{valid = undefined} = Error ->
             Error#eval_result{evaluated = valid_json_evaluated:neutral(), units = []};
@@ -229,9 +227,7 @@ effective_min(undefined) -> 1;
 effective_min(Min) -> Min.
 
 incomplete_decided(Valid) ->
-    #eval_result{valid = Valid,
-                 evaluated = valid_json_evaluated:neutral(),
-                 units = []}.
+    valid_json_eval:empty_result(Valid).
 
 -spec scan(addr(), [json()], non_neg_integer(), #eval_context{},
            [non_neg_integer()], non_neg_integer(), eval_error() | undefined,
@@ -335,7 +331,7 @@ message(<<"maxContains">>) ->
 
 -spec inapplicable([{binary(), term()}], #eval_context{}) -> #eval_result{}.
 inapplicable(_Slots, #eval_context{format = flag}) ->
-    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
+    valid_json_eval:empty_result(true);
 inapplicable(Slots, Context) ->
     Units = [valid_json_unit:keyword(Keyword, true, none, Context)
              || {Keyword, Slot} <- Slots, Slot =/= undefined],

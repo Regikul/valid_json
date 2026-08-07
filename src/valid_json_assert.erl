@@ -93,7 +93,7 @@ missing_dependents(Dependencies, Object) ->
 %% там ответ исчерпывается вердиктом.
 -spec report(constraint(), boolean(), json(), #eval_context{}) -> #eval_result{}.
 report(_Constraint, Valid, _Instance, #eval_context{format = flag}) ->
-    #eval_result{valid = Valid, evaluated = valid_json_evaluated:neutral(), units = []};
+    valid_json_eval:empty_result(Valid);
 report(Constraint, Valid, Instance, Context) ->
     Unit = valid_json_unit:keyword(keyword(Constraint), Valid,
                                    detail(Constraint, Valid, Instance), Context),

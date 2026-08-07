@@ -18,8 +18,7 @@
 %% активной Format-Assertion vocabulary.
 -spec check(constraint(), json(), #eval_context{}) -> #eval_result{}.
 check({format, Name, Assert}, Instance, #eval_context{format = flag}) ->
-    #eval_result{valid = holds(Assert, Name, Instance),
-                 evaluated = valid_json_evaluated:neutral(), units = []};
+    valid_json_eval:empty_result(holds(Assert, Name, Instance));
 check({format, Name, Assert}, Instance, Context) ->
     report(Name, holds(Assert, Name, Instance), Context).
 

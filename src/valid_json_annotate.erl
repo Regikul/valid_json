@@ -15,7 +15,7 @@
 %% исчерпывается вердиктом, а вердикт эти keywords не меняют.
 -spec check(constraint(), json(), #eval_context{}) -> #eval_result{}.
 check({annotation, _Keyword, _Value}, _Instance, #eval_context{format = flag}) ->
-    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
+    valid_json_eval:empty_result(true);
 check({annotation, Keyword, Value}, _Instance, Context) ->
     Unit = valid_json_unit:keyword(Keyword, true, {annotation, Value}, Context),
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = [Unit]};
@@ -27,7 +27,7 @@ check({annotation, Keyword, Value}, _Instance, Context) ->
 %% успешен и для испорченного содержимого: и `contentEncoding`, и
 %% `contentMediaType`, и `contentSchema` остаются чистыми annotations.
 check({content, _Keyword, _Value}, _Instance, #eval_context{format = flag}) ->
-    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = []};
+    valid_json_eval:empty_result(true);
 check({content, Keyword, Value}, Instance, Context) when is_binary(Instance) ->
     Unit = valid_json_unit:keyword(Keyword, true, {annotation, Value}, Context),
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = [Unit]};

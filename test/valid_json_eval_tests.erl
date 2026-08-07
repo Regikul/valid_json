@@ -156,9 +156,7 @@ conjunction_test_() ->
 %% Пустой успешный результат — точная единица обычной конъюнкции: fast path
 %% обязан сохранять не только verdict, но и coverage, units и первую ошибку.
 conjoin_identity_test() ->
-    Identity = #eval_result{valid = true,
-                            evaluated = valid_json_evaluated:neutral(),
-                            units = []},
+    Identity = valid_json_eval:empty_result(true),
     Unit = #output_unit{detail = {annotation, kept}},
     Result = #eval_result{valid = undefined,
                           evaluated = valid_json_evaluated:properties([<<"kept">>]),
@@ -166,6 +164,12 @@ conjoin_identity_test() ->
                           error = {no_progress, {anonymous, <<"/loop">>}}},
     ?assertEqual(Result, valid_json_eval:conjoin(Identity, Result)),
     ?assertEqual(Result, valid_json_eval:conjoin(Result, Identity)).
+
+empty_result_test() ->
+    ?assertEqual(#eval_result{valid = true, evaluated = neutral, units = []},
+                 valid_json_eval:empty_result(true)),
+    ?assertEqual(#eval_result{valid = false, evaluated = neutral, units = []},
+                 valid_json_eval:empty_result(false)).
 
 %% Внутри длинного fold units лежат в обратном порядке, но его граница обязана
 %% вернуть тот же статический порядок, что обычная конъюнкция.
@@ -192,7 +196,10 @@ conjoin_acc_discard_coverage_test() ->
                          evaluated = valid_json_evaluated:items(all),
                          units = []},
     Result = valid_json_eval:conjoin_acc_discard_coverage(Left, Right),
-    ?assertEqual(valid_json_evaluated:neutral(), Result#eval_result.evaluated).
+    ?assertEqual(valid_json_eval:empty_result(true), Result),
+    ?assertEqual(valid_json_eval:empty_result(false),
+                 valid_json_eval:conjoin_acc_discard_coverage(
+                   Left, valid_json_eval:empty_result(false))).
 
 %% Провалившийся schema object не отдаёт эффективных аннотаций. Чистые
 %% assertions покрытия не вносят, поэтому маска остаётся нейтральной в обоих
