@@ -414,6 +414,15 @@ walk(Other, Rid, Location, Contexts, _RootOrChild, Profile, State) ->
           {error, #schema_error{}}.
 enter_resource(_Schema, Rid, Location, Contexts, root, Profile, State) ->
     {ok, Rid, Location, Contexts, Profile, State};
+%% Draft 6/7: `$ref`-объект игнорирует все прочие свойства, включая `$id` и
+%% `$schema` (draft-07 core, 8.3). Discovery не меняет ни base URI, ни dialect:
+%% ref остаётся в текущем resource, иначе sibling `$id` сдвинул бы базу, против
+%% которой разрешается сам `$ref` (suite, «$ref prevents a sibling $id from
+%% changing the base uri»).
+enter_resource(#{<<"$ref">> := _}, Rid, Location, Contexts, child,
+               #profile{draft = Draft} = Profile, State)
+  when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
+    {ok, Rid, Location, Contexts, Profile, State};
 %% Draft 6/7: `$id` с plain-name fragment — location-independent identifier. Он
 %% не меняет base URI и не открывает новый resource: имя регистрируется как
 %% anchor текущего resource, а node остаётся в нём (draft-06 core, 9.2; draft-07

@@ -5,10 +5,14 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -define(DIALECTS, [{"draft2020-12", <<"https://json-schema.org/draft/2020-12/schema">>},
-                   {"draft2019-09", <<"https://json-schema.org/draft/2019-09/schema">>}]).
+                   {"draft2019-09", <<"https://json-schema.org/draft/2019-09/schema">>},
+                   {"draft6", <<"http://json-schema.org/draft-06/schema">>},
+                   {"draft7", <<"http://json-schema.org/draft-07/schema">>}]).
 
-%% Файл подключается, когда компилируются схемы почти всех его групп; единичные
-%% группы, написанные через keywords следующих фаз, перечислены в ?PENDING.
+%% Файлы, существующие во всех четырёх dialects: пересечение обязательных и
+%% общих optional наборов. Dialect-специфичные файлы перечислены в
+%% ?DIALECT_FILES: modern-only keywords и наборы optional/format между drafts
+%% различаются.
 -define(FILES, ["boolean_schema.json", "type.json", "const.json", "enum.json",
                 "multipleOf.json",
                 "maximum.json", "exclusiveMaximum.json",
@@ -16,23 +20,17 @@
                 "maxLength.json", "minLength.json", "pattern.json",
                 "maxItems.json", "minItems.json",
                 "maxProperties.json", "minProperties.json",
-                "required.json", "dependentRequired.json",
+                "required.json",
                 "properties.json", "patternProperties.json",
                 "additionalProperties.json", "propertyNames.json",
                 "items.json", "uniqueItems.json",
-                "contains.json", "maxContains.json", "minContains.json",
+                "contains.json",
                 "allOf.json", "anyOf.json", "oneOf.json",
-                "if-then-else.json", "dependentSchemas.json",
-                "default.json", "not.json", "format.json", "content.json",
-                "vocabulary.json",
-                "ref.json", "defs.json",
-                "anchor.json", "refRemote.json", "infinite-loop-detection.json",
-                "unevaluatedProperties.json", "unevaluatedItems.json",
+                "default.json", "not.json", "format.json",
+                "ref.json",
+                "refRemote.json", "infinite-loop-detection.json",
                 "optional/id.json", "optional/unknownKeyword.json",
-                "optional/cross-draft.json",
-                "optional/format/date.json", "optional/format/time.json",
                 "optional/format/date-time.json",
-                "optional/format/duration.json",
                 "optional/format/ipv4.json", "optional/format/ipv6.json",
                 "optional/format/hostname.json",
                 "optional/format/email.json",
@@ -40,22 +38,50 @@
                 "optional/format/uri-reference.json",
                 "optional/format/uri-template.json",
                 "optional/format/json-pointer.json",
-                "optional/format/relative-json-pointer.json",
-                "optional/format/uuid.json", "optional/format/regex.json",
                 "optional/format/unknown.json"]).
 
-%% Files, существующие только в одном dialect: `prefixItems.json` появился
-%% вместе с самим keyword в Draft 2020-12, обоих файлов `dynamicRef.json` в
-%% Draft 2019-09 нет по той же причине, а обязательные `additionalItems.json` и
-%% `recursiveRef.json`, наоборот, существуют только в Draft 2019-09. Первый —
-%% зеркало `prefixItems.json`: в Draft 2020-12 хвост массива задаёт сам `items`
-%% рядом с `prefixItems`, и отдельного keyword для хвоста там нет. Files,
-%% отложенные до своей фазы, здесь не перечисляются: для этого есть ?PENDING.
--define(DIALECT_FILES, [{"draft2020-12",
-                         ["prefixItems.json", "dynamicRef.json",
-                          "optional/dynamicRef.json"]},
-                        {"draft2019-09",
-                         ["additionalItems.json", "recursiveRef.json"]}]).
+%% Файлы, существующие не во всех dialects: modern-only keywords, legacy
+%% `definitions`/`dependencies`/`additionalItems` и наборы optional/format Draft
+%% 6/7 (у Draft 6 format-профиль уже, у Draft 7 он дополнен date/time/regex и
+%% relative-json-pointer). IDN/IRI-файлы в профиль не входят по conformance
+%% policy, поэтому здесь не перечислены вовсе. `optional/content.json` Draft 7
+%% тоже не входит: contentEncoding/contentMediaType как validation assertions
+%% спецификация разрешает, но не требует (draft-07 validation.txt:1144), а
+%% профиль держит content-аннотации annotation-only, как и modern dialects.
+-define(DIALECT_FILES,
+        [{"draft2020-12",
+          ["prefixItems.json", "dynamicRef.json", "optional/dynamicRef.json",
+           "anchor.json",
+           "dependentRequired.json", "dependentSchemas.json",
+           "minContains.json", "maxContains.json",
+           "unevaluatedProperties.json", "unevaluatedItems.json",
+           "vocabulary.json", "defs.json", "content.json",
+           "optional/cross-draft.json",
+           "optional/format/date.json", "optional/format/time.json",
+           "optional/format/duration.json",
+           "optional/format/relative-json-pointer.json",
+           "optional/format/uuid.json", "optional/format/regex.json"]},
+         {"draft2019-09",
+          ["additionalItems.json", "recursiveRef.json",
+           "anchor.json",
+           "dependentRequired.json", "dependentSchemas.json",
+           "minContains.json", "maxContains.json",
+           "unevaluatedProperties.json", "unevaluatedItems.json",
+           "vocabulary.json", "defs.json", "content.json",
+           "optional/cross-draft.json",
+           "optional/format/date.json", "optional/format/time.json",
+           "optional/format/duration.json",
+           "optional/format/relative-json-pointer.json",
+           "optional/format/uuid.json", "optional/format/regex.json"]},
+         {"draft6",
+          ["additionalItems.json", "definitions.json", "dependencies.json"]},
+         {"draft7",
+          ["additionalItems.json", "definitions.json", "dependencies.json",
+           "if-then-else.json",
+           "optional/cross-draft.json",
+           "optional/format/date.json", "optional/format/time.json",
+           "optional/format/regex.json",
+           "optional/format/relative-json-pointer.json"]}]).
 
 %% Группы подключённых files, которые ждут keywords следующих фаз: их схемы пока
 %% не компилируются вовсе. Фаза, снимающая группу, вычёркивает свою строку
@@ -73,28 +99,18 @@
          {"optional/format/hostname.json",
           <<"validation of A-label (punycode) host names">>}]).
 
-%% Группы, чья цепочка dialects выходит за conformance-профиль
-%% (okf/testing/conformance-policy.md, раздел «Conformance-профиль»). От
-%% ?EXCLUDED отличается природой: это не расхождение реализации с
-%% спецификацией, а объявленная граница профиля. Поэтому и ключ другой —
-%% dialect назван, ведь одноимённая группа соседнего dialect может остаться
-%% внутри профиля, как и происходит в `cross-draft.json`.
--define(OUT_OF_PROFILE,
-        [{"draft2019-09", "optional/cross-draft.json",
-          <<"refs to historic drafts are processed as historic drafts">>}]).
-
 %% Ожидаемый размер прогона: {групп, cases}. Число закреплено, чтобы прогон, в
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES,
-%% ?EXCLUDED и ?OUT_OF_PROFILE, и менять его иначе нельзя.
--define(CENSUS, {792, 3547}).
+%% ?EXCLUDED и ?DIALECT_FILES, и менять его иначе нельзя.
+-define(CENSUS, {1291, 5967}).
 
 %% Сьют адресует свои remote documents относительно этого base, повторяя в URI
 %% раскладку директории `remotes`. Число документов закреплено по той же
 %% причине, что и перепись: потерянная директория не должна давать зелёный
 %% прогон, в котором remote refs просто перестали проверяться.
 -define(REMOTE_BASE, <<"http://localhost:1234/">>).
--define(REMOTES, 41).
+-define(REMOTES, 58).
 
 %% Встроенные метасхемы поднимает дерево приложения, и без него компиляция
 %% схемы не идёт.
@@ -171,7 +187,6 @@ format_options(File) ->
 %% одновременно, а цепочка ссылок у одноимённых групп бывает разной.
 included(Dir, File, #{<<"description">> := Description}) ->
     not lists:member({File, Description}, ?EXCLUDED) andalso
-        not lists:member({Dir, File, Description}, ?OUT_OF_PROFILE) andalso
         not lists:member({Dir, File, Description}, ?PENDING).
 
 group_tests(Store, Options, #{<<"description">> := Description,
