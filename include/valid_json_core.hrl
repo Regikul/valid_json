@@ -87,7 +87,8 @@
 
 %% Эффективное покрытие для unevaluated*: непрерывный префикс плюс разреженное
 %% множество индексов от contains.
--type evaluated()  :: #{properties := sets:set(binary()),
+-type evaluated()  :: neutral
+                    | #{properties := sets:set(binary()),
                         items      := items_mask()}.
 -type items_mask() :: all
                     | {Prefix :: non_neg_integer(), Sparse :: sets:set(non_neg_integer())}.

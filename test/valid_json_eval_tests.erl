@@ -170,6 +170,16 @@ conjoin_acc_order_test() ->
         valid_json_eval:finish_acc(Acc),
     ?assertEqual([FirstUnit, SecondUnit, ThirdUnit], Units).
 
+conjoin_acc_discard_coverage_test() ->
+    Left = #eval_result{valid = true,
+                        evaluated = valid_json_evaluated:properties([<<"left">>]),
+                        units = []},
+    Right = #eval_result{valid = true,
+                         evaluated = valid_json_evaluated:items(all),
+                         units = []},
+    Result = valid_json_eval:conjoin_acc_discard_coverage(Left, Right),
+    ?assertEqual(valid_json_evaluated:neutral(), Result#eval_result.evaluated).
+
 %% Провалившийся schema object не отдаёт эффективных аннотаций. Чистые
 %% assertions покрытия не вносят, поэтому маска остаётся нейтральной в обоих
 %% исходах — это фиксирует, что провал её не портит.
@@ -1716,6 +1726,8 @@ detail(Detail)           -> Detail.
 
 %% `all` — покрыт весь массив; отдельного префикса и разреженной части у такой
 %% маски нет.
+expand(neutral) ->
+    {[], 0, []};
 expand(#{properties := Properties, items := all}) ->
     {lists:sort(sets:to_list(Properties)), all, []};
 expand(#{properties := Properties, items := {Prefix, Sparse}}) ->

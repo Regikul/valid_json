@@ -7,10 +7,31 @@
 %% Тесты модуля независимы, поэтому eunit прогоняет их параллельно.
 eunit_wrapper_(Tests) -> {inparallel, Tests}.
 
-neutral_test_() ->
-    #{properties := Properties, items := Items} = valid_json_evaluated:neutral(),
-    [?_assertEqual([], sets:to_list(Properties)),
-     ?_assertEqual({0, []}, expand(Items))].
+neutral_test() ->
+    ?assertEqual(neutral, valid_json_evaluated:neutral()).
+
+neutral_identity_test_() ->
+    Properties = valid_json_evaluated:properties([<<"foo">>]),
+    Items = valid_json_evaluated:items({2, []}),
+    [?_assertEqual(Properties,
+                   valid_json_evaluated:merge(valid_json_evaluated:neutral(),
+                                              Properties)),
+     ?_assertEqual(Items,
+                   valid_json_evaluated:merge(Items,
+                                              valid_json_evaluated:neutral())),
+     ?_assertEqual(neutral, valid_json_evaluated:properties([])),
+     ?_assertEqual(neutral, valid_json_evaluated:items({0, []}))].
+
+neutral_read_test_() ->
+    Properties = valid_json_evaluated:properties([<<"foo">>]),
+    Names = [<<"bar">>, <<"foo">>],
+    [?_assertEqual(Names,
+                   valid_json_evaluated:unevaluated_properties(neutral, Names)),
+     ?_assertEqual([<<"bar">>],
+                   valid_json_evaluated:unevaluated_properties(Properties, Names)),
+     ?_assertEqual([], valid_json_evaluated:unevaluated_indexes(neutral, 0)),
+     ?_assertEqual([0, 1, 2],
+                   valid_json_evaluated:unevaluated_indexes(neutral, 3))].
 
 all_absorbs_test_() ->
     [?_assertEqual(all, valid_json_evaluated:merge_items(all, mask(0, []))),

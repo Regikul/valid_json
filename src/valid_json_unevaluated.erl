@@ -15,18 +15,18 @@
 -type application() :: {binary(), json()}.
 
 -spec check(constraint(), json(), evaluated(), #eval_context{}) -> #eval_result{}.
-check({unevaluated_properties, Addr}, Instance, #{properties := Covered}, Context)
+check({unevaluated_properties, Addr}, Instance, Evaluated, Context)
   when is_map(Instance) ->
-    Names = [Name || Name <- lists:sort(maps:keys(Instance)),
-                     not sets:is_element(Name, Covered)],
+    Names = valid_json_evaluated:unevaluated_properties(
+              Evaluated, lists:sort(maps:keys(Instance))),
     properties([{Name, maps:get(Name, Instance)} || Name <- Names], Addr, Context);
 %% Keyword применяется только к своему типу инстанса: другое значение даёт
 %% успешный unit без error и annotation, а не отказ.
 check({unevaluated_properties, _Addr}, _Instance, _Evaluated, Context) ->
     inapplicable(<<"unevaluatedProperties">>, Context);
-check({unevaluated_items, Addr}, Instance, #{items := Mask}, Context)
+check({unevaluated_items, Addr}, Instance, Evaluated, Context)
   when is_list(Instance) ->
-    Indexes = valid_json_evaluated:unevaluated_indexes(Mask, length(Instance)),
+    Indexes = valid_json_evaluated:unevaluated_indexes(Evaluated, length(Instance)),
     items(pick(Indexes, Instance, 0), Addr, Context);
 check({unevaluated_items, _Addr}, _Instance, _Evaluated, Context) ->
     inapplicable(<<"unevaluatedItems">>, Context).
@@ -103,7 +103,7 @@ coverage(false, _Evaluated) -> valid_json_evaluated:neutral().
 apply_all([], _Addr, _Keyword, _Context, Result, Applied) ->
     {valid_json_eval:finish_acc(Result), lists:reverse(Applied)};
 apply_all([{Segment, Value} | Rest], Addr, Keyword, Context, Result, Applied) ->
-    Merged = valid_json_eval:conjoin_acc(
+    Merged = valid_json_eval:conjoin_acc_discard_coverage(
                Result, branch(Addr, Keyword, Segment, Value, Context)),
     case Merged#eval_result.valid =:= false andalso
          Context#eval_context.format =:= flag of

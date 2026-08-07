@@ -130,7 +130,7 @@ keyword(Keyword, Role, Applications, Length, Context) ->
 apply_all([], _Context, Result, Applied) ->
     {valid_json_eval:finish_acc(Result), Applied};
 apply_all([{Tail, Index, Element, Addr} | Rest], Context, Result, Applied) ->
-    Merged = valid_json_eval:conjoin_acc(
+    Merged = valid_json_eval:conjoin_acc_discard_coverage(
                Result, branch(Addr, Tail, Index, Element, Context)),
     case Merged#eval_result.valid =:= false andalso
          Context#eval_context.format =:= flag of

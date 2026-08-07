@@ -6,32 +6,48 @@
 -include("valid_json_core.hrl").
 
 -export([neutral/0, properties/1, items/1, merge/2, merge_items/2]).
+-export([unevaluated_properties/2]).
 -export([unevaluated_indexes/2]).
 
 -spec neutral() -> evaluated().
 neutral() ->
-    #{properties => sets:new(),
-      items      => {0, sets:new()}}.
+    neutral.
 
 %% Покрытие, внесённое одним object applicator: имена свойств, к которым он
 %% применился. Маску массива он не трогает.
 -spec properties([binary()]) -> evaluated().
+properties([]) ->
+    neutral;
 properties(Names) ->
-    (neutral())#{properties := sets:from_list(Names)}.
+    #{properties => sets:from_list(Names),
+      items      => {0, sets:new()}}.
 
 %% Покрытие, внесённое одним array applicator: непрерывный префикс и совпавшие
 %% индексы `contains`. Список индексов нормализуется здесь, чтобы обработчики не
 %% собирали каноническую маску руками. Имён свойств такой applicator не трогает.
 -spec items(all | {non_neg_integer(), [non_neg_integer()]}) -> evaluated().
 items(all) ->
-    (neutral())#{items := all};
+    #{properties => sets:new(), items => all};
+items({0, []}) ->
+    neutral;
 items({Prefix, Indexes}) ->
-    (neutral())#{items := normalize(Prefix, sets:from_list(Indexes))}.
+    #{properties => sets:new(),
+      items      => normalize(Prefix, sets:from_list(Indexes))}.
 
 -spec merge(evaluated(), evaluated()) -> evaluated().
+merge(neutral, Right) ->
+    Right;
+merge(Left, neutral) ->
+    Left;
 merge(#{properties := P1, items := I1}, #{properties := P2, items := I2}) ->
     #{properties => sets:union(P1, P2),
       items      => merge_items(I1, I2)}.
+
+-spec unevaluated_properties(evaluated(), [binary()]) -> [binary()].
+unevaluated_properties(neutral, Names) ->
+    Names;
+unevaluated_properties(#{properties := Properties}, Names) ->
+    [Name || Name <- Names, not sets:is_element(Name, Properties)].
 
 %% Union по разреженным множествам и max по префиксу. Нормализация обязательна:
 %% без неё представление покрытия зависело бы от порядка обхода ветвей.
@@ -45,7 +61,12 @@ merge_items({P1, S1}, {P2, S2}) ->
 %% `unevaluatedItems`. Маска канонична, поэтому исчерпанный префикс сразу
 %% отвечает пустым списком, а разреженная часть только выкалывает отдельные
 %% индексы за ним.
--spec unevaluated_indexes(items_mask(), non_neg_integer()) -> [non_neg_integer()].
+-spec unevaluated_indexes(evaluated() | items_mask(), non_neg_integer()) ->
+          [non_neg_integer()].
+unevaluated_indexes(neutral, Length) ->
+    lists:seq(0, Length - 1);
+unevaluated_indexes(#{items := Mask}, Length) ->
+    unevaluated_indexes(Mask, Length);
 unevaluated_indexes(all, _Length) ->
     [];
 unevaluated_indexes({Prefix, _Sparse}, Length) when Prefix >= Length ->

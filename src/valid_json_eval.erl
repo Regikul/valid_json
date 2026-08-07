@@ -4,8 +4,8 @@
 
 -include("valid_json_core.hrl").
 
--export([run/3, eval/3, resolve/2, conjoin/2, conjoin_acc/2, finish_acc/1,
-         error_result/1]).
+-export([run/3, eval/3, resolve/2, conjoin/2, conjoin_acc/2,
+         conjoin_acc_discard_coverage/2, finish_acc/1, error_result/1]).
 
 %% Единственный вход в вычисление. Cycle guard — единственная причина отказа.
 -spec run(compiled(), json(), format()) -> {ok, #eval_result{}} | {error, eval_error()}.
@@ -79,6 +79,14 @@ conjoin_acc(Left, Right) ->
     Units = reverse_prepend(Right#eval_result.units, Left#eval_result.units),
     conjoined(Left, Right, Units).
 
+%% Container applicators возвращают собственное покрытие свойства или индекса;
+%% покрытие применённой дочерней schema наружу не выходит. Такой fold сохраняет
+%% её verdict, ошибку и units, не объединяя заведомо невостребованную аннотацию.
+-spec conjoin_acc_discard_coverage(#eval_result{}, #eval_result{}) -> #eval_result{}.
+conjoin_acc_discard_coverage(Left, Right) ->
+    Units = reverse_prepend(Right#eval_result.units, Left#eval_result.units),
+    conjoined(Left, Right, valid_json_evaluated:neutral(), Units).
+
 -spec finish_acc(#eval_result{}) -> #eval_result{}.
 finish_acc(#eval_result{units = []} = Result) ->
     Result;
@@ -97,6 +105,14 @@ reverse_prepend(Units, Acc) ->
 
 -spec conjoined(#eval_result{}, #eval_result{}, [#output_unit{}]) -> #eval_result{}.
 conjoined(Left, Right, Units) ->
+    conjoined(Left, Right,
+              valid_json_evaluated:merge(Left#eval_result.evaluated,
+                                         Right#eval_result.evaluated),
+              Units).
+
+-spec conjoined(#eval_result{}, #eval_result{}, evaluated(), [#output_unit{}]) ->
+          #eval_result{}.
+conjoined(Left, Right, Evaluated, Units) ->
     Valid = conjunction(Left#eval_result.valid, Right#eval_result.valid),
     Error = case Valid of
                 undefined -> first_error(Left#eval_result.error,
@@ -104,9 +120,7 @@ conjoined(Left, Right, Units) ->
                 _ -> undefined
             end,
     #eval_result{valid = Valid,
-                 evaluated = valid_json_evaluated:merge(
-                               Left#eval_result.evaluated,
-                               Right#eval_result.evaluated),
+                 evaluated = Evaluated,
                  units = Units,
                  error = Error}.
 

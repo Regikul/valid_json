@@ -58,7 +58,7 @@ names(Names, Addr, Context) ->
 scan([], _Addr, _Context, Result) ->
     valid_json_eval:finish_acc(Result);
 scan([Name | Rest], Addr, Context, Result) ->
-    Merged = valid_json_eval:conjoin_acc(
+    Merged = valid_json_eval:conjoin_acc_discard_coverage(
                Result,
                branch(Addr, [<<"propertyNames">>], Name, Name, Context)),
     case Merged#eval_result.valid =:= false andalso
@@ -166,7 +166,7 @@ coverage(false, _Applied) -> valid_json_evaluated:neutral().
 apply_all([], _Instance, _Context, Result, Names) ->
     {valid_json_eval:finish_acc(Result), lists:reverse(Names)};
 apply_all([{Tail, Name, Addr} | Rest], Instance, Context, Result, Names) ->
-    Merged = valid_json_eval:conjoin_acc(
+    Merged = valid_json_eval:conjoin_acc_discard_coverage(
                Result,
                branch(Addr, Tail, Name, maps:get(Name, Instance), Context)),
     case Merged#eval_result.valid =:= false andalso
