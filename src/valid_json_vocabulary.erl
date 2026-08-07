@@ -169,6 +169,8 @@ vocabulary(<<"additionalItems">>, ?DRAFT_06)  -> applicator;
 vocabulary(<<"additionalItems">>, ?DRAFT_07)  -> applicator;
 vocabulary(<<"dependentSchemas">>, ?DRAFT_06) -> unknown;
 vocabulary(<<"dependentSchemas">>, ?DRAFT_07) -> unknown;
+vocabulary(<<"dependencies">>, ?DRAFT_06)      -> validation;
+vocabulary(<<"dependencies">>, ?DRAFT_07)      -> validation;
 vocabulary(<<"dependentRequired">>, ?DRAFT_06) -> unknown;
 vocabulary(<<"dependentRequired">>, ?DRAFT_07) -> unknown;
 vocabulary(<<"minContains">>, ?DRAFT_06)      -> unknown;

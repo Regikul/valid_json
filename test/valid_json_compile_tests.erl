@@ -1093,6 +1093,82 @@ public_reference_error_test_() ->
           Store, #{<<"$id">> => Remote,
                    <<"$schema">> => <<"https://example.com/dialect">>}, []))].
 
+%% Draft 6/7: `$id` с plain-name fragment — location-independent identifier.
+%% Он не открывает resource, а регистрирует имя в anchors текущего resource,
+%% и `$ref: "#foo"` разрешается в него (draft-06 core, 9.2; draft-07 core,
+%% 8.2.3).
+classic_plain_name_identifier_test() ->
+    Store = valid_json_store:temporary(),
+    Schema = #{<<"definitions">> =>
+                   #{<<"A">> => #{<<"$id">> => <<"#foo">>,
+                                  <<"type">> => <<"integer">>}},
+               <<"allOf">> => [#{<<"$ref">> => <<"#foo">>}]},
+    {ok, Compiled} =
+        trusted_compile(Store, Schema, [{default_dialect, ?DRAFT_06}]),
+    #{anonymous := Resource} = maps:get(resources, Compiled),
+    ?assertEqual(#{<<"foo">> => <<"/definitions/A">>},
+                 Resource#resource.anchors),
+    ?assertEqual({ok, #{<<"valid">> => true}},
+                 valid_json_core:validate(Compiled, 3, [{output, flag}])),
+    ?assertEqual({ok, #{<<"valid">> => false}},
+                 valid_json_core:validate(Compiled, <<"x">>,
+                                          [{output, flag}])).
+
+%% Remote target с classic plain-name идентификатором: `$ref` на URI с
+%% plain-name fragment разрешается внутрь resource другого документа.
+classic_remote_plain_name_identifier_test() ->
+    Root = <<"https://example.com/root">>,
+    Other = <<"https://example.com/other.json">>,
+    OtherSchema = #{<<"$id">> => Other,
+                    <<"definitions">> =>
+                        #{<<"X">> => #{<<"$id">> => <<"#bar">>,
+                                       <<"type">> => <<"string">>}}},
+    RootSchema = #{<<"$id">> => Root,
+                   <<"$schema">> =>
+                       <<"http://json-schema.org/draft-06/schema#">>,
+                   <<"$ref">> => <<Other/binary, "#bar">>},
+    {ok, _Names, Store} =
+        valid_json_store:add(valid_json_store:temporary(),
+                             [{Other, OtherSchema}, {Root, RootSchema}]),
+    {ok, Compiled} =
+        trusted_compile_uri(Store, Root, [{default_dialect, ?DRAFT_06}]),
+    ?assertEqual({ok, #{<<"valid">> => true}},
+                 valid_json_core:validate(Compiled, <<"text">>,
+                                          [{output, flag}])),
+    ?assertEqual({ok, #{<<"valid">> => false}},
+                 valid_json_core:validate(Compiled, 7, [{output, flag}])).
+
+%% Draft 6/7: schema-форма `dependencies` — schema position, и вложенный `$id`
+%% открывает resource. Array-форма (property dependency) position не образует:
+%% значение не обходится, и `$id` внутри массива в индекс не попадает.
+classic_dependencies_discovery_test() ->
+    Child = <<"https://example.com/child">>,
+    Store = valid_json_store:temporary(),
+    {ok, Compiled} =
+        trusted_compile(
+          Store,
+          #{<<"dependencies">> =>
+                #{<<"foo">> => #{<<"$id">> => Child,
+                                 <<"type">> => <<"integer">>}}},
+          [{default_dialect, ?DRAFT_06}]),
+    ?assertMatch(#{Child := #resource{dialect = ?DRAFT_06}},
+                 maps:get(resources, Compiled)),
+    {ok, ArrayForm} =
+        trusted_compile(
+          Store,
+          #{<<"dependencies">> =>
+                #{<<"foo">> => [<<"bar">>, #{<<"$id">> => Child}]}},
+          [{default_dialect, ?DRAFT_06}]),
+    ?assertNot(maps:is_key(Child, maps:get(resources, ArrayForm))).
+
+%% Modern dialects plain-name `$id` не принимают: fragment в `$id` остаётся
+%% ошибкой, как и до classic-ветки.
+modern_rejects_plain_name_id_test() ->
+    ?assertEqual(
+       schema_error({bad_keyword_value, <<"#foo">>}, <<"/$defs/A/$id">>),
+       compile(#{<<"$defs">> =>
+                     #{<<"A">> => #{<<"$id">> => <<"#foo">>}}})).
+
 %% Подсхема с `$id` начинает новый resource: адрес в parent constraint сразу
 %% канонический, а указатели внутри child считаются от его собственного корня.
 embedded_resource_test() ->

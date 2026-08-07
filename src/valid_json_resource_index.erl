@@ -414,10 +414,51 @@ walk(Other, Rid, Location, Contexts, _RootOrChild, Profile, State) ->
           {error, #schema_error{}}.
 enter_resource(_Schema, Rid, Location, Contexts, root, Profile, State) ->
     {ok, Rid, Location, Contexts, Profile, State};
+%% Draft 6/7: `$id` с plain-name fragment — location-independent identifier. Он
+%% не меняет base URI и не открывает новый resource: имя регистрируется как
+%% anchor текущего resource, а node остаётся в нём (draft-06 core, 9.2; draft-07
+%% core, 8.2.3). Всякий другой fragment-состав `$id` в classic drafts оставлен
+%% спецификацией undefined и называется ошибкой, как и в modern dialects.
+enter_resource(#{<<"$id">> := Id} = Schema, Rid, Location, Contexts, child,
+               #profile{draft = Draft} = Profile, State)
+  when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
+    IdLocation = keyword_addr(Rid, Location, <<"$id">>),
+    case classic_id(Id, Rid, Draft) of
+        {ok, resource} ->
+            enter_id_resource(Schema, Rid, Location, Contexts, Profile, State,
+                              IdLocation);
+        {ok, {plain_name, Name}} ->
+            Addr = addr(Rid, Location),
+            {ok, Rid, Location, Contexts, Profile, put_anchor(Name, Addr, State)};
+        {error, Reason} ->
+            {error, schema_error(Reason, IdLocation)}
+    end;
 enter_resource(#{<<"$id">> := Id} = Schema, Rid, Location, Contexts, child,
                Profile, State) ->
-    IdLocation = keyword_addr(Rid, Location, <<"$id">>),
-    case resolve_id(Id, Rid) of
+    enter_id_resource(Schema, Rid, Location, Contexts, Profile, State,
+                      keyword_addr(Rid, Location, <<"$id">>));
+%% `$schema` разрешён только в корне schema resource; в остальных подсхемах он
+%% запрещён обоими dialects (core.txt:1377 в 2020-12, core.txt:1320 в 2019-09).
+%% Молча игнорировать его нельзя: автор написал бы смену dialect и получил бы
+%% dialect объемлющего.
+enter_resource(#{<<"$schema">> := _, <<"$id">> := _}, Rid, Location,
+               Contexts, child, Profile, State) ->
+    {ok, Rid, Location, Contexts, Profile, State};
+enter_resource(#{<<"$schema">> := _}, Rid, Location, _Contexts, child,
+               _Profile, _State) ->
+    {error, schema_error({misplaced_keyword, <<"$schema">>},
+                         keyword_addr(Rid, Location, <<"$schema">>))};
+enter_resource(_Schema, Rid, Location, Contexts, child, Profile, State) ->
+    {ok, Rid, Location, Contexts, Profile, State}.
+
+%% Общий путь `$id`, меняющего resource boundary. Вынесен из клаузы, чтобы
+%% classic-ветка могла выбрать между plain-name идентификатором и boundary.
+-spec enter_id_resource(json(), rid(), location(), [context()], profile(),
+                        state(), addr()) ->
+          {ok, rid(), location(), [context()], profile(), state()} |
+          {error, #schema_error{}}.
+enter_id_resource(Schema, Rid, Location, Contexts, Profile, State, IdLocation) ->
+    case resolve_id(maps:get(<<"$id">>, Schema), Rid) of
         {ok, NewRid} ->
             case resource_profile(Schema, NewRid, Profile, State) of
                 {ok, NewProfile, Resolved} ->
@@ -434,20 +475,30 @@ enter_resource(#{<<"$id">> := Id} = Schema, Rid, Location, Contexts, child,
             end;
         {error, Reason} ->
             {error, schema_error(Reason, IdLocation)}
+    end.
+
+-spec classic_id(json(), rid(), dialect()) ->
+          {ok, resource | {plain_name, binary()}} | {error, reason()}.
+classic_id(Id, Base, Draft) when is_binary(Id) ->
+    case valid_json_uri:resolve(Id, Base) of
+        {ok, _Base, root} ->
+            {ok, resource};
+        {ok, _Base, {anchor, Name}} ->
+            case fragment_only(Id) andalso valid_anchor(Name, Draft) of
+                true  -> {ok, {plain_name, Name}};
+                false -> {error, {bad_keyword_value, Id}}
+            end;
+        {ok, _Base, {pointer, _Segments}} ->
+            {error, {bad_keyword_value, Id}};
+        {error, Reason} ->
+            {error, Reason}
     end;
-%% `$schema` разрешён только в корне schema resource; в остальных подсхемах он
-%% запрещён обоими dialects (core.txt:1377 в 2020-12, core.txt:1320 в 2019-09).
-%% Молча игнорировать его нельзя: автор написал бы смену dialect и получил бы
-%% dialect объемлющего.
-enter_resource(#{<<"$schema">> := _, <<"$id">> := _}, Rid, Location,
-               Contexts, child, Profile, State) ->
-    {ok, Rid, Location, Contexts, Profile, State};
-enter_resource(#{<<"$schema">> := _}, Rid, Location, _Contexts, child,
-               _Profile, _State) ->
-    {error, schema_error({misplaced_keyword, <<"$schema">>},
-                         keyword_addr(Rid, Location, <<"$schema">>))};
-enter_resource(_Schema, Rid, Location, Contexts, child, Profile, State) ->
-    {ok, Rid, Location, Contexts, Profile, State}.
+classic_id(Id, _Base, _Draft) ->
+    {error, {bad_keyword_value, Id}}.
+
+-spec fragment_only(binary()) -> boolean().
+fragment_only(<<"#", _/binary>>) -> true;
+fragment_only(_Id)               -> false.
 
 %% Встроенный resource без `$schema` наследует dialect объемлющего
 %% (core.txt:2122), со своим — меняет его. Прочитанная здесь пользовательская
@@ -625,6 +676,8 @@ put_dynamic_anchor(Name, {Rid, Pointer},
 valid_anchor(Name, Dialect) when is_binary(Name) ->
     Pattern = case Dialect of
                   ?DRAFT_2019_09 -> <<"\\A[A-Za-z][-A-Za-z0-9.:_]*\\z">>;
+                  ?DRAFT_06      -> <<"\\A[A-Za-z][-A-Za-z0-9.:_]*\\z">>;
+                  ?DRAFT_07      -> <<"\\A[A-Za-z][-A-Za-z0-9.:_]*\\z">>;
                   _              -> <<"\\A[A-Za-z_][-A-Za-z0-9._]*\\z">>
               end,
     re:run(Name, Pattern, [{capture, none}]) =:= match;
@@ -787,6 +840,7 @@ children(Schema, #profile{draft = Draft} = Profile) ->
         named_children(<<"properties">>, Active),
         named_children(<<"patternProperties">>, Active),
         named_children(<<"dependentSchemas">>, Active),
+        dependencies_children(Active, Draft),
         ordered_children(<<"allOf">>, Active),
         ordered_children(<<"anyOf">>, Active),
         ordered_children(<<"oneOf">>, Active),
@@ -807,6 +861,23 @@ named_children(Keyword, Schema) ->
         _Other ->
             []
     end.
+
+%% Draft 6/7: `dependencies` — контейнер зависимостей. Schema-форма entry —
+%% schema position, array-форма (property dependency) — нет. В modern dialects
+%% keyword неизвестен, и внутрь его значений спускаться нельзя.
+-spec dependencies_children(#{binary() => json()}, dialect()) -> [child()].
+dependencies_children(Schema, Draft)
+  when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
+    case maps:get(<<"dependencies">>, Schema, undefined) of
+        Values when is_map(Values) ->
+            [{[<<"dependencies">>, Name], Child}
+             || {Name, Child} <- lists:sort(maps:to_list(Values)),
+                is_map(Child) orelse is_boolean(Child)];
+        _Other ->
+            []
+    end;
+dependencies_children(_Schema, _Draft) ->
+    [].
 
 -spec ordered_children(binary(), #{binary() => json()}) -> [child()].
 ordered_children(Keyword, Schema) ->
