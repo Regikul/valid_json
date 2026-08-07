@@ -153,6 +153,20 @@ conjunction_test_() ->
      ?_assertNot(valid(Constraints, 3)),
      ?_assert(valid([], <<"anything">>))].
 
+%% Пустой успешный результат — точная единица обычной конъюнкции: fast path
+%% обязан сохранять не только verdict, но и coverage, units и первую ошибку.
+conjoin_identity_test() ->
+    Identity = #eval_result{valid = true,
+                            evaluated = valid_json_evaluated:neutral(),
+                            units = []},
+    Unit = #output_unit{detail = {annotation, kept}},
+    Result = #eval_result{valid = undefined,
+                          evaluated = valid_json_evaluated:properties([<<"kept">>]),
+                          units = [Unit],
+                          error = {no_progress, {anonymous, <<"/loop">>}}},
+    ?assertEqual(Result, valid_json_eval:conjoin(Identity, Result)),
+    ?assertEqual(Result, valid_json_eval:conjoin(Result, Identity)).
+
 %% Внутри длинного fold units лежат в обратном порядке, но его граница обязана
 %% вернуть тот же статический порядок, что обычная конъюнкция.
 conjoin_acc_order_test() ->

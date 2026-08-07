@@ -47,9 +47,7 @@ eval(Addr, Instance, #eval_context{guard = Guard} = Context) ->
         true ->
             error_result({no_progress, Addr});
         false ->
-            Entered = enter_node(
-                        Addr,
-                        Context#eval_context{guard = sets:add_element(Frame, Guard)}),
+            Entered = enter_node(Addr, sets:add_element(Frame, Guard), Context),
             eval_node(resolve(Addr, Context#eval_context.schema), Instance, Entered)
     end.
 
@@ -65,6 +63,12 @@ error_result(Error) ->
 %% окончательно определяет результат и потому поглощает no-progress другой
 %% ветви; без провала первая ошибка сохраняется в статическом порядке обхода.
 -spec conjoin(#eval_result{}, #eval_result{}) -> #eval_result{}.
+conjoin(#eval_result{valid = true, evaluated = neutral, units = [],
+                     error = undefined}, Right) ->
+    Right;
+conjoin(Left, #eval_result{valid = true, evaluated = neutral, units = [],
+                           error = undefined}) ->
+    Left;
 conjoin(Left, Right) ->
     conjoined(Left, Right,
               Left#eval_result.units ++ Right#eval_result.units).
@@ -135,11 +139,14 @@ first_error(Error, _Later) -> Error.
 
 %% Граница ресурса определяется целевым rid, а не видом перехода: это первая
 %% половина адреса, и сравнивается именно она.
--spec enter_node(addr(), #eval_context{}) -> #eval_context{}.
-enter_node({Rid, _} = Addr, #eval_context{node = {Rid, _}} = Context) ->
-    Context#eval_context{node = Addr};
-enter_node({Rid, _} = Addr, #eval_context{dynamic_scope = Scope} = Context) ->
-    Context#eval_context{node = Addr, dynamic_scope = [Rid | Scope]}.
+-spec enter_node(addr(), sets:set(frame()), #eval_context{}) -> #eval_context{}.
+enter_node({Rid, _} = Addr, Guard,
+           #eval_context{node = {Rid, _}} = Context) ->
+    Context#eval_context{node = Addr, guard = Guard};
+enter_node({Rid, _} = Addr, Guard,
+           #eval_context{dynamic_scope = Scope} = Context) ->
+    Context#eval_context{node = Addr, guard = Guard,
+                         dynamic_scope = [Rid | Scope]}.
 
 %% Boolean true даёт успех с пустым покрытием, false — отказ. Аннотаций boolean
 %% не производит, но остаётся обычным адресуемым node и потому выпускает
