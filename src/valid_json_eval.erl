@@ -4,7 +4,8 @@
 
 -include("valid_json_core.hrl").
 
--export([run/3, eval/3, resolve/2, conjoin/2, error_result/1]).
+-export([run/3, eval/3, resolve/2, conjoin/2, conjoin_acc/2, finish_acc/1,
+         error_result/1]).
 
 %% Единственный вход в вычисление. Cycle guard — единственная причина отказа.
 -spec run(compiled(), json(), format()) -> {ok, #eval_result{}} | {error, eval_error()}.
@@ -65,6 +66,37 @@ error_result(Error) ->
 %% ветви; без провала первая ошибка сохраняется в статическом порядке обхода.
 -spec conjoin(#eval_result{}, #eval_result{}) -> #eval_result{}.
 conjoin(Left, Right) ->
+    conjoined(Left, Right,
+              Left#eval_result.units ++ Right#eval_result.units).
+
+%% Длинный левый fold хранит накопленные units в обратном порядке. Очередной
+%% правый результат всё ещё приходит в обычном порядке, поэтому его достаточно
+%% развернуть в голову аккумулятора: уже собранный префикс больше не копируется.
+%% За пределы fold такой результат не выходит — finish_acc/1 восстанавливает
+%% наблюдаемый статический порядок.
+-spec conjoin_acc(#eval_result{}, #eval_result{}) -> #eval_result{}.
+conjoin_acc(Left, Right) ->
+    Units = reverse_prepend(Right#eval_result.units, Left#eval_result.units),
+    conjoined(Left, Right, Units).
+
+-spec finish_acc(#eval_result{}) -> #eval_result{}.
+finish_acc(#eval_result{units = []} = Result) ->
+    Result;
+finish_acc(#eval_result{units = [_]} = Result) ->
+    Result;
+finish_acc(#eval_result{units = Units} = Result) ->
+    Result#eval_result{units = lists:reverse(Units)}.
+
+-spec reverse_prepend([#output_unit{}], [#output_unit{}]) -> [#output_unit{}].
+reverse_prepend([], Acc) ->
+    Acc;
+reverse_prepend([Unit], Acc) ->
+    [Unit | Acc];
+reverse_prepend(Units, Acc) ->
+    lists:reverse(Units, Acc).
+
+-spec conjoined(#eval_result{}, #eval_result{}, [#output_unit{}]) -> #eval_result{}.
+conjoined(Left, Right, Units) ->
     Valid = conjunction(Left#eval_result.valid, Right#eval_result.valid),
     Error = case Valid of
                 undefined -> first_error(Left#eval_result.error,
@@ -75,7 +107,7 @@ conjoin(Left, Right) ->
                  evaluated = valid_json_evaluated:merge(
                                Left#eval_result.evaluated,
                                Right#eval_result.evaluated),
-                 units = Left#eval_result.units ++ Right#eval_result.units,
+                 units = Units,
                  error = Error}.
 
 conjunction(false, _Right) -> false;

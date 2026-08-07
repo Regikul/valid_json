@@ -77,14 +77,14 @@ dependent(Present, Instance, Context) ->
     end.
 
 dependent([], _Instance, _Context, Result) ->
-    Result;
+    valid_json_eval:finish_acc(Result);
 dependent([{Name, Addr} | Rest], Instance, Context, Result) ->
-    Merged = valid_json_eval:conjoin(
+    Merged = valid_json_eval:conjoin_acc(
                Result,
                branch(Addr, <<"dependentSchemas">>, [Name], Instance, Context)),
     case Merged#eval_result.valid =:= false andalso
          Context#eval_context.format =:= flag of
-        true  -> Merged;
+        true  -> valid_json_eval:finish_acc(Merged);
         false -> dependent(Rest, Instance, Context, Merged)
     end.
 
@@ -109,25 +109,25 @@ legacy_dependencies(Present, Instance, Context) ->
 -spec legacy_dependencies([{binary(), [binary()] | addr()}], #{binary() => json()},
                          #eval_context{}, #eval_result{}) -> #eval_result{}.
 legacy_dependencies([], _Instance, _Context, Result) ->
-    Result;
+    valid_json_eval:finish_acc(Result);
 legacy_dependencies([{_Name, Names} | Rest], Instance, Context, Result)
   when is_list(Names) ->
     Valid = lists:all(fun(Name) -> maps:is_key(Name, Instance) end, Names),
     Property = #eval_result{valid = Valid,
                             evaluated = valid_json_evaluated:neutral(), units = []},
     next_legacy_dependencies(Rest, Instance, Context,
-                             valid_json_eval:conjoin(Result, Property));
+                             valid_json_eval:conjoin_acc(Result, Property));
 legacy_dependencies([{Name, Addr} | Rest], Instance, Context, Result) ->
     Branch = branch(Addr, <<"dependencies">>, [Name], Instance, Context),
     next_legacy_dependencies(Rest, Instance, Context,
-                             valid_json_eval:conjoin(Result, Branch)).
+                             valid_json_eval:conjoin_acc(Result, Branch)).
 
 -spec next_legacy_dependencies([{binary(), [binary()] | addr()}], #{binary() => json()},
                                #eval_context{}, #eval_result{}) -> #eval_result{}.
 next_legacy_dependencies(_Rest, _Instance,
                          #eval_context{format = flag},
                          #eval_result{valid = false} = Result) ->
-    Result;
+    valid_json_eval:finish_acc(Result);
 next_legacy_dependencies(Rest, Instance, Context, Result) ->
     legacy_dependencies(Rest, Instance, Context, Result).
 

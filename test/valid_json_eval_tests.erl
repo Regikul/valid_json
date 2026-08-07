@@ -153,6 +153,23 @@ conjunction_test_() ->
      ?_assertNot(valid(Constraints, 3)),
      ?_assert(valid([], <<"anything">>))].
 
+%% Внутри длинного fold units лежат в обратном порядке, но его граница обязана
+%% вернуть тот же статический порядок, что обычная конъюнкция.
+conjoin_acc_order_test() ->
+    Evaluated = valid_json_evaluated:neutral(),
+    FirstUnit = #output_unit{detail = {annotation, first}},
+    SecondUnit = #output_unit{detail = {annotation, second}},
+    ThirdUnit = #output_unit{detail = {annotation, third}},
+    Empty = #eval_result{valid = true, evaluated = Evaluated, units = []},
+    First = #eval_result{valid = true, evaluated = Evaluated,
+                         units = [FirstUnit, SecondUnit]},
+    Last = #eval_result{valid = false, evaluated = Evaluated, units = [ThirdUnit]},
+    Acc = valid_json_eval:conjoin_acc(
+            valid_json_eval:conjoin_acc(Empty, First), Last),
+    #eval_result{valid = false, units = Units} =
+        valid_json_eval:finish_acc(Acc),
+    ?assertEqual([FirstUnit, SecondUnit, ThirdUnit], Units).
+
 %% Провалившийся schema object не отдаёт эффективных аннотаций. Чистые
 %% assertions покрытия не вносят, поэтому маска остаётся нейтральной в обоих
 %% исходах — это фиксирует, что провал её не портит.
