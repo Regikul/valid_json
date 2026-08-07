@@ -6,6 +6,12 @@
     },
     "2019-09": {
       "commit": "c8eb3d320f60eca7cfb18da25337a426ceb40eaa"
+    },
+    "06": {
+      "commit": "c97da08127aa0d391f73b98b3655a35fe027b572"
+    },
+    "07": {
+      "commit": "6e2b42516dc7e8845c980d284c61bd44c9f95cd2"
     }
   }
 }

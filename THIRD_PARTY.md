@@ -9,6 +9,21 @@ This project vendors the following third-party files:
 | `vendor/uri_string/uri_string.erl` | `lib/stdlib/src/uri_string.erl` (Erlang/OTP 28.1.1) | Apache License 2.0 |
 | `test/valid_json_eunit_progress.erl` | `vendor/eunit_formatters/src/eunit_progress.erl` (rebar3 3.27.0) | Apache License 2.0 |
 
+## JSON Schema meta-schemas
+
+The builtin Draft 6 and Draft 7 meta-schemas are vendored without modification
+from `https://github.com/json-schema-org/json-schema-spec`. Machine-readable
+provenance (repository URL and commits) is recorded in
+[`priv/json_schema/UPSTREAM.json`](priv/json_schema/UPSTREAM.json).
+
+| File | Upstream source | License |
+| --- | --- | --- |
+| `priv/json_schema/draft-06/schema.json` | `schema.json` @ `c97da08127aa0d391f73b98b3655a35fe027b572` (draft-06 branch) | AFL or BSD |
+| `priv/json_schema/draft-07/schema.json` | `schema.json` @ `6e2b42516dc7e8845c980d284c61bd44c9f95cd2` (draft-07 branch) | AFL or BSD |
+
+The upstream repository declares its source material licensed under the AFL or
+BSD license; the repository itself does not distribute the license texts.
+
 ## Erlang/OTP
 
 The two module directories are selected by `rebar.config.script`: OTP20 uses
