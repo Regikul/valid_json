@@ -662,14 +662,16 @@ single(Schema, Position, State) ->
 
 %% `minContains` и `maxContains` без `contains` спецификация оставляет без
 %% эффекта (validation.txt:459 и 474), поэтому constraint не собирается. Значения
-%% всё равно разбираются: ошибка в них обязана останавливать компиляцию, как у
-%% `then` без `if`. Покрывает индексы `contains` только в Draft 2020-12 — в Draft
-%% 2019-09 его аннотация на `unevaluatedItems` не влияет.
+%% активных keywords всё равно разбираются: ошибка в них обязана останавливать
+%% компиляцию, как у `then` без `if`. В Draft 6/7 это неизвестные keywords, и их
+%% значения полностью игнорируются. Покрывает индексы `contains` только в Draft
+%% 2020-12 — в Draft 2019-09 его аннотация на `unevaluatedItems` не влияет.
 -spec contains(#{binary() => json()}, position(), state()) ->
           {ok, constraint() | none, state()} | {error, #schema_error{}}.
-contains(Schema, Position, #state{profile = #profile{draft = Draft}} = State) ->
+contains(Schema, Position,
+         #state{profile = #profile{draft = Draft} = Profile} = State) ->
     Keyword = <<"contains">>,
-    case bounds(Schema, Position) of
+    case bounds(Schema, Position, Profile) of
         {ok, Min, Max} ->
             case maps:find(Keyword, Schema) of
                 error ->
@@ -687,28 +689,33 @@ contains(Schema, Position, #state{profile = #profile{draft = Draft}} = State) ->
             Error
     end.
 
--spec bounds(#{binary() => json()}, position()) ->
+-spec bounds(#{binary() => json()}, position(), profile()) ->
           {ok, non_neg_integer() | undefined, non_neg_integer() | undefined}
         | {error, #schema_error{}}.
-bounds(Schema, Position) ->
-    case {bound(<<"minContains">>, Schema, Position),
-          bound(<<"maxContains">>, Schema, Position)} of
+bounds(Schema, Position, Profile) ->
+    case {bound(<<"minContains">>, Schema, Position, Profile),
+          bound(<<"maxContains">>, Schema, Position, Profile)} of
         {{ok, Min}, {ok, Max}}  -> {ok, Min, Max};
         {{error, _} = Error, _} -> Error;
         {_, {error, _} = Error} -> Error
     end.
 
--spec bound(binary(), #{binary() => json()}, position()) ->
+-spec bound(binary(), #{binary() => json()}, position(), profile()) ->
           {ok, non_neg_integer() | undefined} | {error, #schema_error{}}.
-bound(Keyword, Schema, Position) ->
-    case maps:find(Keyword, Schema) of
-        error ->
+bound(Keyword, Schema, Position, Profile) ->
+    case valid_json_vocabulary:active(Keyword, Profile) of
+        false ->
             {ok, undefined};
-        {ok, Value} ->
-            case non_negative(Value) of
-                {ok, Count}     -> {ok, Count};
-                {error, Reason} ->
-                    {error, schema_error(Reason, below(Keyword, Position))}
+        true ->
+            case maps:find(Keyword, Schema) of
+                error ->
+                    {ok, undefined};
+                {ok, Value} ->
+                    case non_negative(Value) of
+                        {ok, Count}     -> {ok, Count};
+                        {error, Reason} ->
+                            {error, schema_error(Reason, below(Keyword, Position))}
+                    end
             end
     end.
 

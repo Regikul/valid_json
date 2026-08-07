@@ -58,6 +58,51 @@ legacy_ref_ignores_misplaced_schema_test() ->
     Compiled = compile(Schema, ?DRAFT_07),
     ?assert(valid(Compiled, #{<<"value">> => 1})).
 
+legacy_contains_ignores_modern_bounds_test_() ->
+    [{atom_to_list(Name),
+      fun() ->
+              Compiled = compile(#{<<"contains">> => true,
+                                   <<"minContains">> => 2,
+                                   <<"maxContains">> => 2}, Draft),
+              ?assert(valid(Compiled, [1])),
+              ?assert(valid(Compiled, [1, 2, 3])),
+              ?assertNot(valid(Compiled, [])),
+              Ignored = compile(#{<<"contains">> => true,
+                                  <<"minContains">> => <<"unknown keyword">>,
+                                  <<"maxContains">> => null}, Draft),
+              ?assert(valid(Ignored, [1]))
+      end}
+     || {Name, Draft} <- [{draft6, ?DRAFT_06}, {draft7, ?DRAFT_07}]].
+
+legacy_ref_ignores_fragment_id_sibling_test_() ->
+    Root = <<"https://example.com/legacy-ref-sibling">>,
+    [{atom_to_list(Name),
+      fun() ->
+              Ignored = #{<<"$id">> => Root,
+                          <<"definitions">> =>
+                              #{<<"integer">> => #{<<"type">> => <<"integer">>},
+                                <<"hidden">> =>
+                                    #{<<"$ref">> => <<"#/definitions/integer">>,
+                                      <<"$id">> => <<"#not valid">>}}},
+              #{resources := Resources} = compile(Ignored, Draft),
+              #resource{anchors = Anchors} = maps:get(Root, Resources),
+              ?assertEqual(#{}, Anchors),
+
+              Referenced = #{<<"$id">> => Root,
+                             <<"definitions">> =>
+                                 #{<<"integer">> => #{<<"type">> => <<"integer">>},
+                                   <<"hidden">> =>
+                                       #{<<"$ref">> => <<"#/definitions/integer">>,
+                                         <<"$id">> => <<"#shadow">>}},
+                             <<"allOf">> => [#{<<"$ref">> => <<"#shadow">>}]},
+              ?assertMatch(
+                 {error, #schema_error{reason = unresolved_anchor}},
+                 valid_json_compile:compile(
+                   valid_json_store:temporary(), Referenced,
+                   [{default_dialect, Draft}, {schema_validation, trusted}]))
+      end}
+     || {Name, Draft} <- [{draft6, ?DRAFT_06}, {draft7, ?DRAFT_07}]].
+
 legacy_fragment_id_anchor_test() ->
     Root = <<"https://example.com/draft7-anchor">>,
     Schema = #{<<"$id">> => Root,

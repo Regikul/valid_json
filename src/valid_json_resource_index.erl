@@ -599,6 +599,10 @@ active_anchor(Schema, Addr, Profile) ->
 %% base URI.
 -spec index_legacy_id_anchor(#{binary() => json()}, addr(), profile(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
+index_legacy_id_anchor(#{<<"$ref">> := _}, _Addr,
+                       #profile{draft = Draft}, State)
+  when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
+    {ok, State};
 index_legacy_id_anchor(#{<<"$id">> := Id}, Addr,
                        #profile{draft = Draft}, State)
   when Draft =:= ?DRAFT_06; Draft =:= ?DRAFT_07 ->
