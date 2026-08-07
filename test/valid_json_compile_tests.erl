@@ -1225,6 +1225,53 @@ classic_dependencies_constraint_test() ->
            <<"baz">> => {anonymous, <<"/dependencies/baz">>}}}],
        constraints(<<>>, Nodes)).
 
+%% Draft 6/7: modern-only keywords — обычные неизвестные keywords: они не дают
+%% constraints, не образуют schema positions, не индексируют anchors и не
+%% маркируются в output.
+classic_ignores_modern_keywords_test() ->
+    Schema = #{<<"$defs">> => #{<<"x">> => #{<<"type">> => <<"integer">>}},
+               <<"$anchor">> => <<"a">>,
+               <<"dependentSchemas">> => #{<<"p">> => #{}},
+               <<"unevaluatedProperties">> => false,
+               <<"prefixItems">> => [],
+               <<"type">> => <<"integer">>},
+    {ok, #{resources := Resources}} =
+        valid_json_compile:compile_unchecked(Schema, ?DRAFT_06),
+    #resource{nodes = Nodes, anchors = Anchors} =
+        maps:get(anonymous, Resources),
+    ?assertEqual([{type, [integer]}], constraints(<<>>, Nodes)),
+    ?assertEqual([<<>>], maps:keys(Nodes)),
+    ?assertEqual(#{}, Anchors).
+
+%% `$vocabulary` в Draft 6/7 — неизвестный keyword: не меняет profile, не
+%% останавливает компиляцию, а keywords фиксированного профиля работают.
+classic_ignores_vocabulary_test() ->
+    Schema = #{<<"$vocabulary">> => #{}, <<"type">> => <<"integer">>},
+    {ok, #{resources := Resources}} =
+        valid_json_compile:compile_unchecked(Schema, ?DRAFT_07),
+    #resource{nodes = Nodes} = maps:get(anonymous, Resources),
+    ?assertEqual([{type, [integer]}], constraints(<<>>, Nodes)).
+
+%% Draft 6 считает if/then/else, readOnly, $comment и content* неизвестными;
+%% Draft 7 применяет их.
+classic_gating_test() ->
+    Schema = #{<<"if">> => #{<<"const">> => <<"x">>},
+               <<"then">> => #{<<"const">> => <<"y">>},
+               <<"readOnly">> => true,
+               <<"$comment">> => <<"c">>,
+               <<"contentMediaType">> => <<"application/json">>},
+    {ok, #{resources := D6Resources}} =
+        valid_json_compile:compile_unchecked(Schema, ?DRAFT_06),
+    #resource{nodes = D6Nodes} = maps:get(anonymous, D6Resources),
+    ?assertEqual([], constraints(<<>>, D6Nodes)),
+    {ok, #{resources := D7Resources}} =
+        valid_json_compile:compile_unchecked(Schema, ?DRAFT_07),
+    #resource{nodes = D7Nodes} = maps:get(anonymous, D7Resources),
+    ?assertMatch([{if_then_else, _, _, _},
+                  {annotation, <<"readOnly">>, true},
+                  {content, <<"contentMediaType">>, <<"application/json">>}],
+                 constraints(<<>>, D7Nodes)).
+
 %% Подсхема с `$id` начинает новый resource: адрес в parent constraint сразу
 %% канонический, а указатели внутри child считаются от его собственного корня.
 embedded_resource_test() ->

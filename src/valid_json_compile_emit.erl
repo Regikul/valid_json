@@ -151,7 +151,7 @@ compile_node(Schema, Position, #state{profile = Profile} = State)
                 {ok, WithDefinitions} ->
                     case node_constraints(Schema, Position, WithDefinitions) of
                         {ok, Constraints, Unevaluated, Built} ->
-                            Markers = output_markers(Schema),
+                            Markers = output_markers(Schema, Profile),
                             Extras = extra_constraints(Schema, Profile),
                             Node = #node{constraints =
                                              Markers ++ Constraints ++ Extras,
@@ -194,11 +194,12 @@ compile_ref_node(Schema, Position, State) ->
 %% Definition containers не вычисляют instance, но являются видимыми
 %% успешными keyword results в normative verbose example. Marker ничего не
 %% меняет в validity/coverage и остаётся невидимым в плоском basic.
--spec output_markers(#{binary() => json()}) -> [constraint()].
-output_markers(Schema) ->
+-spec output_markers(#{binary() => json()}, profile()) -> [constraint()].
+output_markers(Schema, Profile) ->
     [{marker, Keyword}
      || Keyword <- [<<"$defs">>, <<"definitions">>],
-        maps:is_key(Keyword, Schema)].
+        maps:is_key(Keyword, Schema),
+        valid_json_vocabulary:active(Keyword, Profile)].
 
 %% Значения unknown keywords не являются schema positions: discovery их уже не
 %% посещал, а emitter лишь сохраняет исходное JSON value как annotation в
@@ -235,8 +236,10 @@ place({Rid, Location}, Node, #state{resources = Resources} = State) ->
 -spec definition_containers(#{binary() => json()}, position(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
 definition_containers(Schema, Position, State) ->
-    definition_containers([<<"$defs">>, <<"definitions">>], Schema,
-                          Position, State).
+    Keywords = [Keyword || Keyword <- [<<"$defs">>, <<"definitions">>],
+                           valid_json_vocabulary:active(
+                             Keyword, State#state.profile)],
+    definition_containers(Keywords, Schema, Position, State).
 
 -spec definition_containers([binary()], #{binary() => json()}, position(), state()) ->
           {ok, state()} | {error, #schema_error{}}.

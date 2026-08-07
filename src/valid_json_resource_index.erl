@@ -585,14 +585,21 @@ place(Schema, {Rid, Pointer} = Addr, Contexts, Profile,
 -spec index_anchors(#{binary() => json()}, addr(), profile(), state()) ->
           {ok, state()} | {error, #schema_error{}}.
 index_anchors(Schema, Addr, Profile, State) ->
-    case anchor_name(<<"$anchor">>, Schema, Addr, Profile) of
-        {ok, none} ->
-            index_special_anchors(Schema, Addr, Profile, State);
-        {ok, Name} ->
-            index_special_anchors(Schema, Addr, Profile,
-                                  put_anchor(Name, Addr, State));
-        {error, _} = Error ->
-            Error
+    case valid_json_vocabulary:active(<<"$anchor">>, Profile) of
+        true ->
+            case anchor_name(<<"$anchor">>, Schema, Addr, Profile) of
+                {ok, none} ->
+                    index_special_anchors(Schema, Addr, Profile, State);
+                {ok, Name} ->
+                    index_special_anchors(Schema, Addr, Profile,
+                                          put_anchor(Name, Addr, State));
+                {error, _} = Error ->
+                    Error
+            end;
+        false ->
+            %% `$anchor` не существует в Draft 6/7: это обычный неизвестный
+            %% keyword, и его значение не индексируется и не проверяется.
+            index_special_anchors(Schema, Addr, Profile, State)
     end.
 
 -spec index_special_anchors(#{binary() => json()}, addr(), profile(), state()) ->
