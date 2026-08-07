@@ -257,6 +257,21 @@ default_dialect_test() ->
                      valid_json_store_manager:add_at(Store, [{Uri, Schema}]))
     end).
 
+trust_schema_store_policy_test() ->
+    Uri = <<"https://example.com/trusted-invalid">>,
+    Schema = #{<<"type">> => []},
+    with_store([{base_uri, ?BASE}, {trust_schema, true}], fun(Store) ->
+        ?assertEqual({ok, [Uri]},
+                     valid_json_store_manager:add_at(Store, [{Uri, Schema}])),
+        ?assertMatch({ok, _}, valid_json_store_manager:lookup(Store, Uri))
+    end),
+    with_store([{base_uri, ?BASE}], fun(Store) ->
+        ?assertMatch({error,
+                      {compilation,
+                       [{Uri, #schema_error{reason = schema_invalid}}]}},
+                     valid_json_store_manager:add_at(Store, [{Uri, Schema}]))
+    end).
+
 %% Незнакомая опция — ошибка конфигурации: хранилище не поднимается вовсе.
 unknown_option_test() ->
     ?assertMatch({error, _},
@@ -332,6 +347,15 @@ restart_artifacts_keeper_test() ->
         ?assertMatch({error, [{Leaf, _}]},
                      valid_json_store_manager:remove(Store, [Leaf])),
         ?assertEqual(ok, valid_json_store_manager:remove(Store, [Leaf, Root]))
+    end).
+
+trust_schema_survives_artifact_rebuild_test() ->
+    with_store([{base_uri, ?BASE}, {trust_schema, true}], fun(Store) ->
+        Uri = <<"https://example.com/trusted-rebuild">>,
+        {ok, [Uri]} = valid_json_store_manager:add_at(
+                        Store, [{Uri, #{<<"type">> => []}}]),
+        _Restarted = restart(Store, keeper(artifacts_table(Store))),
+        ?assertMatch({ok, _}, valid_json_store_manager:lookup(Store, Uri))
     end).
 
 %% Смерть хранителя реестра уносит обе таблицы: восстанавливать не из чего, и

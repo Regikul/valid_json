@@ -99,7 +99,7 @@ legacy_ref_ignores_fragment_id_sibling_test_() ->
                  {error, #schema_error{reason = unresolved_anchor}},
                  valid_json_compile:compile(
                    valid_json_store:temporary(), Referenced,
-                   [{default_dialect, Draft}, {schema_validation, trusted}]))
+                   [{default_dialect, Draft}, {trust_schema, true}]))
       end}
      || {Name, Draft} <- [{draft6, ?DRAFT_06}, {draft7, ?DRAFT_07}]].
 
@@ -127,7 +127,7 @@ legacy_fragment_id_rejects_misplaced_schema_test_() ->
                                               <<"/definitions/integer/$schema">>}}},
                    valid_json_compile:compile(valid_json_store:temporary(), Schema,
                                               [{default_dialect, Draft},
-                                               {schema_validation, trusted}]))
+                                               {trust_schema, true}]))
      || Draft <- [?DRAFT_06, ?DRAFT_07]].
 
 legacy_unknown_anchor_test() ->
@@ -171,7 +171,7 @@ cross_dialect(SourceDraft, TargetDraft) ->
                                                 [{Source, SourceSchema},
                                                  {Target, TargetSchema}]),
     {ok, #{resources := Resources} = Compiled} =
-        valid_json_compile:compile_uri(Store, Source, [{schema_validation, trusted}]),
+        valid_json_compile:compile_uri(Store, Source, [{trust_schema, true}]),
     ?assertEqual(SourceDraft, (maps:get(Source, Resources))#resource.dialect),
     ?assertEqual(TargetDraft, (maps:get(Target, Resources))#resource.dialect),
     ?assert(valid(Compiled, 1)),
@@ -204,14 +204,14 @@ cross_anchor(Source, SourceSchema, Target, TargetSchema) ->
                                                 [{Source, SourceSchema},
                                                  {Target, TargetSchema}]),
     {ok, Compiled} = valid_json_compile:compile_uri(
-                       Store, Source, [{schema_validation, trusted}]),
+                       Store, Source, [{trust_schema, true}]),
     ?assert(valid(Compiled, 1)),
     ?assertNot(valid(Compiled, <<"one">>)).
 
 compile(Schema, Draft) ->
     {ok, Compiled} = valid_json_compile:compile(valid_json_store:temporary(), Schema,
                                                  [{default_dialect, Draft},
-                                                  {schema_validation, trusted}]),
+                                                  {trust_schema, true}]),
     Compiled.
 
 valid(Compiled, Instance) ->

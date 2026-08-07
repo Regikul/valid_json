@@ -61,7 +61,7 @@ calling process.
 | `$dynamicRef` / `$dynamicAnchor` | yes | no | yes |
 | `$recursiveRef` / `$recursiveAnchor` | yes | no | no |
 | `$vocabulary` and custom meta-schemas | yes, meta-schemas come from the store | no | yes, the meta-schema comes from your loader |
-| Schema checked against its meta-schema on registration | yes | no | no |
+| Schema checked against its meta-schema on registration | yes by default; optional store-wide `trust_schema` skips it | no | no |
 | `format` as an assertion | opt-in per store, 15 formats | always on, 7 formats | opt-in per compile, full set |
 | `contentEncoding` / `contentMediaType` / `contentSchema` | annotations only | not implemented | checked when enabled |
 | Regular expression dialect | PCRE as-is | PCRE as-is | ECMA-262 patterns are adapted |

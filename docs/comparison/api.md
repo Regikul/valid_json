@@ -52,14 +52,16 @@ so `{ok, Output}` may well describe a failed validation — `valid` is a field i
 getting as far as evaluating: `not_found`, `unavailable`, or an evaluation error.
 `run_schema/3` takes the options of both layers in that one list: `output` is
 its own, everything else goes to the compiler, so `assert_format` and the choice
-of default dialect are available per call there.
+of default dialect are available per call there. `{trust_schema, true}` is also
+available when the caller guarantees the schema has already been checked.
 
 **Options of a store**, given to `valid_json:store_child_spec/2`:
-`base_uri`, `default_dialect`, `assert_format`, and `loader`; the last three
+`base_uri`, `default_dialect`, `assert_format`, `trust_schema`, and `loader`; the last four
 also read from the application environment. `base_uri` is required — it is how a
 store claims its schemas for a service, and relative document names become
 addresses against it. `assert_format` belongs to the store rather than to a call
-because it changes the compiled artifact.
+because it changes the compiled artifact. `trust_schema` is likewise store-wide
+and skips only meta-schema evaluation.
 
 **The loader** is a behaviour with one callback, `load/1`, returning the whole
 set of documents at once under relative names. Where the schemas live is the
@@ -154,8 +156,9 @@ differs is what it costs. jesse walks the raw schema in
 from its stored path. jsonschex hands you the compiled struct, so this is its
 normal case, and you decide how long the struct lives. `valid_json`, in
 `run_schema/3`, compiles the schema anew on every call — discovery, the
-meta-schema check, pattern compilation, and emission — and throws the artifact
-away afterwards. Its registry is temporary too, so such a schema must stand on
+meta-schema check unless `{trust_schema, true}` is supplied, pattern compilation,
+and emission — and throws the artifact away afterwards. Its registry is temporary
+too, so such a schema must stand on
 its own: `$ref` sees only the schema itself and the built-in
 meta-schemas, the documents of a store are invisible to it, and a relative `$id`
 has no base to resolve against.

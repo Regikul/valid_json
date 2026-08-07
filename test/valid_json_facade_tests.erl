@@ -246,6 +246,16 @@ run_schema_invalid_schema_test() ->
     ?assertMatch({error, #schema_error{reason = schema_invalid}},
                  valid_json:run_schema(#{<<"type">> => 42}, 1, [])).
 
+run_schema_trust_schema_test() ->
+    ok = ensure_app(),
+    Schema = #{<<"type">> => []},
+    ?assertMatch({error, #schema_error{reason = schema_invalid}},
+                 valid_json:run_schema(Schema, 1, [])),
+    ?assertEqual({ok, #{<<"valid">> => false}},
+                 valid_json:run_schema(
+                   Schema, 1,
+                   [{trust_schema, true}, {schema_validation, verbose}])).
+
 %% Реестр у этой компиляции временный: документ стандартного хранилища ей не
 %% виден, и `$ref` до него не дотягивается даже при живом хранилище.
 run_schema_does_not_see_store_test() ->
@@ -306,7 +316,9 @@ run_schema_assert_format_test() ->
 run_schema_bad_option_test() ->
     ok = ensure_app(),
     ?assertError(badarg, valid_json:run_schema(true, 1, [{quiet, true}])),
-    ?assertError(badarg, valid_json:run_schema(true, 1, [{output, invalid}])).
+    ?assertError(badarg, valid_json:run_schema(true, 1, [{output, invalid}])),
+    ?assertError(badarg, valid_json:run_schema(true, 1,
+                                               [{trust_schema, yes}])).
 
 %% Спека собственного хранилища берётся с фасада, а не из супервизора: за ней
 %% незачем идти в исходники. Пересказ должен быть дословным, и по этой спеке

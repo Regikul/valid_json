@@ -10,15 +10,16 @@
 -export_type([compile_option/0, schema_validation/0]).
 
 -ifdef(TEST).
--export([compile_unchecked/2]).
+-export([compile_emitter_fixture/2]).
 -endif.
 
 %% `schema_validation` называет формат, в котором проверка метасхемой доложит о
-%% провале. Значение `trusted`, отключающее проверку, принимается только в test
-%% build: в обычной сборке оно неотличимо от любой другой незнакомой опции.
+%% провале. `trust_schema` — отдельная политика вызывающего, которая может
+%% отключить саму проверку, но не compiler safety checks.
 -type compile_option() :: {default_dialect, dialect()}
                         | {assert_format, boolean()}
-                        | {schema_validation, schema_validation()}.
+                        | {schema_validation, schema_validation()}
+                        | {trust_schema, boolean()}.
 
 -spec compile(json(), dialect()) -> {ok, compiled()} | {error, #schema_error{}}.
 compile(Schema, Dialect) ->
@@ -30,18 +31,19 @@ compile(Schema, Dialect) ->
                 valid_json_store:temporary(), Profile),
     case valid_json_resource_index:discover(Schema, anonymous, Profile, Resolve) of
         {ok, Index} ->
-            finish(valid_json_store:temporary(), {ok, Index, []}, basic, false);
+            finish(valid_json_store:temporary(), {ok, Index, []}, basic, false,
+                   false);
         {error, _} = Error ->
             Error
     end.
 
 -ifdef(TEST).
-%% Точные emitter fixtures проверяют страховочную тотальность и форму IR
-%% отдельно от публичной проверки метасхемой. Функция существует только в test
-%% build; пользовательские compile-входы всегда проходят finish/3.
--spec compile_unchecked(json(), dialect()) ->
+%% Точные emitter fixtures проверяют защитную обработку некорректных входов и
+%% форму IR отдельно от публичной проверки метасхемой. Функция существует только
+%% в test build; пользовательские compile-входы всегда проходят schema-check.
+-spec compile_emitter_fixture(json(), dialect()) ->
           {ok, compiled()} | {error, #schema_error{}}.
-compile_unchecked(Schema, Dialect) ->
+compile_emitter_fixture(Schema, Dialect) ->
     Profile = valid_json_vocabulary:canonical(Dialect),
     Resolve = valid_json_compile_closure:dialect_resolver(
                 valid_json_store:temporary(), Profile),
@@ -58,10 +60,10 @@ compile_unchecked(Schema, Dialect) ->
           {ok, compiled()} | {error, #schema_error{}}.
 compile(#store{} = Store, Schema, Options) when is_list(Options) ->
     case compile_options(Options) of
-        {ok, DefaultDialect, SchemaValidation, AssertFormat} ->
+        {ok, DefaultDialect, SchemaValidation, TrustSchema, AssertFormat} ->
             finish(Store, valid_json_compile_closure:inline(Store, Schema,
                                                             DefaultDialect),
-                   SchemaValidation, AssertFormat);
+                   SchemaValidation, TrustSchema, AssertFormat);
         {error, _} = Error ->
             Error
     end;
@@ -75,7 +77,7 @@ compile(Store, Schema, Options) ->
 compile_uri(#store{} = Store, Uri, Options)
   when is_binary(Uri), is_list(Options) ->
     case compile_options(Options) of
-        {ok, DefaultDialect, SchemaValidation, AssertFormat} ->
+        {ok, DefaultDialect, SchemaValidation, TrustSchema, AssertFormat} ->
             case entry_name(Uri, Store#store.base) of
                 {ok, Name} ->
                     case valid_json_store:fetch(Name, Store) of
@@ -85,7 +87,7 @@ compile_uri(#store{} = Store, Uri, Options)
                         #document{} = Document ->
                             finish(Store, valid_json_compile_closure:document(
                                             Store, Document, DefaultDialect),
-                                   SchemaValidation, AssertFormat)
+                                   SchemaValidation, TrustSchema, AssertFormat)
                     end;
                 {error, _} = Error ->
                     Error
@@ -98,12 +100,13 @@ compile_uri(Store, Uri, Options) ->
 
 -spec finish(store(),
              {ok, valid_json_resource_index:index(), [uri()]}
-           | {error, #schema_error{}}, schema_validation(), boolean()) ->
+           | {error, #schema_error{}}, schema_validation(), boolean(), boolean()) ->
           {ok, compiled()} | {error, #schema_error{}}.
-finish(Store, {ok, Index, Sources0}, SchemaValidation, AssertFormat) ->
+finish(Store, {ok, Index, Sources0}, SchemaValidation, TrustSchema, AssertFormat) ->
     case valid_json_resource_index:check_references(Index) of
         ok ->
-            case valid_json_schema_check:check(Index, Store, SchemaValidation) of
+            case valid_json_schema_check:check(Index, Store, SchemaValidation,
+                                               TrustSchema) of
                 {ok, MetaSources} ->
                     Sources = ordsets:union(Sources0, MetaSources),
                     valid_json_compile_emit:emit(Index, Sources, AssertFormat);
@@ -113,56 +116,53 @@ finish(Store, {ok, Index, Sources0}, SchemaValidation, AssertFormat) ->
         {error, _} = Error ->
             Error
     end;
-finish(_Store, {error, _} = Error, _SchemaValidation, _AssertFormat) ->
+finish(_Store, {error, _} = Error, _SchemaValidation, _TrustSchema,
+       _AssertFormat) ->
     Error.
 
 -spec compile_options([term()]) ->
-          {ok, dialect(), schema_validation(), boolean()}
+          {ok, dialect(), schema_validation(), boolean(), boolean()}
         | {error, #schema_error{}}.
 compile_options(Options) ->
-    compile_options(Options, ?DRAFT_2020_12, basic, false).
+    compile_options(Options, ?DRAFT_2020_12, basic, false, false).
 
-%% Пропуск проверки метасхемой нужен вручную выписанным fixtures и conformance
-%% runner'у, где схемы заведомо валидны. Поставляемая библиотека проверяет
-%% всегда (validator-resources-runtime.md, «Проверка схем и ошибки»), поэтому
-%% вне test build `trusted` неотличим от любой другой негодной опции.
--ifdef(TEST).
--define(SCHEMA_VALIDATION(Mode),
-        Mode =:= trusted; Mode =:= flag; Mode =:= basic;
-        Mode =:= detailed; Mode =:= verbose).
--else.
 -define(SCHEMA_VALIDATION(Mode),
         Mode =:= flag; Mode =:= basic;
         Mode =:= detailed; Mode =:= verbose).
--endif.
 
 %% `assert_format` меняет IR и потому является compile option, а не option
 %% вычисления (validator-resources-runtime.md, «Опции»). По умолчанию `format`
 %% только аннотирует: включать проверку без явной настройки спецификация
 %% запрещает (validation.txt:617).
--spec compile_options([term()], dialect(), schema_validation(), boolean()) ->
-          {ok, dialect(), schema_validation(), boolean()}
+-spec compile_options([term()], dialect(), schema_validation(), boolean(), boolean()) ->
+          {ok, dialect(), schema_validation(), boolean(), boolean()}
         | {error, #schema_error{}}.
-compile_options([], DefaultDialect, SchemaValidation, AssertFormat) ->
-    {ok, DefaultDialect, SchemaValidation, AssertFormat};
+compile_options([], DefaultDialect, SchemaValidation, TrustSchema, AssertFormat) ->
+    {ok, DefaultDialect, SchemaValidation, TrustSchema, AssertFormat};
 compile_options([{default_dialect, Dialect} | Rest], _DefaultDialect,
-                SchemaValidation, AssertFormat)
+                SchemaValidation, TrustSchema, AssertFormat)
   when is_binary(Dialect) ->
     case valid_json_compile_closure:supported_dialect(Dialect) of
         {ok, Normalized} ->
-            compile_options(Rest, Normalized, SchemaValidation, AssertFormat);
+            compile_options(Rest, Normalized, SchemaValidation, TrustSchema,
+                            AssertFormat);
         {error, _} = Error ->
             Error
     end;
 compile_options([{assert_format, Assert} | Rest], DefaultDialect,
-                SchemaValidation, _AssertFormat)
+                SchemaValidation, TrustSchema, _AssertFormat)
   when is_boolean(Assert) ->
-    compile_options(Rest, DefaultDialect, SchemaValidation, Assert);
+    compile_options(Rest, DefaultDialect, SchemaValidation, TrustSchema, Assert);
 compile_options([{schema_validation, Mode} | Rest], DefaultDialect,
-                _SchemaValidation, AssertFormat)
+                _SchemaValidation, TrustSchema, AssertFormat)
   when ?SCHEMA_VALIDATION(Mode) ->
-    compile_options(Rest, DefaultDialect, Mode, AssertFormat);
-compile_options(_Options, _DefaultDialect, _SchemaValidation, _AssertFormat) ->
+    compile_options(Rest, DefaultDialect, Mode, TrustSchema, AssertFormat);
+compile_options([{trust_schema, Trust} | Rest], DefaultDialect,
+                SchemaValidation, _TrustSchema, AssertFormat)
+  when is_boolean(Trust) ->
+    compile_options(Rest, DefaultDialect, SchemaValidation, Trust, AssertFormat);
+compile_options(_Options, _DefaultDialect, _SchemaValidation, _TrustSchema,
+                _AssertFormat) ->
     erlang:error(badarg).
 
 -spec entry_name(uri(), rid()) ->

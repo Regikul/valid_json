@@ -42,6 +42,7 @@
 -type store_option() :: {base_uri, uri()}
                       | {default_dialect, dialect()}
                       | {assert_format, boolean()}
+                      | {trust_schema, boolean()}
                       | {loader, valid_json_loader:loader()}.
 
 %% Промежуток между попытками в `wait`: имя управляющего в перезапуске бывает не
@@ -556,7 +557,8 @@ known_options([]) ->
 known_options([{loader, {Module, _Args}} | Rest]) when is_atom(Module) ->
     known_options(Rest);
 known_options([{Key, _Value} | Rest])
-  when Key =:= base_uri; Key =:= default_dialect; Key =:= assert_format ->
+  when Key =:= base_uri; Key =:= default_dialect; Key =:= assert_format;
+       Key =:= trust_schema ->
     known_options(Rest);
 known_options(Options) ->
     erlang:error(badarg, [Options]).
@@ -571,7 +573,8 @@ registry_options(Options) ->
 -spec compile_options([store_option()]) -> [valid_json_compile:compile_option()].
 compile_options(Options) ->
     [{default_dialect, dialect(option(default_dialect, Options, ?DRAFT_2020_12))},
-     {assert_format, assert_format(option(assert_format, Options, false))}].
+     {assert_format, assert_format(option(assert_format, Options, false))},
+     {trust_schema, trust_schema(option(trust_schema, Options, false))}].
 
 dialect(Dialect) when is_binary(Dialect) -> Dialect;
 dialect(Other) -> erlang:error(badarg, [{default_dialect, Other}]).
@@ -579,8 +582,11 @@ dialect(Other) -> erlang:error(badarg, [{default_dialect, Other}]).
 assert_format(Assert) when is_boolean(Assert) -> Assert;
 assert_format(Other) -> erlang:error(badarg, [{assert_format, Other}]).
 
-%% Одно правило на все три опции: значение вызова, затем app env библиотеки,
-%% затем встроенное умолчание. Все три одинаково влияют на все артефакты
+trust_schema(Trust) when is_boolean(Trust) -> Trust;
+trust_schema(Other) -> erlang:error(badarg, [{trust_schema, Other}]).
+
+%% Одно правило на все четыре compile options: значение вызова, затем app env
+%% библиотеки, затем встроенное умолчание. Все четыре одинаково влияют на все артефакты
 %% хранилища сразу, поэтому частных правил у них нет.
 -spec option(atom(), [store_option()], term()) -> term().
 option(Key, Options, Default) ->

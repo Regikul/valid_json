@@ -182,7 +182,7 @@ file_tests(Store, Dir, Dialect, File) ->
     %% Dialect директории задаётся опцией, а не подставляется вместо `$schema`:
     %% схема, которая называет свой dialect сама, остаётся сильнее раскладки
     %% сьюта.
-    Options = [{default_dialect, Dialect}, {schema_validation, trusted}
+    Options = [{default_dialect, Dialect}, {trust_schema, true}
                | format_options(File)],
     {filename:join(Dir, File),
      [group_tests(Store, Options, Group)

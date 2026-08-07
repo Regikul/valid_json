@@ -146,8 +146,12 @@ is started by the library itself, so it has no `store_child_spec` counterpart â€
 embedding is only for your own stores.
 
 A store's options are `base_uri` (required), `default_dialect`,
-`assert_format`, and `loader`. `assert_format` belongs to the store rather than
-to a single call, because it changes the compiled artifact.
+`assert_format`, `trust_schema`, and `loader`. `assert_format` and
+`trust_schema` belong to the store rather than to a single call: they affect
+compiled artifacts and the trust boundary of the whole store. `trust_schema`
+defaults to `false` and skips only meta-schema evaluation; compiler safety
+checks, reference resolution, dialect/profile resolution, and instance
+validation remain active.
 
 ## The loader behaviour
 

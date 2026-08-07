@@ -40,7 +40,8 @@ call repeats the whole of compilation, and the temporary registry holds nothing
 but the schema itself and the built-in meta-schemas, so such a schema cannot
 refer to a registered document or carry a relative `$id`. It is the door for a
 schema that arrives with the request; a schema used more than once is cheaper
-registered.
+registered. Meta-schema evaluation is enabled by default and can be skipped with
+`{trust_schema, true}` when the caller owns the schema's trust decision.
 
 Validation does not go through the manager. `validate/3` reads the compiled
 artifact from ETS in the caller's own process and evaluates it there, so
@@ -120,5 +121,5 @@ fastest of the three for static schemas. In exchange, there is no answer to
 | Survives a process restart | yes, tables outlive the manager | no, the table dies with its owner | as designed by the caller |
 | Cost of the hot path | ETS read plus evaluation, in the caller | full walk of the raw schema | rule execution on the struct |
 | Reloading the set of schemas | `add` and `remove`, all-or-nothing, affected artifacts rebuilt | `add_schema` and `del_schema`, one key at a time | recompile and replace the struct |
-| Broken schema is detected | at registration, against the meta-schema | at validation, as `schema_invalid` | at compile time |
+| Broken schema is detected | at registration by default, against the meta-schema; `trust_schema` skips that check | at validation, as `schema_invalid` | at compile time |
 | Network | never | possible during validation | inside your loader |

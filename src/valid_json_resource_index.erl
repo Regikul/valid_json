@@ -25,10 +25,11 @@
 
 %% Написанный в `$schema` dialect превращает в профиль вызывающий: реестр
 %% пользовательских метасхем принадлежит ему, а индекс о store не знает. Вторым
-%% элементом успеха идёт каноническое имя прочитанной пользовательской
-%% метасхемы либо `undefined` у канонического dialect.
+%% элементом успеха идёт список канонических имён пользовательских metaschema
+%% documents, которые определяют этот profile; встроенные документы в список не
+%% входят.
 -type resolver() :: fun((uri()) ->
-                           {ok, profile(), uri() | undefined} | {error, reason()}).
+                           {ok, profile(), [uri()]} | {error, reason()}).
 
 %% Индекс является промежуточным значением compiler и не входит в compiled().
 -opaque index() :: #{root := rid(),
@@ -412,7 +413,7 @@ walk(Schema, Rid, Location, Contexts, RootOrChild, Profile, State)
 walk(Other, Rid, Location, Contexts, _RootOrChild, Profile, State) ->
     %% Некорректная schema position остаётся в сыром index, чтобы единственным
     %% источником синтаксической ошибки стала метасхема. Emitter всё равно имеет
-    %% страховочную totality-ветвь на случай прямого внутреннего вызова.
+    %% защитную ветвь обработки на случай прямого внутреннего вызова.
     place(Other, addr(Rid, Location), Contexts, Profile, State).
 
 -spec enter_resource(json(), rid(), location(), [context()], root | child,
@@ -488,8 +489,8 @@ enter_resource(_Schema, Rid, Location, Contexts, child, Profile, State) ->
 resource_profile(#{<<"$schema">> := Dialect}, Rid, _Outer,
                  #state{resolve = Resolve} = State) when is_binary(Dialect) ->
     case Resolve(Dialect) of
-        {ok, Profile, Metaschema} ->
-            {ok, Profile, add_metaschema(Metaschema, State)};
+        {ok, Profile, Metaschemas} ->
+            {ok, Profile, add_metaschemas(Metaschemas, State)};
         {error, Reason} ->
             {error, schema_error(Reason, keyword_addr(Rid, [], <<"$schema">>))}
     end;
@@ -506,11 +507,9 @@ legacy_subschema_dialect(#{<<"$schema">> := _}, #profile{draft = Draft})
 legacy_subschema_dialect(_Schema, _Profile) ->
     false.
 
--spec add_metaschema(uri() | undefined, state()) -> state().
-add_metaschema(undefined, State) ->
-    State;
-add_metaschema(Uri, #state{metaschemas = Metaschemas} = State) ->
-    State#state{metaschemas = ordsets:add_element(Uri, Metaschemas)}.
+-spec add_metaschemas([uri()], state()) -> state().
+add_metaschemas(New, #state{metaschemas = Metaschemas} = State) ->
+    State#state{metaschemas = ordsets:union(New, Metaschemas)}.
 
 -spec resolve_id(json(), rid(), profile()) ->
           {resource, rid()} | {anchor, binary()} | {error, reason()}.

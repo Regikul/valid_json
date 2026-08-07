@@ -154,7 +154,7 @@ schema_validation_modes_test_() ->
                                     <<"errors">> := [_ | _]}}},
         Compile([{schema_validation, verbose}])),
      ?_assertMatch({ok, #{root := anonymous}},
-                   Compile([{schema_validation, trusted}]))].
+                   Compile([{trust_schema, true}]))].
 
 invalid_schema_validation_mode_test_() ->
     Store = valid_json_store:temporary(),
@@ -164,16 +164,19 @@ invalid_schema_validation_mode_test_() ->
      ?_assertError(badarg,
                    valid_json_compile:compile_uri(
                      Store, ?DRAFT_2020_12,
-                     [{schema_validation, unknown}]))].
+                     [{schema_validation, unknown}])),
+     ?_assertError(badarg,
+                   valid_json_compile:compile(
+                     Store, true, [{trust_schema, yes}]))].
 
-trusted_still_checks_references_test() ->
+trust_schema_still_checks_references_test() ->
     Missing = <<"https://example.com/missing">>,
     ?assertEqual(
        {error, #schema_error{reason = {unknown_document, Missing},
                              location = {anonymous, <<"/$ref">>}}},
        valid_json_compile:compile(
          valid_json_store:temporary(), #{<<"$ref">> => Missing},
-         [{schema_validation, trusted}])).
+         [{trust_schema, true}])).
 
 non_schema_position_rejection_test_() ->
     [?_test(assert_schema_invalid(42, ?DRAFT_2020_12, <<>>, ?DRAFT_2020_12)),
@@ -229,6 +232,12 @@ custom_metaschema_is_an_ordinary_store_document_test() ->
     {ok, Compiled} =
         valid_json_compile:compile(Store, Good, [{schema_validation, flag}]),
     ?assertEqual([Meta, Rules], maps:get(sources, Compiled)),
+    {ok, Trusted} =
+        valid_json_compile:compile(Store, Good, [{trust_schema, true}]),
+    %% Rules is needed only to execute Meta as a metaschema. Trusting the
+    %% schema keeps Meta itself as a profile dependency, but not that `$ref`
+    %% closure.
+    ?assertEqual([Meta], maps:get(sources, Trusted)),
     %% `$schema` использует метасхему для проверки, но не втягивает её nodes в
     %% пользовательский artifact как обычный `$ref`.
     ?assertEqual([anonymous], maps:keys(maps:get(resources, Compiled))).
@@ -302,8 +311,29 @@ schema_validation_is_propagated_to_custom_metaschema_test() ->
                                   [{schema_validation, flag}])),
     {ok, Compiled} =
         valid_json_compile:compile(Store, Schema,
-                                   [{schema_validation, trusted}]),
+                                   [{trust_schema, true}]),
     ?assertEqual([Meta], maps:get(sources, Compiled)).
+
+trusted_custom_metaschema_schema_chain_sources_test() ->
+    Base = <<"https://example.com/meta/base">>,
+    Meta = <<"https://example.com/meta/derived">>,
+    BaseJson = #{<<"$id">> => Base,
+                 <<"$schema">> => ?DRAFT_2020_12,
+                 <<"$vocabulary">> =>
+                     #{<<"https://json-schema.org/draft/2020-12/vocab/core">>
+                           => true}},
+    MetaJson = #{<<"$id">> => Meta,
+                 <<"$schema">> => Base,
+                 <<"$vocabulary">> =>
+                     #{<<"https://json-schema.org/draft/2020-12/vocab/core">>
+                           => true}},
+    {ok, [Base, Meta], Store} =
+        valid_json_store:add(valid_json_store:temporary(),
+                             [{Base, BaseJson}, {Meta, MetaJson}]),
+    {ok, Compiled} =
+        valid_json_compile:compile(Store, #{<<"$schema">> => Meta},
+                                   [{trust_schema, true}]),
+    ?assertEqual([Base, Meta], maps:get(sources, Compiled)).
 
 %% Перезапуски идут на отдельной ветке: intensity супервизора равна единице, и
 %% двух убийств подряд он не переживает, а имя таблицы глобально и второй ветки

@@ -83,7 +83,7 @@ close_documents(Store, [Entry | Rest], Default, Index0, Loaded, Sources0) ->
                                             Sources = add_sources(
                                                         valid_json_resource_index:metaschemas(
                                                           DocumentIndex),
-                                                        add_source(
+                                                        add_sources(
                                                           Metaschema,
                                                           add_source(Source, Sources0))),
                                             close_documents(
@@ -130,16 +130,16 @@ add_sources(New, Sources) ->
     ordsets:union(New, Sources).
 
 %% Профиль документа выбирается его собственным `$schema`, а без него — профилем
-%% компиляции. Наружу уходит и канонический URI прочитанной пользовательской
-%% метасхемы: её `$vocabulary` влияет на артефакт, поэтому она обязана попасть в
-%% `sources` (validator-resources-runtime.md, «Транзитивное замыкание»).
+%% компиляции. Наружу уходит список канонических URI пользовательских
+%% metaschema documents, чей `$vocabulary` или `$schema`-draft определяет profile:
+%% эти документы влияют на артефакт и обязаны попасть в `sources`.
 -spec document_profile(json(), profile(), rid(), store()) ->
-          {ok, profile(), uri() | undefined} | {error, #schema_error{}}.
+          {ok, profile(), [uri()]} | {error, #schema_error{}}.
 document_profile(#{<<"$schema">> := Dialect}, #profile{draft = Default},
                  Resource, Store)
   when is_binary(Dialect) ->
     case dialect_profile(Dialect, Store, Default, []) of
-        {ok, _Profile, _Metaschema} = Ok ->
+        {ok, _Profile, _Metaschemas} = Ok ->
             Ok;
         {error, Reason} ->
             {error, #schema_error{reason = Reason,
@@ -150,7 +150,7 @@ document_profile(#{<<"$schema">> := Other}, _Default, Resource, _Store) ->
     {error, #schema_error{reason = {bad_keyword_value, Other},
                           location = keyword_location(Resource, <<"$schema">>)}};
 document_profile(_Schema, Default, _Resource, _Store) ->
-    {ok, Default, undefined}.
+    {ok, Default, []}.
 
 %% Канонический dialect несёт встроенный набор keywords. Всякий другой URI
 %% обязан называть зарегистрированный document: это пользовательская метасхема,
@@ -158,29 +158,29 @@ document_profile(_Schema, Default, _Resource, _Store) ->
 %% берётся из её `$schema` тем же правилом, поэтому цепочка идёт под guard:
 %% метасхема, зацикленная на себе, dialect не определяет.
 -spec dialect_profile(uri(), store(), dialect(), [uri()]) ->
-          {ok, profile(), uri() | undefined} | {error, reason()}.
+          {ok, profile(), [uri()]} | {error, reason()}.
 dialect_profile(Dialect, Store, Default, Seen) ->
     case valid_json_uri:resolve(Dialect, anonymous) of
         {ok, ?DRAFT_2020_12 = Canonical, root} ->
-            {ok, valid_json_vocabulary:canonical(Canonical), undefined};
+            {ok, valid_json_vocabulary:canonical(Canonical), []};
         {ok, ?DRAFT_2019_09 = Canonical, root} ->
-            {ok, valid_json_vocabulary:canonical(Canonical), undefined};
+            {ok, valid_json_vocabulary:canonical(Canonical), []};
         {ok, ?DRAFT_07 = Canonical, root} ->
-            {ok, valid_json_vocabulary:canonical(Canonical), undefined};
+            {ok, valid_json_vocabulary:canonical(Canonical), []};
         {ok, ?DRAFT_06 = Canonical, root} ->
-            {ok, valid_json_vocabulary:canonical(Canonical), undefined};
+            {ok, valid_json_vocabulary:canonical(Canonical), []};
         {ok, Uri, root} when Uri =/= anonymous ->
             metaschema_profile(Uri, Store, Default, Seen);
         _ ->
             {error, {unknown_dialect, Dialect}}
     end.
 
-%% На этой фазе сама метасхема не компилируется: из неё читается один
-%% `$vocabulary`. Поэтому в основное замыкание она не попадает и её собственные
-%% `$ref` здесь не разрешаются — отдельный schema-check pass скомпилирует её с
-%% локальным cache и добавит транзитивные документы в `sources`.
+%% На этой фазе сама метасхема не компилируется: из неё читаются `$vocabulary` и
+%% `$schema`-цепочка. Поэтому её собственные `$ref` здесь не разрешаются — они
+%% нужны только отдельному schema-check pass и не должны попадать в artifact при
+%% `trust_schema`.
 -spec metaschema_profile(uri(), store(), dialect(), [uri()]) ->
-          {ok, profile(), uri() | undefined} | {error, reason()}.
+          {ok, profile(), [uri()]} | {error, reason()}.
 metaschema_profile(Uri, Store, Default, Seen) ->
     case lists:member(Uri, Seen) of
         true ->
@@ -196,13 +196,15 @@ metaschema_profile(Uri, Store, Default, Seen) ->
     end.
 
 -spec metaschema_vocabularies(uri(), #document{}, store(), dialect(), [uri()]) ->
-          {ok, profile(), uri() | undefined} | {error, reason()}.
+          {ok, profile(), [uri()]} | {error, reason()}.
 metaschema_vocabularies(Uri, #document{json = Json} = Metaschema, Store, Default,
                         Seen) ->
     case metaschema_draft(Json, Store, Default, Seen) of
-        {ok, Draft} ->
+        {ok, Draft, DraftSources} ->
             case valid_json_vocabulary:declared(Uri, Json, Draft) of
-                {ok, Profile} -> {ok, Profile, source_name(Metaschema, Store)};
+                {ok, Profile} ->
+                    {ok, Profile, add_source(source_name(Metaschema, Store),
+                                             DraftSources)};
                 {error, _} = Error -> Error
             end;
         {error, _} = Error ->
@@ -213,17 +215,17 @@ metaschema_vocabularies(Uri, #document{json = Json} = Metaschema, Store, Default
 %% `$schema` подчиняется тому же правилу, что и обычный document: её draft
 %% берётся из dialect компиляции по умолчанию.
 -spec metaschema_draft(json(), store(), dialect(), [uri()]) ->
-          {ok, dialect()} | {error, reason()}.
+          {ok, dialect(), [uri()]} | {error, reason()}.
 metaschema_draft(#{<<"$schema">> := Dialect}, Store, Default, Seen)
   when is_binary(Dialect) ->
     case dialect_profile(Dialect, Store, Default, Seen) of
-        {ok, #profile{draft = Draft}, _Metaschema} -> {ok, Draft};
+        {ok, #profile{draft = Draft}, Sources} -> {ok, Draft, Sources};
         {error, _} = Error                         -> Error
     end;
 metaschema_draft(#{<<"$schema">> := Other}, _Store, _Default, _Seen) ->
     {error, {bad_keyword_value, Other}};
 metaschema_draft(_Json, _Store, Default, _Seen) ->
-    {ok, Default}.
+    {ok, Default, []}.
 
 %% Встроенные метасхемы в `sources` не входят: они не меняются никогда.
 -spec source_name(#document{}, store()) -> uri() | undefined.

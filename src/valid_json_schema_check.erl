@@ -5,21 +5,22 @@
 
 -include("valid_json_resources.hrl").
 
--export([check/3]).
+-export([check/4]).
 
 -type cache() :: #{uri() => compiled()}.
 
--spec check(valid_json_resource_index:index(), store(), schema_validation()) ->
+-spec check(valid_json_resource_index:index(), store(), schema_validation(), boolean()) ->
           {ok, [uri()]} | {error, #schema_error{}}.
-check(Index, #store{} = Store, Mode) ->
+check(_Index, _Store, _Mode, true) ->
+    %% Profile resolution and compiler safety checks have already happened in
+    %% the closure/index phases. Trust only removes this meta-evaluation pass.
+    {ok, []};
+check(Index, #store{} = Store, Mode, false) ->
     Root = valid_json_resource_index:root(Index),
     Resources = valid_json_resource_index:resources(Index),
     Profiles = valid_json_resource_index:profiles(Index),
     Rids = [Root | lists:sort(maps:keys(Resources) -- [Root])],
-    Instances = case Mode of
-                    trusted -> #{};
-                    _       -> resource_instances(Rids, Resources, Index)
-                end,
+    Instances = resource_instances(Rids, Resources, Index),
     check_resources(Rids, Instances, Profiles, Store, Mode, #{}, []).
 
 -spec check_resources([rid()], #{rid() => json()}, #{rid() => profile()},
@@ -117,8 +118,6 @@ metaschema(#profile{uri = Uri, draft = Draft}, Store, Mode, Cache) ->
 
 -spec validate(compiled(), uri(), rid(), json(), schema_validation()) ->
           ok | {error, #schema_error{}}.
-validate(_Compiled, _MetaUri, _Rid, _Schema, trusted) ->
-    ok;
 validate(Compiled, MetaUri, Rid, Schema, Format)
   when Format =:= flag; Format =:= basic;
        Format =:= detailed; Format =:= verbose ->

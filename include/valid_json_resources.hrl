@@ -37,10 +37,7 @@
 
 %% Политика проверки корней resources их метасхемами: значение называет формат,
 %% в котором докладывается провал. Это решение компиляции, и ядро его не читает.
-%% `trusted` пропускает проверку целиком и существует только в test build, где
-%% схемы fixtures выписаны вручную и заведомо валидны; поставляемая библиотека
-%% проверяет всегда.
--type schema_validation() :: trusted | format().
+-type schema_validation() :: flag | basic | detailed | verbose.
 
 -record(document, {
     registered :: uri(),

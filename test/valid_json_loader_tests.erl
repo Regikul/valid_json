@@ -272,6 +272,18 @@ loader_compilation_failure_test() ->
               #{load => fun() -> {ok, [{<<"broken">>, #{<<"type">> => 1}}]} end}},
     ?assertEqual(dead, tree_outcome([{base_uri, ?BASE}, {loader, Broken}])).
 
+trusted_loader_accepts_schema_without_meta_validation_test() ->
+    Broken = {valid_json_test_loader,
+              #{load => fun() -> {ok, [{<<"broken">>,
+                                        #{<<"type">> => []}}]} end}},
+    with_store([{base_uri, ?BASE}, {loader, Broken}, {trust_schema, true}],
+               fun(Store) ->
+                   {ok, _Ref} = valid_json_store_manager:wait(Store, 5000),
+                   ?assertMatch({ok, _},
+                                valid_json_store_manager:lookup(Store,
+                                                                <<"broken">>))
+               end).
+
 %% Негодная опция загрузчика останавливает старт так же громко, как любая
 %% другая.
 bad_loader_option_test() ->

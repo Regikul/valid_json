@@ -66,7 +66,7 @@ if your schemas use them the outcome is the same either way.
 | Error shape | output units with keyword location, absolute location, and instance location | `data_invalid` / `schema_invalid` tuples with a path of names and indices | structs with `path`, `rule`, `context`, `value` |
 | Human-readable messages | `format_error/1`, wording is not a contract | built into the error tuple | `format_error/1` |
 | Stopping early | `flag` short-circuits where annotations allow it | first error by default, `allowed_errors` to collect more | errors are collected |
-| Schema validated against its meta-schema | yes, whenever it is compiled — at registration or inside `run_schema/3` — and the failure carries the output of that check | no, malformed schemas surface as `schema_invalid` during validation | no |
+| Schema validated against its meta-schema | yes by default at registration or inside `run_schema/3`; `{trust_schema, true}` skips this check and leaves malformed-schema behavior implementation-defined | no, malformed schemas surface as `schema_invalid` during validation | no |
 
 ## format
 

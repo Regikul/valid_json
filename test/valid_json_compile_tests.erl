@@ -18,59 +18,59 @@ eunit_wrapper_(Tests) ->
 -define(LEGACY, <<"https://json-schema.org/draft/2019-09/schema">>).
 
 boolean_schema_test_() ->
-    [?_assertEqual({ok, artifact(true)},  compile(true)),
-     ?_assertEqual({ok, artifact(false)}, compile(false))].
+    [?_assertEqual({ok, artifact(true)},  emitter_fixture(true)),
+     ?_assertEqual({ok, artifact(false)}, emitter_fixture(false))].
 
 %% {} и true семантически равны, но дают разный IR.
 empty_object_test() ->
-    ?assertEqual({ok, artifact(schema_node([]))}, compile(#{})).
+    ?assertEqual({ok, artifact(schema_node([]))}, emitter_fixture(#{})).
 
 type_test_() ->
     [?_assertEqual({ok, artifact(schema_node([{type, [integer]}]))},
-                   compile(#{<<"type">> => <<"integer">>})),
+                   emitter_fixture(#{<<"type">> => <<"integer">>})),
      ?_assertEqual({ok, artifact(schema_node([{type, [string, null]}]))},
-                   compile(#{<<"type">> => [<<"string">>, <<"null">>]})),
-     %% Страховочный IR slot допускает пустой список; публичный compile-отказ
+                   emitter_fixture(#{<<"type">> => [<<"string">>, <<"null">>]})),
+     %% Защитный IR slot допускает пустой список; публичный compile-отказ
      %% метасхемы проверяется в valid_json_metaschema_tests.
      ?_assertEqual({ok, artifact(schema_node([{type, []}]))},
-                   compile(#{<<"type">> => []}))].
+                   emitter_fixture(#{<<"type">> => []}))].
 
 enum_and_const_test_() ->
     [?_assertEqual({ok, artifact(schema_node([{enum, [1, <<"a">>, null]}]))},
-                   compile(#{<<"enum">> => [1, <<"a">>, null]})),
+                   emitter_fixture(#{<<"enum">> => [1, <<"a">>, null]})),
      ?_assertEqual({ok, artifact(schema_node([{enum, []}]))},
-                   compile(#{<<"enum">> => []})),
+                   emitter_fixture(#{<<"enum">> => []})),
      ?_assertEqual({ok, artifact(schema_node([{const, #{<<"a">> => [1]}}]))},
-                   compile(#{<<"const">> => #{<<"a">> => [1]}})),
+                   emitter_fixture(#{<<"const">> => #{<<"a">> => [1]}})),
      ?_assertEqual({ok, artifact(schema_node([{const, null}]))},
-                   compile(#{<<"const">> => null}))].
+                   emitter_fixture(#{<<"const">> => null}))].
 
 numeric_test_() ->
     [?_assertEqual({ok, artifact(schema_node([{multiple_of, 2}]))},
-                   compile(#{<<"multipleOf">> => 2})),
+                   emitter_fixture(#{<<"multipleOf">> => 2})),
      ?_assertEqual({ok, artifact(schema_node([{multiple_of, 0.0001}]))},
-                   compile(#{<<"multipleOf">> => 0.0001})),
+                   emitter_fixture(#{<<"multipleOf">> => 0.0001})),
      ?_assertEqual({ok, artifact(schema_node([{maximum, 3.0}]))},
-                   compile(#{<<"maximum">> => 3.0})),
+                   emitter_fixture(#{<<"maximum">> => 3.0})),
      ?_assertEqual({ok, artifact(schema_node([{exclusive_maximum, 3}]))},
-                   compile(#{<<"exclusiveMaximum">> => 3})),
+                   emitter_fixture(#{<<"exclusiveMaximum">> => 3})),
      ?_assertEqual({ok, artifact(schema_node([{minimum, -2}]))},
-                   compile(#{<<"minimum">> => -2})),
+                   emitter_fixture(#{<<"minimum">> => -2})),
      ?_assertEqual({ok, artifact(schema_node([{exclusive_minimum, 1.1}]))},
-                   compile(#{<<"exclusiveMinimum">> => 1.1}))].
+                   emitter_fixture(#{<<"exclusiveMinimum">> => 1.1}))].
 
 %% Неположительный делитель запрещён метасхемой, поэтому не доходит до IR.
 bad_multiple_of_test_() ->
     [?_assertEqual(schema_error({bad_keyword_value, 0}, <<"/multipleOf">>),
-                   compile(#{<<"multipleOf">> => 0})),
+                   emitter_fixture(#{<<"multipleOf">> => 0})),
      ?_assertEqual(schema_error({bad_keyword_value, -1.5}, <<"/multipleOf">>),
-                   compile(#{<<"multipleOf">> => -1.5})),
+                   emitter_fixture(#{<<"multipleOf">> => -1.5})),
      ?_assertEqual(schema_error({bad_keyword_value, <<"2">>}, <<"/multipleOf">>),
-                   compile(#{<<"multipleOf">> => <<"2">>})),
+                   emitter_fixture(#{<<"multipleOf">> => <<"2">>})),
      ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/maximum">>),
-                   compile(#{<<"maximum">> => null})),
+                   emitter_fixture(#{<<"maximum">> => null})),
      ?_assertEqual(schema_error({bad_keyword_value, true}, <<"/minimum">>),
-                   compile(#{<<"minimum">> => true}))].
+                   emitter_fixture(#{<<"minimum">> => true}))].
 
 %% Скомпилированный re:mp() попадает прямо в IR, но сравнивается не он, а
 %% лежащий рядом исходный текст: с OTP 28 равных термов из одного текста больше
@@ -78,9 +78,9 @@ bad_multiple_of_test_() ->
 %% отдельно, по поведению, в pattern_options_test_/0.
 pattern_test_() ->
     [?_assertEqual({ok, artifact(schema_node([{pattern, regex(<<"^a+$">>)}]))},
-                   compile(#{<<"pattern">> => <<"^a+$">>})),
+                   emitter_fixture(#{<<"pattern">> => <<"^a+$">>})),
      ?_assertEqual({ok, artifact(schema_node([{pattern, regex(<<"[0-9]">>)}]))},
-                   compile(#{<<"pattern">> => <<"[0-9]">>}))].
+                   emitter_fixture(#{<<"pattern">> => <<"[0-9]">>}))].
 
 %% Пока re:mp() входил в сравниваемый терм, точное равенство заодно закрепляло
 %% и опции его компиляции. Стёртый scrub'ом терм их больше не показывает,
@@ -97,82 +97,82 @@ pattern_options_test_() ->
 bad_pattern_test_() ->
     [?_assertMatch({error, #schema_error{reason   = {bad_pattern, _},
                                          location = {anonymous, <<"/pattern">>}}},
-                   compile(#{<<"pattern">> => <<"(">>})),
+                   emitter_fixture(#{<<"pattern">> => <<"(">>})),
      ?_assertMatch({error, #schema_error{reason   = {bad_pattern, _},
                                          location = {anonymous, <<"/pattern">>}}},
-                   compile(#{<<"pattern">> => <<"[z-a]">>})),
+                   emitter_fixture(#{<<"pattern">> => <<"[z-a]">>})),
      %% Нестроковое значение — обычная ошибка значения keyword, не regex.
      ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/pattern">>),
-                   compile(#{<<"pattern">> => 1}))].
+                   emitter_fixture(#{<<"pattern">> => 1}))].
 
 counted_test_() ->
     [?_assertEqual({ok, artifact(schema_node([{max_length, 2}]))},
-                   compile(#{<<"maxLength">> => 2})),
+                   emitter_fixture(#{<<"maxLength">> => 2})),
      ?_assertEqual({ok, artifact(schema_node([{min_items, 1}]))},
-                   compile(#{<<"minItems">> => 1})),
+                   emitter_fixture(#{<<"minItems">> => 1})),
      ?_assertEqual({ok, artifact(schema_node([{max_properties, 0}]))},
-                   compile(#{<<"maxProperties">> => 0})),
+                   emitter_fixture(#{<<"maxProperties">> => 0})),
      %% Десятичная форма — то же целое, и в IR попадает целым.
      ?_assertEqual({ok, artifact(schema_node([{min_length, 2}]))},
-                   compile(#{<<"minLength">> => 2.0})),
+                   emitter_fixture(#{<<"minLength">> => 2.0})),
      ?_assertEqual({ok, artifact(schema_node([{max_items, 2}]))},
-                   compile(#{<<"maxItems">> => 2.0}))].
+                   emitter_fixture(#{<<"maxItems">> => 2.0}))].
 
 collections_test_() ->
     [?_assertEqual({ok, artifact(schema_node([{unique_items, true}]))},
-                   compile(#{<<"uniqueItems">> => true})),
+                   emitter_fixture(#{<<"uniqueItems">> => true})),
      %% Написанный no-op сохраняется в IR, а не выбрасывается.
      ?_assertEqual({ok, artifact(schema_node([{unique_items, false}]))},
-                   compile(#{<<"uniqueItems">> => false})),
+                   emitter_fixture(#{<<"uniqueItems">> => false})),
      ?_assertEqual({ok, artifact(schema_node([{required, [<<"a">>, <<"b">>]}]))},
-                   compile(#{<<"required">> => [<<"a">>, <<"b">>]})),
+                   emitter_fixture(#{<<"required">> => [<<"a">>, <<"b">>]})),
      ?_assertEqual({ok, artifact(schema_node([{required, []}]))},
-                   compile(#{<<"required">> => []})),
+                   emitter_fixture(#{<<"required">> => []})),
      ?_assertEqual({ok, artifact(schema_node([{dependent_required,
                                                #{<<"bar">> => [<<"foo">>]}}]))},
-                   compile(#{<<"dependentRequired">> => #{<<"bar">> => [<<"foo">>]}}))].
+                   emitter_fixture(#{<<"dependentRequired">> => #{<<"bar">> => [<<"foo">>]}}))].
 
 bad_counted_test_() ->
     [?_assertEqual(schema_error({bad_keyword_value, -1}, <<"/maxLength">>),
-                   compile(#{<<"maxLength">> => -1})),
+                   emitter_fixture(#{<<"maxLength">> => -1})),
      ?_assertEqual(schema_error({bad_keyword_value, 1.5}, <<"/minItems">>),
-                   compile(#{<<"minItems">> => 1.5})),
+                   emitter_fixture(#{<<"minItems">> => 1.5})),
      ?_assertEqual(schema_error({bad_keyword_value, <<"2">>}, <<"/maxProperties">>),
-                   compile(#{<<"maxProperties">> => <<"2">>})),
+                   emitter_fixture(#{<<"maxProperties">> => <<"2">>})),
      ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/uniqueItems">>),
-                   compile(#{<<"uniqueItems">> => 1})),
+                   emitter_fixture(#{<<"uniqueItems">> => 1})),
      ?_assertEqual(schema_error({bad_keyword_value, [1]}, <<"/required">>),
-                   compile(#{<<"required">> => [1]})),
+                   emitter_fixture(#{<<"required">> => [1]})),
      ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/required">>),
-                   compile(#{<<"required">> => null})),
+                   emitter_fixture(#{<<"required">> => null})),
      ?_assertEqual(schema_error({bad_keyword_value, #{<<"bar">> => <<"foo">>}},
                                 <<"/dependentRequired">>),
-                   compile(#{<<"dependentRequired">> => #{<<"bar">> => <<"foo">>}}))].
+                   emitter_fixture(#{<<"dependentRequired">> => #{<<"bar">> => <<"foo">>}}))].
 
 %% Дочерняя schema становится отдельным node, а constraint хранит её полный
 %% адрес. Сегменты локации — фактические keywords и десятичные индексы ветвей.
 logical_test_() ->
     [?_assertEqual({ok, artifact(#{<<>>          => schema_node([{all_of, [addr(<<"/allOf/0">>)]}]),
                                    <<"/allOf/0">> => schema_node([{type, [integer]}])})},
-                   compile(#{<<"allOf">> => [#{<<"type">> => <<"integer">>}]})),
+                   emitter_fixture(#{<<"allOf">> => [#{<<"type">> => <<"integer">>}]})),
      %% Boolean-подсхема — такой же адресуемый node.
      ?_assertEqual({ok, artifact(#{<<>>           => schema_node([{any_of, [addr(<<"/anyOf/0">>),
                                                                            addr(<<"/anyOf/1">>)]}]),
                                    <<"/anyOf/0">> => true,
                                    <<"/anyOf/1">> => false})},
-                   compile(#{<<"anyOf">> => [true, false]})),
+                   emitter_fixture(#{<<"anyOf">> => [true, false]})),
      ?_assertEqual({ok, artifact(#{<<>>           => schema_node([{one_of, [addr(<<"/oneOf/0">>)]}]),
                                    <<"/oneOf/0">> => schema_node([])})},
-                   compile(#{<<"oneOf">> => [#{}]})),
+                   emitter_fixture(#{<<"oneOf">> => [#{}]})),
      %% У `not` ветвь одна, поэтому индекса в её локации нет.
      ?_assertEqual({ok, artifact(#{<<>>        => schema_node([{'not', addr(<<"/not">>)}]),
                                    <<"/not">>  => schema_node([{const, 1}])})},
-                   compile(#{<<"not">> => #{<<"const">> => 1}})),
+                   emitter_fixture(#{<<"not">> => #{<<"const">> => 1}})),
      %% Пустой список ветвей метасхема запрещает, но в IR он ложится.
      %% То же разделение: emitter тотален, а публичная проверка метасхемой
      %% отвергает пустой schemaArray отдельным тестом.
      ?_assertEqual({ok, artifact(schema_node([{all_of, []}]))},
-                   compile(#{<<"allOf">> => []}))].
+                   emitter_fixture(#{<<"allOf">> => []}))].
 
 %% Три object applicators дают один constraint, но каждый со своим слотом:
 %% ненаписанный keyword остаётся `undefined`.
@@ -181,30 +181,30 @@ object_test_() ->
                                                          #{<<"a">> => addr(<<"/properties/a">>)},
                                                          undefined, undefined}]),
                                    <<"/properties/a">> => schema_node([{type, [integer]}])})},
-                   compile(#{<<"properties">> => #{<<"a">> => #{<<"type">> => <<"integer">>}}})),
+                   emitter_fixture(#{<<"properties">> => #{<<"a">> => #{<<"type">> => <<"integer">>}}})),
      %% Сегмент локации паттерна — его исходный текст.
      ?_assertEqual({ok, artifact(#{<<>> => schema_node([{properties, undefined,
                                                          [{regex(<<"^a">>),
                                                            addr(<<"/patternProperties/^a">>)}],
                                                          undefined}]),
                                    <<"/patternProperties/^a">> => true})},
-                   compile(#{<<"patternProperties">> => #{<<"^a">> => true}})),
+                   emitter_fixture(#{<<"patternProperties">> => #{<<"^a">> => true}})),
      %% У additionalProperties своего сегмента нет: ветвь стоит на keyword.
      ?_assertEqual({ok, artifact(#{<<>> => schema_node([{properties, undefined, undefined,
                                                          addr(<<"/additionalProperties">>)}]),
                                    <<"/additionalProperties">> => false})},
-                   compile(#{<<"additionalProperties">> => false})),
+                   emitter_fixture(#{<<"additionalProperties">> => false})),
      %% Написанный пустой properties — пустая map, а не отсутствие keyword.
      ?_assertEqual({ok, artifact(schema_node([{properties, #{}, undefined, undefined}]))},
-                   compile(#{<<"properties">> => #{}})),
+                   emitter_fixture(#{<<"properties">> => #{}})),
      ?_assertEqual({ok, artifact(schema_node([{properties, undefined, [], undefined}]))},
-                   compile(#{<<"patternProperties">> => #{}})),
+                   emitter_fixture(#{<<"patternProperties">> => #{}})),
      %% Имя свойства экранируется в указателе как обычный сегмент.
      ?_assertEqual({ok, artifact(#{<<>> => schema_node([{properties,
                                                          #{<<"a/b">> => addr(<<"/properties/a~1b">>)},
                                                          undefined, undefined}]),
                                    <<"/properties/a~1b">> => true})},
-                   compile(#{<<"properties">> => #{<<"a/b">> => true}}))].
+                   emitter_fixture(#{<<"properties">> => #{<<"a/b">> => true}}))].
 
 %% Три keyword'а собираются в один constraint, а список паттернов упорядочен по
 %% их тексту: от порядка обхода map наблюдаемый IR зависеть не должен.
@@ -222,38 +222,38 @@ object_group_test() ->
                                  <<"/patternProperties/^a">> => true,
                                  <<"/patternProperties/^b">> => true,
                                  <<"/additionalProperties">> => false})},
-                 compile(Schema)).
+                 emitter_fixture(Schema)).
 
 object_error_test_() ->
     [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/properties">>),
-                   compile(#{<<"properties">> => 42})),
+                   emitter_fixture(#{<<"properties">> => 42})),
      ?_assertEqual(schema_error({bad_keyword_value, []}, <<"/patternProperties">>),
-                   compile(#{<<"patternProperties">> => []})),
+                   emitter_fixture(#{<<"patternProperties">> => []})),
      %% Некомпилируемый паттерн называет свою собственную позицию.
      ?_assertMatch({error, #schema_error{reason   = {bad_pattern, _},
                                          location = {anonymous, <<"/patternProperties/(">>}}},
-                   compile(#{<<"patternProperties">> => #{<<"(">> => true}})),
+                   emitter_fixture(#{<<"patternProperties">> => #{<<"(">> => true}})),
      ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/properties/a/maximum">>),
-                   compile(#{<<"properties">> => #{<<"a">> => #{<<"maximum">> => null}}})),
+                   emitter_fixture(#{<<"properties">> => #{<<"a">> => #{<<"maximum">> => null}}})),
      ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/additionalProperties">>),
-                   compile(#{<<"additionalProperties">> => 1}))].
+                   emitter_fixture(#{<<"additionalProperties">> => 1}))].
 
 %% Своего сегмента у ветви нет: она стоит на самом keyword.
 property_names_test_() ->
     [?_assertEqual({ok, artifact(#{<<>> => schema_node([{property_names,
                                                          addr(<<"/propertyNames">>)}]),
                                    <<"/propertyNames">> => schema_node([{max_length, 3}])})},
-                   compile(#{<<"propertyNames">> => #{<<"maxLength">> => 3}})),
+                   emitter_fixture(#{<<"propertyNames">> => #{<<"maxLength">> => 3}})),
      ?_assertEqual({ok, artifact(#{<<>> => schema_node([{property_names,
                                                          addr(<<"/propertyNames">>)}]),
                                    <<"/propertyNames">> => false})},
-                   compile(#{<<"propertyNames">> => false}))].
+                   emitter_fixture(#{<<"propertyNames">> => false}))].
 
 property_names_error_test_() ->
     [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/propertyNames">>),
-                   compile(#{<<"propertyNames">> => 42})),
+                   emitter_fixture(#{<<"propertyNames">> => 42})),
      ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/propertyNames/maxLength">>),
-                   compile(#{<<"propertyNames">> => #{<<"maxLength">> => null}}))].
+                   emitter_fixture(#{<<"propertyNames">> => #{<<"maxLength">> => null}}))].
 
 %% Раскладка та же, что у `properties`: имя свойства становится сегментом
 %% локации и экранируется в указателе как обычный сегмент.
@@ -262,23 +262,23 @@ dependent_schemas_test_() ->
                                                          #{<<"a">> => addr(<<"/dependentSchemas/a">>)}}]),
                                    <<"/dependentSchemas/a">> =>
                                        schema_node([{required, [<<"b">>]}])})},
-                   compile(#{<<"dependentSchemas">> =>
+                   emitter_fixture(#{<<"dependentSchemas">> =>
                                  #{<<"a">> => #{<<"required">> => [<<"b">>]}}})),
      %% Написанный пустой keyword — пустая map, а не отсутствие keyword.
      ?_assertEqual({ok, artifact(schema_node([{dependent_schemas, #{}}]))},
-                   compile(#{<<"dependentSchemas">> => #{}})),
+                   emitter_fixture(#{<<"dependentSchemas">> => #{}})),
      ?_assertEqual({ok, artifact(#{<<>> => schema_node([{dependent_schemas,
                                                          #{<<"a/b">> =>
                                                                addr(<<"/dependentSchemas/a~1b">>)}}]),
                                    <<"/dependentSchemas/a~1b">> => true})},
-                   compile(#{<<"dependentSchemas">> => #{<<"a/b">> => true}}))].
+                   emitter_fixture(#{<<"dependentSchemas">> => #{<<"a/b">> => true}}))].
 
 dependent_schemas_error_test_() ->
     [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/dependentSchemas">>),
-                   compile(#{<<"dependentSchemas">> => 42})),
+                   emitter_fixture(#{<<"dependentSchemas">> => 42})),
      ?_assertEqual(schema_error({bad_keyword_value, null},
                                 <<"/dependentSchemas/a/maximum">>),
-                   compile(#{<<"dependentSchemas">> =>
+                   emitter_fixture(#{<<"dependentSchemas">> =>
                                  #{<<"a">> => #{<<"maximum">> => null}}}))].
 
 %% Одиночный `items` — своя раскладка: ветвь одна и стоит на самом keyword.
@@ -287,39 +287,39 @@ dependent_schemas_error_test_() ->
 array_test_() ->
     [?_assertEqual({ok, artifact(#{<<>>        => schema_node([{items, addr(<<"/items">>)}]),
                                    <<"/items">> => schema_node([{type, [integer]}])})},
-                   compile(#{<<"items">> => #{<<"type">> => <<"integer">>}})),
+                   emitter_fixture(#{<<"items">> => #{<<"type">> => <<"integer">>}})),
      ?_assertEqual({ok, artifact(#{<<>>        => schema_node([{items, addr(<<"/items">>)}]),
                                    <<"/items">> => false})},
-                   compile(#{<<"items">> => false})),
+                   emitter_fixture(#{<<"items">> => false})),
      ?_assertEqual({ok, artifact(#{<<>> => schema_node([{prefix_items,
                                                          [addr(<<"/prefixItems/0">>),
                                                           addr(<<"/prefixItems/1">>)],
                                                          undefined}]),
                                    <<"/prefixItems/0">> => true,
                                    <<"/prefixItems/1">> => schema_node([{const, 1}])})},
-                   compile(#{<<"prefixItems">> => [true, #{<<"const">> => 1}]})),
+                   emitter_fixture(#{<<"prefixItems">> => [true, #{<<"const">> => 1}]})),
      %% У хвостового `items` своего сегмента нет, как и у additionalProperties.
      ?_assertEqual({ok, artifact(#{<<>> => schema_node([{prefix_items,
                                                          [addr(<<"/prefixItems/0">>)],
                                                          addr(<<"/items">>)}]),
                                    <<"/prefixItems/0">> => true,
                                    <<"/items">>         => false})},
-                   compile(#{<<"prefixItems">> => [true], <<"items">> => false})),
+                   emitter_fixture(#{<<"prefixItems">> => [true], <<"items">> => false})),
      %% Пустой префикс метасхема запрещает, но в IR он ложится, как `allOf: []`.
      ?_assertEqual({ok, artifact(schema_node([{prefix_items, [], undefined}]))},
-                   compile(#{<<"prefixItems">> => []}))].
+                   emitter_fixture(#{<<"prefixItems">> => []}))].
 
 array_error_test_() ->
     [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/prefixItems">>),
-                   compile(#{<<"prefixItems">> => 42})),
+                   emitter_fixture(#{<<"prefixItems">> => 42})),
      %% В Draft 2020-12 массив на позиции `items` схемой не является.
      ?_assertEqual(schema_error({bad_keyword_value, [true]}, <<"/items">>),
-                   compile(#{<<"items">> => [true]})),
+                   emitter_fixture(#{<<"items">> => [true]})),
      ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/items/maximum">>),
-                   compile(#{<<"items">> => #{<<"maximum">> => null}})),
+                   emitter_fixture(#{<<"items">> => #{<<"maximum">> => null}})),
      ?_assertEqual(schema_error({bad_keyword_value, null},
                                 <<"/prefixItems/1/maximum">>),
-                   compile(#{<<"prefixItems">> => [true, #{<<"maximum">> => null}]}))].
+                   emitter_fixture(#{<<"prefixItems">> => [true, #{<<"maximum">> => null}]}))].
 
 %% Раскладку выбирает dialect: schema-form `items` одинаков в обоих, array-form
 %% принадлежит только 2019-09, а неизвестный там `prefixItems` игнорируется и не
@@ -328,13 +328,13 @@ array_dialect_test_() ->
     [?_assertEqual({ok, legacy_artifact(#{<<>>        => schema_node([{items,
                                                                        addr(<<"/items">>)}]),
                                           <<"/items">> => true})},
-                   legacy(#{<<"items">> => true})),
+                   legacy_emitter_fixture(#{<<"items">> => true})),
      ?_assertEqual({ok, legacy_artifact(schema_node([]))},
-                   legacy(#{<<"prefixItems">> => [true]})),
+                   legacy_emitter_fixture(#{<<"prefixItems">> => [true]})),
      ?_assertEqual({ok, legacy_artifact(#{<<>> => schema_node([{items,
                                                                  addr(<<"/items">>)}]),
                                           <<"/items">> => true})},
-                   legacy(#{<<"prefixItems">> => [false], <<"items">> => true}))].
+                   legacy_emitter_fixture(#{<<"prefixItems">> => [false], <<"items">> => true}))].
 
 %% Array-form `items` раздаёт по схеме на индекс, `additionalItems` стоит на
 %% самом keyword и достаётся остатку — раскладка та же, что у `prefixItems` с
@@ -346,16 +346,16 @@ array_legacy_test_() ->
                                                                 undefined}]),
                                           <<"/items/0">> => true,
                                           <<"/items/1">> => schema_node([{const, 1}])})},
-                   legacy(#{<<"items">> => [true, #{<<"const">> => 1}]})),
+                   legacy_emitter_fixture(#{<<"items">> => [true, #{<<"const">> => 1}]})),
      ?_assertEqual({ok, legacy_artifact(#{<<>> => schema_node([{items_array,
                                                                 [addr(<<"/items/0">>)],
                                                                 addr(<<"/additionalItems">>)}]),
                                           <<"/items/0">>         => true,
                                           <<"/additionalItems">> => false})},
-                   legacy(#{<<"items">> => [true], <<"additionalItems">> => false})),
+                   legacy_emitter_fixture(#{<<"items">> => [true], <<"additionalItems">> => false})),
      %% Пустой префикс метасхема запрещает, но в IR он ложится, как `allOf: []`.
      ?_assertEqual({ok, legacy_artifact(schema_node([{items_array, [], undefined}]))},
-                   legacy(#{<<"items">> => []}))].
+                   legacy_emitter_fixture(#{<<"items">> => []}))].
 
 %% `additionalItems` без array-form `items` спецификация велит игнорировать:
 %% constraint не собирается ни рядом со schema-form `items`, ни в одиночку. Сама
@@ -365,20 +365,20 @@ array_legacy_ignored_test_() ->
                                                                 addr(<<"/items">>)}]),
                                           <<"/items">>           => true,
                                           <<"/additionalItems">> => false})},
-                   legacy(#{<<"items">> => true, <<"additionalItems">> => false})),
+                   legacy_emitter_fixture(#{<<"items">> => true, <<"additionalItems">> => false})),
      ?_assertEqual({ok, legacy_artifact(#{<<>>                   => schema_node([]),
                                           <<"/additionalItems">> => false})},
-                   legacy(#{<<"additionalItems">> => false}))].
+                   legacy_emitter_fixture(#{<<"additionalItems">> => false}))].
 
 array_legacy_error_test_() ->
     [?_assertEqual(schema_error({bad_keyword_value, null}, <<"/items/1/maximum">>),
-                   legacy(#{<<"items">> => [true, #{<<"maximum">> => null}]})),
+                   legacy_emitter_fixture(#{<<"items">> => [true, #{<<"maximum">> => null}]})),
      ?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/additionalItems">>),
-                   legacy(#{<<"items">> => [true], <<"additionalItems">> => 42})),
+                   legacy_emitter_fixture(#{<<"items">> => [true], <<"additionalItems">> => 42})),
      %% Игнорируемый `additionalItems` всё равно обязан быть schema: его node
      %% выпускается общим проходом.
      ?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/additionalItems">>),
-                   legacy(#{<<"additionalItems">> => 42}))].
+                   legacy_emitter_fixture(#{<<"additionalItems">> => 42}))].
 
 %% Границы попадают в тот же constraint отдельными слотами, а ненаписанная
 %% остаётся `undefined`. Последнее поле — покрывает ли `contains` индексы: это
@@ -387,41 +387,41 @@ contains_test_() ->
     [?_assertEqual({ok, artifact(#{<<>> => schema_node([{contains, addr(<<"/contains">>),
                                                          undefined, undefined, true}]),
                                    <<"/contains">> => schema_node([{type, [integer]}])})},
-                   compile(#{<<"contains">> => #{<<"type">> => <<"integer">>}})),
+                   emitter_fixture(#{<<"contains">> => #{<<"type">> => <<"integer">>}})),
      ?_assertEqual({ok, artifact(#{<<>> => schema_node([{contains, addr(<<"/contains">>),
                                                          0, 2, true}]),
                                    <<"/contains">> => true})},
-                   compile(#{<<"contains">> => true,
+                   emitter_fixture(#{<<"contains">> => true,
                              <<"minContains">> => 0, <<"maxContains">> => 2})),
      %% Десятичная форма — то же целое, как и у остальных nonNegativeInteger.
      ?_assertEqual({ok, artifact(#{<<>> => schema_node([{contains, addr(<<"/contains">>),
                                                          2, undefined, true}]),
                                    <<"/contains">> => true})},
-                   compile(#{<<"contains">> => true, <<"minContains">> => 2.0})),
+                   emitter_fixture(#{<<"contains">> => true, <<"minContains">> => 2.0})),
      ?_assertEqual({ok, legacy_artifact(#{<<>> => schema_node([{contains,
                                                                 addr(<<"/contains">>),
                                                                 undefined, undefined, false}]),
                                           <<"/contains">> => true})},
-                   legacy(#{<<"contains">> => true}))].
+                   legacy_emitter_fixture(#{<<"contains">> => true}))].
 
 %% Без `contains` границы спецификация оставляет без эффекта, поэтому constraint
 %% не собирается. Значение всё равно разбирается: ошибка в нём обязана
 %% останавливать компиляцию.
 contains_without_schema_test_() ->
     [?_assertEqual({ok, artifact(schema_node([]))},
-                   compile(#{<<"minContains">> => 1, <<"maxContains">> => 3})),
+                   emitter_fixture(#{<<"minContains">> => 1, <<"maxContains">> => 3})),
      ?_assertEqual(schema_error({bad_keyword_value, -1}, <<"/minContains">>),
-                   compile(#{<<"minContains">> => -1}))].
+                   emitter_fixture(#{<<"minContains">> => -1}))].
 
 contains_error_test_() ->
     [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/contains">>),
-                   compile(#{<<"contains">> => 42})),
+                   emitter_fixture(#{<<"contains">> => 42})),
      ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/contains/maximum">>),
-                   compile(#{<<"contains">> => #{<<"maximum">> => null}})),
+                   emitter_fixture(#{<<"contains">> => #{<<"maximum">> => null}})),
      ?_assertEqual(schema_error({bad_keyword_value, 1.5}, <<"/minContains">>),
-                   compile(#{<<"contains">> => true, <<"minContains">> => 1.5})),
+                   emitter_fixture(#{<<"contains">> => true, <<"minContains">> => 1.5})),
      ?_assertEqual(schema_error({bad_keyword_value, <<"2">>}, <<"/maxContains">>),
-                   compile(#{<<"contains">> => true, <<"maxContains">> => <<"2">>}))].
+                   emitter_fixture(#{<<"contains">> => true, <<"maxContains">> => <<"2">>}))].
 
 %% Условные keywords тоже дают один constraint, и своего сегмента у ветви нет:
 %% каждая стоит на собственном keyword.
@@ -432,19 +432,19 @@ conditional_test_() ->
                                    <<"/if">>   => schema_node([{type, [integer]}]),
                                    <<"/then">> => schema_node([{minimum, 0}]),
                                    <<"/else">> => false})},
-                   compile(#{<<"if">> => #{<<"type">> => <<"integer">>},
+                   emitter_fixture(#{<<"if">> => #{<<"type">> => <<"integer">>},
                              <<"then">> => #{<<"minimum">> => 0},
                              <<"else">> => false})),
      %% `if` без ветвей остаётся constraint'ом: аннотации он собирает и один.
      ?_assertEqual({ok, artifact(#{<<>>      => schema_node([{if_then_else, addr(<<"/if">>),
                                                               undefined, undefined}]),
                                    <<"/if">> => true})},
-                   compile(#{<<"if">> => true})),
+                   emitter_fixture(#{<<"if">> => true})),
      ?_assertEqual({ok, artifact(#{<<>>        => schema_node([{if_then_else, addr(<<"/if">>),
                                                                 undefined, addr(<<"/else">>)}]),
                                    <<"/if">>   => true,
                                    <<"/else">> => true})},
-                   compile(#{<<"if">> => true, <<"else">> => true}))].
+                   emitter_fixture(#{<<"if">> => true, <<"else">> => true}))].
 
 %% `then` и `else` без `if` спецификация велит игнорировать целиком, поэтому
 %% constraint не собирается. Nodes у них всё равно есть: это адресуемые schema
@@ -454,15 +454,15 @@ conditional_without_if_test() ->
     ?assertEqual({ok, artifact(#{<<>>        => schema_node([]),
                                  <<"/then">> => schema_node([{type, [null]}]),
                                  <<"/else">> => true})},
-                 compile(Schema)).
+                 emitter_fixture(Schema)).
 
 %% Раз позиция компилируется, ошибка в ней останавливает компиляцию — и тогда,
 %% когда вычислять эту ветвь никто не станет.
 conditional_error_test_() ->
     [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/if">>),
-                   compile(#{<<"if">> => 42})),
+                   emitter_fixture(#{<<"if">> => 42})),
      ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/then/maximum">>),
-                   compile(#{<<"then">> => #{<<"maximum">> => null}}))].
+                   emitter_fixture(#{<<"then">> => #{<<"maximum">> => null}}))].
 
 %% Все nodes строятся до вычисления, поэтому вложенность произвольной глубины
 %% полностью лежит в одной map, а не разворачивается на ходу.
@@ -476,12 +476,12 @@ nested_test() ->
           <<"/not/allOf/0">>         => schema_node([{any_of, [addr(<<"/not/allOf/0/anyOf/0">>)]}]),
           <<"/not/allOf/0/anyOf/0">> => schema_node([{type, [null]}]),
           <<"/not/allOf/1">>         => true},
-    ?assertEqual({ok, artifact(Expected)}, compile(Schema)).
+    ?assertEqual({ok, artifact(Expected)}, emitter_fixture(Schema)).
 
 %% Ошибка внутри ветви называет позицию внутри неё, а не корень схемы.
 nested_error_test() ->
     ?assertEqual(schema_error({bad_keyword_value, null}, <<"/allOf/1/not/maximum">>),
-                 compile(#{<<"allOf">> => [true, #{<<"not">> => #{<<"maximum">> => null}}]})).
+                 emitter_fixture(#{<<"allOf">> => [true, #{<<"not">> => #{<<"maximum">> => null}}]})).
 
 %% Порядок constraints задан компилятором и не зависит от порядка ключей.
 order_test() ->
@@ -515,7 +515,7 @@ order_test() ->
                                  <<"/contains">>           => true,
                                  <<"/propertyNames">>      => true,
                                  <<"/dependentSchemas/a">> => true})},
-                 compile(Schema)).
+                 emitter_fixture(Schema)).
 
 %% `unevaluated*` лежат в собственном поле node: они читают общее покрытие
 %% соседей и потому обязаны выполняться после всех обычных constraints. Свои
@@ -536,7 +536,7 @@ unevaluated_test() ->
                                  <<"/unevaluatedItems">>       => false,
                                  <<"/unevaluatedProperties">>  =>
                                      schema_node([{type, [integer]}])})},
-                 compile(Schema)),
+                 emitter_fixture(Schema)),
     %% Keyword известен обоим dialects: в 2019-09 он не должен становиться
     %% неизвестным расширением.
     ?assertEqual({ok, legacy_artifact(#{<<>> =>
@@ -545,7 +545,7 @@ unevaluated_test() ->
                                                       [{unevaluated_items,
                                                         addr(<<"/unevaluatedItems">>)}]},
                                         <<"/unevaluatedItems">> => true})},
-                 legacy(#{<<"unevaluatedItems">> => true})).
+                 legacy_emitter_fixture(#{<<"unevaluatedItems">> => true})).
 
 %% Корневой `$id` меняет entry rid, но не создаёт constraint. В compiled()
 %% остаётся уже именованный resource, а anonymous resource исчезает.
@@ -556,7 +556,7 @@ named_root_resource_test() ->
         compiled(Root,
                  #{Root => resource(Root,
                                     #{<<>> => schema_node([{type, [integer]}])})}),
-    ?assertEqual({ok, Expected}, compile(Schema)).
+    ?assertEqual({ok, Expected}, emitter_fixture(Schema)).
 
 %% `$defs` даёт silent output marker для verbose, а каждая entry становится
 %% node. Имя definition экранируется как обычный JSON Pointer segment.
@@ -566,7 +566,7 @@ definitions_resource_test() ->
     Expected =
         artifact(#{<<>> => schema_node([{marker, <<"$defs">>}]),
                    <<"/$defs/a~1b~0c">> => schema_node([{type, [string]}])}),
-    ?assertEqual({ok, Expected}, compile(Schema)).
+    ?assertEqual({ok, Expected}, emitter_fixture(Schema)).
 
 %% `definitions` сохраняет собственную pointer location, но во всём остальном
 %% ведёт как `$defs`: контейнер выпускает marker, entries становятся nodes.
@@ -575,8 +575,8 @@ compat_definitions_resource_test_() ->
                    #{<<"value">> => #{<<"type">> => <<"integer">>}}},
     Nodes = #{<<>> => schema_node([{marker, <<"definitions">>}]),
               <<"/definitions/value">> => schema_node([{type, [integer]}])},
-    [?_assertEqual({ok, artifact(Nodes)}, compile(Schema)),
-     ?_assertEqual({ok, legacy_artifact(Nodes)}, legacy(Schema))].
+    [?_assertEqual({ok, artifact(Nodes)}, emitter_fixture(Schema)),
+     ?_assertEqual({ok, legacy_artifact(Nodes)}, legacy_emitter_fixture(Schema))].
 
 %% Anchor index строится до emission, поэтому корневой `$ref` разрешает цель,
 %% объявленную позже в `$defs`, и хранит в IR только canonical addr().
@@ -594,7 +594,7 @@ anchor_ref_resource_test() ->
                                   anonymous,
                                   #{<<"number">> => <<"/$defs/value">>},
                                   Nodes)}),
-    ?assertEqual({ok, Expected}, compile(Schema)).
+    ?assertEqual({ok, Expected}, emitter_fixture(Schema)).
 
 %% `$dynamicAnchor` доходит до артефакта отдельной картой и одновременно
 %% работает как обычный plain-name fragment: `$ref` на него разрешается наравне
@@ -614,7 +614,7 @@ dynamic_anchor_resource_test() ->
                                   #{<<"node">> => <<"/$defs/value">>},
                                   #{<<"node">> => <<"/$defs/value">>},
                                   Nodes)}),
-    ?assertEqual({ok, Expected}, compile(Schema)).
+    ?assertEqual({ok, Expected}, emitter_fixture(Schema)).
 
 %% Динамическая форма: fragment — plain name, и лексическая цель несёт
 %% одноимённый `$dynamicAnchor`. В IR попадают оба: имя для поиска по dynamic
@@ -635,7 +635,7 @@ dynamic_ref_resource_test() ->
                                   #{<<"node">> => <<"/$defs/value">>},
                                   #{<<"node">> => <<"/$defs/value">>},
                                   Nodes)}),
-    ?assertEqual({ok, Expected}, compile(Schema)).
+    ?assertEqual({ok, Expected}, emitter_fixture(Schema)).
 
 %% Лексическая цель может лежать в другом resource, и `$dynamicAnchor` там же:
 %% имя ищется в resource цели, а не в том, где написан keyword.
@@ -647,7 +647,7 @@ dynamic_ref_other_resource_test() ->
                <<"$defs">> =>
                    #{<<"child">> => #{<<"$id">> => Child,
                                       <<"$dynamicAnchor">> => <<"node">>}}},
-    {ok, #{resources := Resources}} = compile(Schema),
+    {ok, #{resources := Resources}} = emitter_fixture(Schema),
     #resource{nodes = #{<<>> := #node{constraints = Constraints}}} =
         maps:get(Root, Resources),
     ?assertEqual([{marker, <<"$defs">>},
@@ -673,11 +673,11 @@ dynamic_ref_static_forms_test_() ->
 %% В Draft 2019-09 keyword неизвестен, а неизвестные этот dialect игнорирует.
 dynamic_ref_value_test_() ->
     [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/$dynamicRef">>),
-                   compile(#{<<"$dynamicRef">> => 42})),
+                   emitter_fixture(#{<<"$dynamicRef">> => 42})),
      ?_assertEqual(schema_error(unresolved_anchor, <<"/$dynamicRef">>),
-                   compile(#{<<"$dynamicRef">> => <<"#missing">>})),
+                   emitter_fixture(#{<<"$dynamicRef">> => <<"#missing">>})),
      ?_assertEqual({ok, legacy_artifact(schema_node([]))},
-                   legacy(#{<<"$dynamicRef">> => <<"#missing">>}))].
+                   legacy_emitter_fixture(#{<<"$dynamicRef">> => <<"#missing">>}))].
 
 %% Recursive IR не зависит от наличия anchor у лексической цели: этот флаг
 %% решает, будет ли evaluator переигрывать цель в runtime scope.
@@ -686,8 +686,8 @@ recursive_ref_resource_test_() ->
                   <<"$recursiveRef">> => <<"#">>},
     Plain = #{<<"$recursiveRef">> => <<"#">>},
     Node = schema_node([{recursive_ref, {anonymous, <<>>}}]),
-    [?_assertEqual({ok, legacy_artifact(Node, true)}, legacy(Recursive)),
-     ?_assertEqual({ok, legacy_artifact(Node, false)}, legacy(Plain))].
+    [?_assertEqual({ok, legacy_artifact(Node, true)}, legacy_emitter_fixture(Recursive)),
+     ?_assertEqual({ok, legacy_artifact(Node, false)}, legacy_emitter_fixture(Plain))].
 
 recursive_anchor_resources_test() ->
     Root = <<"https://example.com/root">>,
@@ -706,7 +706,7 @@ recursive_anchor_resources_test() ->
                                <<"/definitions/nested">> => schema_node([])}),
                    Child => legacy_resource(Child, true,
                                             #{<<>> => schema_node([])})}),
-    ?assertEqual({ok, Expected}, legacy(Schema)).
+    ?assertEqual({ok, Expected}, legacy_emitter_fixture(Schema)).
 
 recursive_ref_dialect_and_value_test_() ->
     Current = #{<<"$recursiveAnchor">> => true,
@@ -715,16 +715,16 @@ recursive_ref_dialect_and_value_test_() ->
          {ok, artifact(schema_node(
                          [{annotation, <<"$recursiveAnchor">>, true},
                           {annotation, <<"$recursiveRef">>, <<"#">>}]))},
-         compile(Current)),
+         emitter_fixture(Current)),
      ?_assertEqual(schema_error({bad_keyword_value, <<"other#">>},
                                 <<"/$recursiveRef">>),
-                   legacy(#{<<"$recursiveRef">> => <<"other#">>})),
+                   legacy_emitter_fixture(#{<<"$recursiveRef">> => <<"other#">>})),
      ?_assertEqual(schema_error({bad_keyword_value, 42},
                                 <<"/$recursiveRef">>),
-                   legacy(#{<<"$recursiveRef">> => 42})),
+                   legacy_emitter_fixture(#{<<"$recursiveRef">> => 42})),
      ?_assertEqual(schema_error({bad_keyword_value, <<"yes">>},
                                 <<"/$recursiveAnchor">>),
-                   legacy(#{<<"$recursiveAnchor">> => <<"yes">>}))].
+                   legacy_emitter_fixture(#{<<"$recursiveAnchor">> => <<"yes">>}))].
 
 %% Старый `dependencies` не является keyword двух заявленных vocabularies.
 %% Разница unknown-policy уже впечатана в IR: 2019-09 игнорирует, 2020-12
@@ -732,10 +732,10 @@ recursive_ref_dialect_and_value_test_() ->
 dependencies_compatibility_profile_test_() ->
     Value = #{<<"a">> => [<<"b">>]},
     Schema = #{<<"dependencies">> => Value},
-    [?_assertEqual({ok, legacy_artifact(schema_node([]))}, legacy(Schema)),
+    [?_assertEqual({ok, legacy_artifact(schema_node([]))}, legacy_emitter_fixture(Schema)),
      ?_assertEqual({ok, artifact(schema_node(
                                    [{annotation, <<"dependencies">>, Value}]))},
-                   compile(Schema))].
+                   emitter_fixture(Schema))].
 
 pointer_ref_resource_test() ->
     Schema = #{<<"$ref">> => <<"#/$defs/value">>,
@@ -745,11 +745,11 @@ pointer_ref_resource_test() ->
                                         {ref, {anonymous,
                                                 <<"/$defs/value">>}}]),
                    <<"/$defs/value">> => false}),
-    ?assertEqual({ok, Expected}, compile(Schema)).
+    ?assertEqual({ok, Expected}, emitter_fixture(Schema)).
 
 self_ref_finite_ir_test() ->
     Expected = artifact(schema_node([{ref, {anonymous, <<>>}}])),
-    ?assertEqual({ok, Expected}, compile(#{<<"$ref">> => <<"#">>})).
+    ?assertEqual({ok, Expected}, emitter_fixture(#{<<"$ref">> => <<"#">>})).
 
 parent_pointer_ref_resource_test() ->
     Child = <<"https://example.com/child">>,
@@ -766,7 +766,7 @@ parent_pointer_ref_resource_test() ->
                    Child => resource(
                               Child,
                               #{<<>> => schema_node([{type, [integer]}])})}),
-    ?assertEqual({ok, Expected}, compile(Schema)).
+    ?assertEqual({ok, Expected}, emitter_fixture(Schema)).
 
 %% Absolute/relative URI может выбрать embedded resource того же compound
 %% document; store для такого локального перехода не нужен.
@@ -789,31 +789,31 @@ embedded_anchor_ref_resource_test() ->
                    Child => resource(
                              Child, #{<<"leaf">> => <<>>},
                              #{<<>> => schema_node([{type, [string]}])})}),
-    ?assertEqual({ok, Expected}, compile(Schema)).
+    ?assertEqual({ok, Expected}, emitter_fixture(Schema)).
 
 local_ref_error_test_() ->
     Root = <<"https://example.com/root.json">>,
     Missing = <<"https://example.com/missing.json">>,
     [?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/$ref">>),
-                   compile(#{<<"$ref">> => 42})),
+                   emitter_fixture(#{<<"$ref">> => 42})),
      ?_assertEqual(schema_error(unresolved_anchor, <<"/$ref">>),
-                   compile(#{<<"$ref">> => <<"#missing">>})),
+                   emitter_fixture(#{<<"$ref">> => <<"#missing">>})),
      ?_assertEqual(schema_error({dangling_ref,
                                  {anonymous, <<"/$defs/missing">>}},
                                 <<"/$ref">>),
-                   compile(#{<<"$ref">> => <<"#/$defs/missing">>,
+                   emitter_fixture(#{<<"$ref">> => <<"#/$defs/missing">>,
                              <<"$defs">> => #{}})),
      ?_assertEqual(schema_error({non_schema_target,
                                  {anonymous, <<"/const/value">>}},
                                 <<"/$ref">>),
-                   compile(#{<<"$ref">> => <<"#/const/value">>,
+                   emitter_fixture(#{<<"$ref">> => <<"#/const/value">>,
                              <<"const">> => #{<<"value">> => true}})),
      ?_assertEqual(
          {error, #schema_error{reason = {unknown_document, Missing},
                                location = {Root, <<"/$ref">>}}},
-         compile(#{<<"$id">> => Root, <<"$ref">> => <<"missing.json">>})),
+         emitter_fixture(#{<<"$id">> => Root, <<"$ref">> => <<"missing.json">>})),
      ?_assertEqual(schema_error(invalid_percent_encoding, <<"/$ref">>),
-                   compile(#{<<"$ref">> => <<"#%zz">>}))].
+                   emitter_fixture(#{<<"$ref">> => <<"#%zz">>}))].
 
 %% Store lookup использует retrieval URI, но IR, resources и sources сразу
 %% переходят на canonical URI корневого `$id` remote document.
@@ -836,7 +836,7 @@ remote_anchor_via_retrieval_test() ->
                 Canonical => resource(
                                Canonical, #{<<"leaf">> => <<>>},
                                #{<<>> => schema_node([{type, [string]}])})}},
-    ?assertEqual({ok, Expected}, trusted_compile(Store, Schema, [])).
+    ?assertEqual({ok, Expected}, trust_compile(Store, Schema, [])).
 
 %% Все documents загружаются до emission, поэтому цикл A <-> B даёт конечный
 %% IR и не зависит от порядка batch-регистрации.
@@ -853,7 +853,7 @@ remote_cycle_finite_ir_test() ->
           resources =>
               #{A => resource(A, #{<<>> => schema_node([{ref, {B, <<>>}}])}),
                 B => resource(B, #{<<>> => schema_node([{ref, {A, <<>>}}])})}},
-    ?assertEqual({ok, Expected}, trusted_compile_uri(Store, A, [])).
+    ?assertEqual({ok, Expected}, trust_compile_uri(Store, A, [])).
 
 %% Замыкание строится транзитивно, а sources содержит документы, не resources:
 %% embedded `$id` отдельным source не становится.
@@ -869,7 +869,7 @@ remote_transitive_sources_test() ->
            {B, #{<<"$ref">> => C,
                  <<"$defs">> => #{<<"local">> => #{<<"$id">> => Embedded}}}},
            {C, #{<<"type">> => <<"integer">>}}]),
-    {ok, Compiled} = trusted_compile_uri(Store, A, []),
+    {ok, Compiled} = trust_compile_uri(Store, A, []),
     ?assertEqual(A, maps:get(root, Compiled)),
     ?assertEqual([A, B, C], maps:get(sources, Compiled)),
     ?assertEqual([A, B, C, Embedded],
@@ -886,7 +886,7 @@ remote_pointer_evaluation_test() ->
     {ok, Canonical, Store} =
         valid_json_store:add(valid_json_store:temporary(), Retrieval, Remote),
     Schema = #{<<"$ref">> => <<Retrieval/binary, "#/$defs/integer">>},
-    {ok, Compiled} = trusted_compile(Store, Schema, []),
+    {ok, Compiled} = trust_compile(Store, Schema, []),
     ?assertMatch({ok, #eval_result{valid = true}},
                  valid_json_eval:run(Compiled, 1, flag)),
     ?assertMatch({ok, #eval_result{valid = false}},
@@ -907,7 +907,7 @@ remote_parent_pointer_alias_test() ->
         valid_json_store:add(valid_json_store:temporary(), Retrieval, Remote),
     Ref = <<Retrieval/binary, "#/$defs/child/properties/x">>,
     {ok, Compiled} =
-        trusted_compile(Store, #{<<"$ref">> => Ref}, []),
+        trust_compile(Store, #{<<"$ref">> => Ref}, []),
     #resource{nodes = #{<<>> := #node{constraints = [{ref, Target}]}}} =
         maps:get(anonymous, maps:get(resources, Compiled)),
     ?assertEqual({Child, <<"/properties/x">>}, Target).
@@ -923,7 +923,7 @@ compile_uri_alias_and_base_test() ->
           [{<<"root.json">>, #{<<"$id">> => Canonical,
                                 <<"$ref">> => <<"target.json">>}},
            {Target, #{<<"type">> => <<"boolean">>}}]),
-    {ok, Compiled} = trusted_compile_uri(Store, <<"root.json">>, []),
+    {ok, Compiled} = trust_compile_uri(Store, <<"root.json">>, []),
     ?assertEqual(Canonical, maps:get(root, Compiled)),
     ?assertEqual([Canonical, Target], maps:get(sources, Compiled)),
     #resource{nodes = #{<<>> := #node{constraints = [{ref, {Target, <<>>}}]}}} =
@@ -935,11 +935,11 @@ compile_uri_alias_and_base_test() ->
 public_dialect_test() ->
     Legacy = #{<<"$schema">> => ?LEGACY, <<"type">> => <<"integer">>},
     {ok, Compiled} =
-        trusted_compile(valid_json_store:temporary(), Legacy, []),
+        trust_compile(valid_json_store:temporary(), Legacy, []),
     #resource{dialect = ?LEGACY} =
         maps:get(anonymous, maps:get(resources, Compiled)),
     {ok, Defaulted} =
-        trusted_compile(valid_json_store:temporary(), #{},
+        trust_compile(valid_json_store:temporary(), #{},
                         [{default_dialect, ?LEGACY}]),
     #resource{dialect = ?LEGACY} =
         maps:get(anonymous, maps:get(resources, Defaulted)).
@@ -963,7 +963,7 @@ cross_draft_embedded_test() ->
                            <<"items">> => [#{<<"type">> => <<"string">>}],
                            <<"additionalItems">> => #{<<"type">> => <<"integer">>}}}},
     {ok, #{resources := Resources}} =
-        trusted_compile(valid_json_store:temporary(), Schema, []),
+        trust_compile(valid_json_store:temporary(), Schema, []),
     #resource{dialect = RootDialect, nodes = RootNodes} = maps:get(Root, Resources),
     #resource{dialect = LegacyDialect, nodes = LegacyNodes} =
         maps:get(Legacy, Resources),
@@ -992,7 +992,7 @@ cross_draft_remote_test() ->
                                <<"$schema">> => ?LEGACY,
                                <<"prefixItems">> => [#{<<"type">> => <<"string">>}]}),
     {ok, #{resources := Resources, sources := Sources}} =
-        trusted_compile(Store, #{<<"$ref">> => Remote}, []),
+        trust_compile(Store, #{<<"$ref">> => Remote}, []),
     ?assertEqual([Remote], Sources),
     #resource{dialect = ?DIALECT, nodes = EntryNodes} =
         maps:get(anonymous, Resources),
@@ -1016,7 +1016,7 @@ cross_draft_embedded_metaschema_test() ->
                                   <<"$schema">> => Meta,
                                   <<"minimum">> => 10}}},
     {ok, #{resources := Resources, sources := Sources}} =
-        trusted_compile(Store, Schema, []),
+        trust_compile(Store, Schema, []),
     ?assertEqual([Meta], Sources),
     #resource{dialect = ?DIALECT, nodes = RootNodes} = maps:get(Root, Resources),
     #resource{dialect = Meta, nodes = EmbeddedNodes} = maps:get(Embedded, Resources),
@@ -1112,7 +1112,7 @@ embedded_resource_test() ->
                      #{<<>> => schema_node([{properties, undefined, undefined,
                                              {Bar, <<"/additionalProperties">>}}]),
                        <<"/additionalProperties">> => schema_node([])})}),
-    ?assertEqual({ok, Expected}, compile(Schema)).
+    ?assertEqual({ok, Expected}, emitter_fixture(Schema)).
 
 %% Anonymous parent тоже имеет physical pointer space на время компиляции, хотя
 %% в итоговом artifact абсолютного id у него нет.
@@ -1133,7 +1133,7 @@ anonymous_parent_resource_test() ->
                                                {Child, <<"/contains">>},
                                                undefined, undefined, true}]),
                          <<"/contains">> => true})}),
-    ?assertEqual({ok, Expected}, compile(Schema)).
+    ?assertEqual({ok, Expected}, emitter_fixture(Schema)).
 
 %% Relative `$id` разрешается от ближайшего resource, а не от anonymous root.
 relative_embedded_resource_test() ->
@@ -1156,7 +1156,7 @@ relative_embedded_resource_test() ->
                                                               <<"/properties/x">>}},
                                                undefined, undefined}]),
                          <<"/properties/x">> => true})}),
-    ?assertEqual({ok, Expected}, compile(Schema)).
+    ?assertEqual({ok, Expected}, emitter_fixture(Schema)).
 
 %% После resource boundary ошибка тоже получает каноническую location.
 embedded_resource_error_test() ->
@@ -1166,50 +1166,50 @@ embedded_resource_error_test() ->
                <<"not">> => #{<<"$id">> => Child, <<"maximum">> => null}},
     ?assertEqual({error, #schema_error{reason = {bad_keyword_value, null},
                                       location = {Child, <<"/maximum">>}}},
-                 compile(Schema)).
+                 emitter_fixture(Schema)).
 
 definitions_error_test() ->
     ?assertEqual(schema_error({bad_keyword_value, 42}, <<"/$defs">>),
-                 compile(#{<<"$defs">> => 42})),
+                 emitter_fixture(#{<<"$defs">> => 42})),
     ?assertEqual(schema_error({bad_keyword_value, 42}, <<"/definitions">>),
-                 legacy(#{<<"definitions">> => 42})).
+                 legacy_emitter_fixture(#{<<"definitions">> => 42})).
 
 %% Потребляются компилятором и собственного constraint не дают.
 consumed_keywords_test() ->
     Schema = #{<<"$schema">> => ?DIALECT,
                <<"$comment">> => <<"note">>,
                <<"type">> => <<"boolean">>},
-    ?assertEqual({ok, artifact(schema_node([{type, [boolean]}]))}, compile(Schema)).
+    ?assertEqual({ok, artifact(schema_node([{type, [boolean]}]))}, emitter_fixture(Schema)).
 
 bad_keyword_value_test_() ->
     [?_assertEqual(schema_error({bad_keyword_value, <<"int">>}, <<"/type">>),
-                   compile(#{<<"type">> => <<"int">>})),
+                   emitter_fixture(#{<<"type">> => <<"int">>})),
      ?_assertEqual(schema_error({bad_keyword_value, [<<"string">>, 1]}, <<"/type">>),
-                   compile(#{<<"type">> => [<<"string">>, 1]})),
+                   emitter_fixture(#{<<"type">> => [<<"string">>, 1]})),
      ?_assertEqual(schema_error({bad_keyword_value, null}, <<"/type">>),
-                   compile(#{<<"type">> => null})),
+                   emitter_fixture(#{<<"type">> => null})),
      ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/enum">>),
-                   compile(#{<<"enum">> => 1}))].
+                   emitter_fixture(#{<<"enum">> => 1}))].
 
 %% Annotation-only keyword доносит своё значение до IR как есть. Типы этих
 %% keywords ограничивает метасхема, которую валидатор не применяет, поэтому
 %% запрещённое ею значение всё равно компилируется.
 annotation_test_() ->
     [?_assertEqual({ok, artifact(schema_node([{annotation, <<"title">>, <<"t">>}]))},
-                   compile(#{<<"title">> => <<"t">>})),
+                   emitter_fixture(#{<<"title">> => <<"t">>})),
      ?_assertEqual({ok, artifact(schema_node([{annotation, <<"readOnly">>, true}]))},
-                   compile(#{<<"readOnly">> => true})),
+                   emitter_fixture(#{<<"readOnly">> => true})),
      ?_assertEqual({ok, artifact(schema_node([{annotation, <<"examples">>, [1, null]}]))},
-                   compile(#{<<"examples">> => [1, null]})),
+                   emitter_fixture(#{<<"examples">> => [1, null]})),
      ?_assertEqual({ok, artifact(schema_node([{annotation, <<"default">>, []}]))},
-                   compile(#{<<"default">> => []})),
+                   emitter_fixture(#{<<"default">> => []})),
      ?_assertEqual({ok, artifact(schema_node([{annotation, <<"title">>, 1}]))},
-                   compile(#{<<"title">> => 1})),
+                   emitter_fixture(#{<<"title">> => 1})),
      %% Внутрь значения компилятор не спускается: schema positions там нет, и
      %% похожий на схему объект остаётся обычными данными.
      ?_assertEqual({ok, artifact(schema_node([{annotation, <<"default">>,
                                                #{<<"unevaluatedItems">> => #{}}}]))},
-                   compile(#{<<"default">> => #{<<"unevaluatedItems">> => #{}}}))].
+                   emitter_fixture(#{<<"default">> => #{<<"unevaluatedItems">> => #{}}}))].
 
 %% `format` аннотирует в обоих dialects, и объявленный в корневой метасхеме
 %% Draft 2019-09 `false` этого не меняет: он относится к assertion. Имя формата
@@ -1217,13 +1217,13 @@ annotation_test_() ->
 %% стандартным, а вот нестроковое значение для слота IR невозможно.
 format_test_() ->
     [?_assertEqual({ok, artifact(schema_node([{format, <<"email">>, false}]))},
-                   compile(#{<<"format">> => <<"email">>})),
+                   emitter_fixture(#{<<"format">> => <<"email">>})),
      ?_assertEqual({ok, legacy_artifact(schema_node([{format, <<"email">>, false}]))},
-                   legacy(#{<<"format">> => <<"email">>})),
+                   legacy_emitter_fixture(#{<<"format">> => <<"email">>})),
      ?_assertEqual({ok, artifact(schema_node([{format, <<"custom-name">>, false}]))},
-                   compile(#{<<"format">> => <<"custom-name">>})),
+                   emitter_fixture(#{<<"format">> => <<"custom-name">>})),
      ?_assertEqual(schema_error({bad_keyword_value, 1}, <<"/format">>),
-                   compile(#{<<"format">> => 1}))].
+                   emitter_fixture(#{<<"format">> => 1}))].
 
 %% Роль `format` выбирает компиляция, а не вычисление: assertion меняет IR и
 %% потому включается опцией `assert_format`. По умолчанию keyword только
@@ -1241,7 +1241,7 @@ assert_format_option_test_() ->
                    option_constraints(#{<<"format">> => <<"custom-name">>},
                                       [{assert_format, true}])),
      ?_assertError(badarg,
-                   trusted_compile(valid_json_store:temporary(), Ipv4,
+                   trust_compile(valid_json_store:temporary(), Ipv4,
                                    [{assert_format, yes}]))].
 
 %% Опция принадлежит проходу компиляции целиком, а не отдельному документу:
@@ -1252,7 +1252,7 @@ assert_format_reaches_every_resource_test() ->
                <<"$defs">> => #{<<"inner">> => #{<<"$id">> => Inner,
                                                  <<"format">> => <<"ipv4">>}}},
     {ok, #{resources := Resources}} =
-        trusted_compile(valid_json_store:temporary(), Schema,
+        trust_compile(valid_json_store:temporary(), Schema,
                         [{assert_format, true}]),
     #resource{nodes = Nodes} = maps:get(Inner, Resources),
     ?assertEqual([{format, <<"ipv4">>, true}], constraints(<<>>, Nodes)).
@@ -1267,7 +1267,7 @@ format_order_test() ->
     Constraints = [{type, [string]},
                    {format, <<"email">>, false},
                    {annotation, <<"title">>, <<"t">>}],
-    ?assertEqual({ok, artifact(schema_node(Constraints))}, compile(Schema)).
+    ?assertEqual({ok, artifact(schema_node(Constraints))}, emitter_fixture(Schema)).
 
 %% Аннотации стоят в конце порядка обхода: сначала идёт то, что определяет
 %% вердикт, потом то, что только описывает значение.
@@ -1278,7 +1278,7 @@ annotation_order_test() ->
     Constraints = [{type, [integer]},
                    {annotation, <<"title">>, <<"t">>},
                    {annotation, <<"deprecated">>, true}],
-    ?assertEqual({ok, artifact(schema_node(Constraints))}, compile(Schema)).
+    ?assertEqual({ok, artifact(schema_node(Constraints))}, emitter_fixture(Schema)).
 
 %% Пользовательская метасхема задаёт активные vocabularies. Keyword выключенной
 %% vocabulary становится неизвестным и в Draft 2020-12 остаётся annotation:
@@ -1289,7 +1289,7 @@ vocabulary_disabled_test() ->
     Schema = #{<<"$schema">> => Meta,
                <<"properties">> => #{<<"a">> => #{<<"minimum">> => 10}},
                <<"minimum">> => 5},
-    {ok, Compiled} = trusted_compile(Store, Schema, []),
+    {ok, Compiled} = trust_compile(Store, Schema, []),
     #{resources := #{anonymous := #resource{dialect = Dialect, nodes = Nodes}},
       sources := Sources} = Compiled,
     %% Dialect артефакта называет то, что написано в `$schema`, а метасхема
@@ -1312,7 +1312,7 @@ vocabulary_disabled_applicator_test() ->
     Properties = #{<<"a">> => #{<<"$id">> => Inner, <<"type">> => <<"string">>}},
     Schema = #{<<"$schema">> => Meta, <<"properties">> => Properties},
     {ok, #{resources := Resources}} =
-        trusted_compile(Store, Schema, []),
+        trust_compile(Store, Schema, []),
     ?assertEqual([anonymous], maps:keys(Resources)),
     #resource{nodes = Nodes} = maps:get(anonymous, Resources),
     ?assertEqual([<<>>], maps:keys(Nodes)),
@@ -1337,7 +1337,7 @@ vocabulary_unrecognized_test_() ->
           [{Required, metaschema(Required, Declared(true))},
            {Optional, metaschema(Optional, Declared(false))}]),
     Compile = fun(Meta) ->
-                      trusted_compile(
+                      trust_compile(
                         Store, #{<<"$schema">> => Meta,
                                  <<"type">> => <<"number">>}, [])
               end,
@@ -1359,7 +1359,7 @@ vocabulary_unrecognized_test_() ->
                               reason = {unrecognized_vocabulary,
                                         vocab(<<"format-assertion">>)},
                               location = {anonymous, <<"/$schema">>}}},
-                   trusted_compile(
+                   trust_compile(
                      WithAssertion, #{<<"$schema">> => Assertion,
                                       <<"format">> => <<"email">>}, []))].
 
@@ -1375,7 +1375,7 @@ vocabulary_core_test_() ->
           [{Missing, metaschema(Missing, #{vocab(<<"validation">>) => true})},
            {Disabled, metaschema(Disabled, #{vocab(<<"core">>) => false})}]),
     Compile = fun(Meta) ->
-                      trusted_compile(Store, #{<<"$schema">> => Meta}, [])
+                      trust_compile(Store, #{<<"$schema">> => Meta}, [])
               end,
     Error = fun(Reason) ->
                     {error, #schema_error{reason = Reason,
@@ -1393,7 +1393,7 @@ vocabulary_consumed_test() ->
     Schema = #{<<"$vocabulary">> => #{vocab(<<"core">>) => true},
                <<"type">> => <<"integer">>},
     ?assertEqual({ok, artifact(schema_node([{type, [integer]}]))},
-                 compile(Schema)).
+                 emitter_fixture(Schema)).
 
 %% Настоящее расширение становится annotation только в 2020-12. Его значение
 %% остаётся непрозрачными данными: вложенные объекты не становятся nodes.
@@ -1406,9 +1406,9 @@ unknown_keyword_test_() ->
         {ok, artifact(schema_node([{type, [integer]},
                                    {annotation, <<"aCustom">>, Value},
                                    {annotation, <<"zCustom">>, 2}]))},
-        compile(Schema)),
+        emitter_fixture(Schema)),
      ?_assertEqual({ok, legacy_artifact(schema_node([{type, [integer]}]))},
-                   legacy(Schema))].
+                   legacy_emitter_fixture(Schema))].
 
 %% `$id` под unknown keyword не резервирует resource. У настоящей schema с тем
 %% же URI нет конфликта, и в артефакт попадают только корень и `$defs/real`.
@@ -1419,7 +1419,7 @@ unknown_keyword_is_not_schema_position_test() ->
                                    <<"type">> => <<"null">>},
                <<"$defs">> => #{<<"real">> => #{<<"$id">> => Child,
                                                     <<"type">> => <<"string">>}}},
-    {ok, Compiled} = compile(Schema),
+    {ok, Compiled} = emitter_fixture(Schema),
     #{resources := Resources} = Compiled,
     ?assertEqual([anonymous, Child], lists:sort(maps:keys(Resources))),
     #resource{nodes = AnonymousNodes} = maps:get(anonymous, Resources),
@@ -1437,7 +1437,7 @@ unknown_keyword_is_not_schema_position_test() ->
 foreign_dialect_keyword_test_() ->
     [?_assertEqual({ok, artifact(schema_node(
                                    [{annotation, <<"additionalItems">>, false}]))},
-                   compile(#{<<"additionalItems">> => false}))].
+                   emitter_fixture(#{<<"additionalItems">> => false}))].
 
 %% Content keywords только аннотируют, поэтому их значения уходят в IR как есть
 %% и не нормализуются. Порядок между собой статический, как и у остальных
@@ -1445,16 +1445,16 @@ foreign_dialect_keyword_test_() ->
 content_test_() ->
     [?_assertEqual({ok, artifact(schema_node(
                                    [{content, <<"contentEncoding">>, <<"base64">>}]))},
-                   compile(#{<<"contentEncoding">> => <<"base64">>})),
+                   emitter_fixture(#{<<"contentEncoding">> => <<"base64">>})),
      ?_assertEqual({ok, artifact(schema_node(
                                    [{content, <<"contentMediaType">>,
                                      <<"application/json">>}]))},
-                   compile(#{<<"contentMediaType">> => <<"application/json">>})),
+                   emitter_fixture(#{<<"contentMediaType">> => <<"application/json">>})),
      %% Тип значения ограничивает метасхема, а компилятор его не проверяет — то
      %% же правило, что и у `default` рядом с несовместимым `type`.
      ?_assertEqual({ok, artifact(schema_node(
                                    [{content, <<"contentEncoding">>, 1}]))},
-                   compile(#{<<"contentEncoding">> => 1}))].
+                   emitter_fixture(#{<<"contentEncoding">> => 1}))].
 
 %% Порядок content keywords между собой статический и не зависит от устройства
 %% map. Значение `contentSchema` остаётся в constraint исходным JSON: подсхема
@@ -1463,7 +1463,7 @@ content_order_test() ->
     Schema = #{<<"contentSchema">> => #{<<"type">> => <<"object">>},
                <<"contentMediaType">> => <<"application/json">>,
                <<"contentEncoding">> => <<"base64">>},
-    {ok, #{resources := Resources}} = compile(Schema),
+    {ok, #{resources := Resources}} = emitter_fixture(Schema),
     #resource{nodes = Nodes} = maps:get(anonymous, Resources),
     ?assertEqual([{content, <<"contentEncoding">>, <<"base64">>},
                   {content, <<"contentMediaType">>, <<"application/json">>},
@@ -1478,7 +1478,7 @@ content_schema_is_not_a_schema_position_test() ->
     Inner = #{<<"$anchor">> => <<"payload">>, <<"type">> => <<"object">>},
     Schema = #{<<"contentMediaType">> => <<"application/json">>,
                <<"contentSchema">> => Inner},
-    {ok, #{resources := Resources}} = compile(Schema),
+    {ok, #{resources := Resources}} = emitter_fixture(Schema),
     #resource{anchors = Anchors, nodes = Nodes} = maps:get(anonymous, Resources),
     ?assertEqual(#{}, Anchors),
     ?assertEqual([<<>>], maps:keys(Nodes)),
@@ -1491,28 +1491,28 @@ content_schema_is_not_a_schema_position_test() ->
 content_schema_shape_is_left_to_the_metaschema_test() ->
     ?assertEqual({ok, artifact(schema_node(
                                  [{content, <<"contentSchema">>, <<"x">>}]))},
-                 compile(#{<<"contentSchema">> => <<"x">>})).
+                 emitter_fixture(#{<<"contentSchema">> => <<"x">>})).
 
 %% На позиции schema стоит значение, которое schema не является: отдельной
 %% причины у него нет, для slot IR оно просто невозможно.
 not_a_schema_test_() ->
-    [?_assertEqual(schema_error({bad_keyword_value, 42}, <<>>), compile(42)),
-     ?_assertEqual(schema_error({bad_keyword_value, null}, <<>>), compile(null)),
-     ?_assertEqual(schema_error({bad_keyword_value, []}, <<>>), compile([])),
+    [?_assertEqual(schema_error({bad_keyword_value, 42}, <<>>), emitter_fixture(42)),
+     ?_assertEqual(schema_error({bad_keyword_value, null}, <<>>), emitter_fixture(null)),
+     ?_assertEqual(schema_error({bad_keyword_value, []}, <<>>), emitter_fixture([])),
      %% Позицию называет её собственная локация, а не имя ближайшего keyword.
      ?_assertEqual(schema_error({bad_keyword_value, 42}, <<"/allOf/1">>),
-                   compile(#{<<"allOf">> => [true, 42]})),
+                   emitter_fixture(#{<<"allOf">> => [true, 42]})),
      ?_assertEqual(schema_error({bad_keyword_value, <<"x">>}, <<"/not">>),
-                   compile(#{<<"not">> => <<"x">>}))].
+                   emitter_fixture(#{<<"not">> => <<"x">>}))].
 
-compile(Schema) ->
-    scrub(valid_json_compile:compile_unchecked(Schema, ?DIALECT)).
+emitter_fixture(Schema) ->
+    scrub(valid_json_compile:compile_emitter_fixture(Schema, ?DIALECT)).
 
 %% Компилирует одиночный `pattern` и отвечает, совпал ли субъект. Идёт мимо
-%% compile/1: нужен как раз тот re:mp(), который scrub/1 стирает.
+%% emitter_fixture/1: нужен как раз тот re:mp(), который scrub/1 стирает.
 compiled_matches(Source, Subject) ->
     {ok, #{resources := Resources}} =
-        valid_json_compile:compile_unchecked(#{<<"pattern">> => Source},
+        valid_json_compile:compile_emitter_fixture(#{<<"pattern">> => Source},
                                              ?DIALECT),
     #{anonymous := #resource{nodes = #{<<>> := Node}}} = Resources,
     #node{constraints = [{pattern, {Source, Compiled}}]} = Node,
@@ -1520,13 +1520,13 @@ compiled_matches(Source, Subject) ->
 
 %% Эти fixtures проверяют closure, dialect/vocabulary и форму публичного
 %% артефакта. Корректность самих статических schemas покрыта meta-schema suite.
-trusted_compile(Store, Schema, Options) ->
+trust_compile(Store, Schema, Options) ->
     valid_json_compile:compile(
-      Store, Schema, [{schema_validation, trusted} | Options]).
+      Store, Schema, [{trust_schema, true} | Options]).
 
-trusted_compile_uri(Store, Uri, Options) ->
+trust_compile_uri(Store, Uri, Options) ->
     valid_json_compile:compile_uri(
-      Store, Uri, [{schema_validation, trusted} | Options]).
+      Store, Uri, [{trust_schema, true} | Options]).
 
 %% Пользовательская метасхема — обычный документ реестра: компилятор читает из
 %% неё только `$vocabulary`, а её собственный dialect выбирает набор URI.
@@ -1547,18 +1547,18 @@ constraints(Pointer, Nodes) ->
     #node{constraints = Constraints} = maps:get(Pointer, Nodes),
     Constraints.
 
-%% Compile options видны только через публичный вход: compile_unchecked/2 их не
+%% Compile options видны только через публичный вход: compile_emitter_fixture/2 их не
 %% принимает вовсе.
 option_constraints(Schema, Options) ->
     {ok, #{resources := Resources}} =
-        trusted_compile(valid_json_store:temporary(), Schema, Options),
+        trust_compile(valid_json_store:temporary(), Schema, Options),
     #resource{nodes = Nodes} = maps:get(anonymous, Resources),
     constraints(<<>>, Nodes).
 
 %% Тот же вход с другим dialect: раскладку array applicators выбирает компилятор,
 %% и это единственное место, где она видна.
-legacy(Schema) ->
-    valid_json_compile:compile_unchecked(Schema, ?LEGACY).
+legacy_emitter_fixture(Schema) ->
+    valid_json_compile:compile_emitter_fixture(Schema, ?LEGACY).
 
 schema_node(Constraints) ->
     #node{constraints = Constraints, unevaluated = []}.
@@ -1574,7 +1574,7 @@ addr(Pointer) ->
 %% Там, где важен только constraint корня, остальной артефакт повторяет уже
 %% проверенный случай и в ожидание не выписывается.
 root_constraints(Schema) ->
-    {ok, #{resources := Resources}} = compile(Schema),
+    {ok, #{resources := Resources}} = emitter_fixture(Schema),
     #resource{nodes = #{<<>> := #node{constraints = Constraints}}} =
         maps:get(anonymous, Resources),
     Constraints.

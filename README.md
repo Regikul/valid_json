@@ -208,7 +208,17 @@ The declared capability profiles are:
   official suite does not exercise them.
 
 Every schema resource is checked against its own meta-schema when it is
-compiled; a schema that fails its meta-schema is rejected at registration.
+compiled by default; a schema that fails its meta-schema is rejected at
+registration. A caller that has already verified its schemas may pass
+`{trust_schema, true}` to `run_schema/3` or configure the same option on a
+store. This skips only meta-schema evaluation: dialect and vocabulary
+resolution, reference checks, regex compilation, emitter safety checks, and
+instance validation still run. `schema_validation` selects the diagnostic
+format when the check is enabled.
+
+`trust_schema` is a store-wide policy. It applies equally to loader startup,
+later additions, rebuilds, and recovery after an artifact-table restart; use
+separate stores for trusted and untrusted sources.
 The conformance policy, including the exact list of files, excluded groups, and
 the pinned census, lives in [okf/testing/conformance-policy.md](okf/testing/conformance-policy.md).
 

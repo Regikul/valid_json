@@ -88,13 +88,13 @@ case_test(Dir, File, GroupDescription, CaseDescription, Schema, Data,
              {ok, Artifact} =
                  valid_json_compile:compile(
                    Store, Schema, [{default_dialect, Dialect},
-                                   {schema_validation, trusted}]),
+                                   {trust_schema, true}]),
              {ok, Actual} =
                  valid_json_core:validate(Artifact, Data, [{output, Format}]),
              {ok, Verifier} =
                  valid_json_compile:compile(
                    Store, OutputSchema, [{default_dialect, Dialect},
-                                         {schema_validation, trusted}]),
+                                         {trust_schema, true}]),
              ?assertEqual(
                 {ok, #{<<"valid">> => true}},
                 valid_json_core:validate(Verifier, Actual, [{output, flag}]))
