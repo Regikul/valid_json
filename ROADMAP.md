@@ -445,7 +445,7 @@
 модели: dialect принадлежит schema resource, target `$ref` компилируется по
 dialect target resource, evaluator остаётся общим.
 
-- [ ] **Фаза P9 завершена**
+- [x] **Фаза P9 завершена**
 - [x] Признание dialects Draft 6/7: канонические http-URI, явные https-алиасы,
   `{default_dialect, ?DRAFT_06|07}`, схема валидируется собственной метасхемой.
   Покрыто тестами recognition и default dialect.
@@ -470,11 +470,10 @@ dialect target resource, evaluator остаётся общим.
   `tests/draft7` и `remotes/draft6|7` из закреплённого коммита suite; runner
   переведён на per-dialect файловые наборы; `?CENSUS` = {1291, 5967},
   `?REMOTES` = 58 по фактическому прогону.
-- [~] Документация: README, docs/comparison/keywords.md,
-  docs/schema-resources.md и этот пункт ROADMAP обновлены. Не обновлены
-  нормативные документы `okf/` (conformance-policy, validator-resources-runtime,
-  format-attributes, playbook) — их правки согласуются отдельно по правилам
-  AGENTS.md.
+- [x] Документация: README, docs/comparison/keywords.md,
+  docs/schema-resources.md, ROADMAP и нормативные документы `okf/`
+  (conformance-policy, validator-resources-runtime, format-attributes, playbook)
+  приведены в соответствие фактическому поведению.
 
 ## Runtime — хранение и эксплуатация
 

@@ -1,7 +1,7 @@
 ---
 type: Architecture
 title: Format attributes
-description: Девятнадцать имён format обоих диалектов — роль, алгоритм, нормативный источник и ограничения, — плюс документированное исключение по IDN и IRI.
+description: Имена format всех четырёх диалектов — роль, алгоритм, нормативный источник и ограничения, — плюс документированное исключение по IDN и IRI.
 tags: [json-schema, architecture, format, conformance]
 status: draft
 ---
@@ -14,11 +14,34 @@ Keyword `format` живёт двумя ролями сразу: аннотаци
 
 На сегодня из таблицы реализованы пятнадцать имён — `date`, `time`, `date-time`, `duration`, `ipv4`, `ipv6`, `hostname`, `email`, `uri`, `uri-reference`, `uri-template`, `json-pointer`, `relative-json-pointer`, `uuid` и `regex`. Четыре IDN/IRI-строки — намеренное документированное исключение, а не описание работающего assertion-кода.
 
-# Один набор на два диалекта
+# Набор по диалектам
 
-Набор имён в обоих диалектах один и тот же: девятнадцать attributes раздела 7.3 ([validation.txt:723](../references/json-schema/draft-2020-12/validation.txt), [validation.txt:719](../references/json-schema/draft-2019-09/validation.txt)), и подразделы в них совпадают вплоть до состава. `duration` и `uuid` появились ещё в Draft 2019-09, так что различать имена по диалекту не в чем, и отдельного столбца в таблице для этого нет.
+Состав имён различается по диалектам. Draft 2020-12 и Draft 2019-09
+определяют девятнадцать attributes раздела 7.3
+([validation.txt:723](../references/json-schema/draft-2020-12/validation.txt),
+[validation.txt:719](../references/json-schema/draft-2019-09/validation.txt)).
+Draft 7 определяет семнадцать: `date-time`, `date`, `time`, `email`,
+`idn-email`, `hostname`, `idn-hostname`, `ipv4`, `ipv6`, `uri`,
+`uri-reference`, `iri`, `iri-reference`, `uri-template`, `json-pointer`,
+`relative-json-pointer` и `regex` (draft-07 validation, 7.3). Draft 6 — девять:
+`date-time`, `email`, `hostname`, `ipv4`, `ipv6`, `uri`, `uri-reference`,
+`uri-template` и `json-pointer` (draft-06 validation, 8.3); `regex` в списке
+validation-спецификации Draft 6 отсутствует, хотя метасхема Draft 6 и
+использует его для `pattern`. Наборы Draft 6/7 закреплены в
+conformance-профиле per-dialect файлами `optional/format/` и в самой
+метасхеме draft.
 
-Диалекты расходятся не составом, а тем, как включается вердикт. В Draft 2020-12 assertion — отдельная Format-Assertion vocabulary ([validation.txt:649](../references/json-schema/draft-2020-12/validation.txt)). В Draft 2019-09 vocabulary одна, а её значение `true` означает «проверять, если не настроено обратное», и требует синтаксической проверки всех имён ([validation.txt:654](../references/json-schema/draft-2019-09/validation.txt), [validation.txt:660](../references/json-schema/draft-2019-09/validation.txt)). Требование к полноте набора, таким образом, одинаковое, и решается оно для обоих диалектов сразу.
+Диалекты расходятся и тем, как включается вердикт. В Draft 2020-12 assertion —
+отдельная Format-Assertion vocabulary
+([validation.txt:649](../references/json-schema/draft-2020-12/validation.txt)).
+В Draft 2019-09 vocabulary одна, а её значение `true` означает «проверять,
+если не настроено обратное», и требует синтаксической проверки всех имён
+([validation.txt:654](../references/json-schema/draft-2019-09/validation.txt),
+[validation.txt:660](../references/json-schema/draft-2019-09/validation.txt)).
+В Draft 6/7 vocabulary-модели нет вовсе: вердикт включается только compile
+option `assert_format`, а сама спецификация называет проверку содержимого
+строки опциональной. Требование к полноте набора при включённом вердикте,
+таким образом, одинаковое, и решается оно для всех диалектов сразу.
 
 Обе редакции ограничивают требование синтаксисом: реализация не обязана отправлять письмо, ходить по ссылке или проверять существование того, что строка называет ([validation.txt:680](../references/json-schema/draft-2020-12/validation.txt), [validation.txt:668](../references/json-schema/draft-2019-09/validation.txt)). Это и есть общая граница всех алгоритмов ниже.
 

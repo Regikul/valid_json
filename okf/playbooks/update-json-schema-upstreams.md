@@ -24,6 +24,12 @@ tags: [json-schema, maintenance, upstream, fixtures]
 
 Repository URL и commits в `UPSTREAM.json` являются машиночитаемой provenance-записью. `commit` dialect применяется к его корневой и vocabulary meta-schemas, а `output.commit` переопределяет источник `output/schema.json`.
 
+Draft 6 и Draft 7 исключение из общей схемы: их метасхемы живут на ветках
+`draft-06` и `draft-07` того же репозитория, в корне ветки как `schema.json`.
+Vocabulary-метасхем у них нет (vocabulary-модель появилась в Draft 2019-09),
+поэтому шаги 3-4 для них не применяются, а `commit` в `UPSTREAM.json`
+записывается как коммит ветки, содержащий финальную метасхему.
+
 # Test fixtures
 
 Источник fixtures — репозиторий `https://github.com/json-schema-org/JSON-Schema-Test-Suite`.
@@ -31,10 +37,14 @@ Repository URL и commits в `UPSTREAM.json` являются машиночит
 Для зафиксированного commit импортировать:
 
 1. `LICENSE`, `test-schema.json` и `output-test-schema.json`;
-2. `tests/draft2020-12/` и `tests/draft2019-09/`;
+2. `tests/draft2020-12/`, `tests/draft2019-09/`, `tests/draft7/` и
+   `tests/draft6/`;
 3. `output-tests/README.md`;
 4. `output-tests/draft2020-12/` и `output-tests/draft2019-09/`;
-5. remote resources, достижимые из test cases заявленного conformance-профиля;
+5. remote resources, достижимые из test cases заявленного conformance-профиля:
+   `remotes/draft2020-12/`, `remotes/draft2019-09/`, `remotes/draft6/`,
+   `remotes/draft7/` и корневые shared remotes классических `refRemote`
+   (`integer.json`, `baseUriChange*/folderInteger.json`, `nested/`);
 6. commit suite в [`test/fixtures/json-schema-test-suite/UPSTREAM.json`](../../test/fixtures/json-schema-test-suite/UPSTREAM.json).
 
 Fixture-файлы переносятся из выбранного commit без содержательных изменений. Набор импортированных директорий следует [conformance policy](../testing/conformance-policy.md).
