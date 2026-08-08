@@ -1,0 +1,5 @@
+ValidJsonBench.print_metadata()
+case_filter = System.get_env("BENCH_CASE", "all")
+contexts = ValidJsonBench.setup!(case_filter)
+:ok = ValidJsonBench.verify!(contexts)
+IO.puts("All benchmark scenarios agree on valid/invalid verdicts.")

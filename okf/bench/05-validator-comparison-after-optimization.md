@@ -231,7 +231,7 @@ scalar и nested Basic — и отдельная стоимость default cold
 # Воспроизведение
 
 ```sh
-cd _checkouts/valid_json_bench
+cd bench
 
 BENCH_SUITE=jesse BENCH_FORMAT=compact BENCH_WARMUP=0 BENCH_TIME=1 \
 BENCH_MEMORY_TIME=1 BENCH_REDUCTION_TIME=1 mix run bench/compare.exs

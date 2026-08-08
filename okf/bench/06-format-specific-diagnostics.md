@@ -183,7 +183,7 @@ Golden tests structural output рекурсивно нормализуют то�
 # Воспроизведение
 
 ```sh
-cd _checkouts/valid_json_bench
+cd bench
 
 BENCH_SUITE=output BENCH_CASE=array_100_last_error BENCH_FORMAT=compact \
 BENCH_WARMUP=1 BENCH_TIME=2 BENCH_MEMORY_TIME=1 \

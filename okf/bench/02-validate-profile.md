@@ -27,7 +27,7 @@ meta-schema validation, запуск applications, загрузка модуле
 * `call_count`, `call_memory` и `call_time` снимались отдельными прогонами.
 
 Профилировщик находится в локальном benchmark checkout:
-`_checkouts/valid_json_bench/bench/profile.exs`. Он умеет измерять пять
+`bench/bench/profile.exs`. Он умеет измерять пять
 границ одного пути:
 
 | Layer | Измеряемая работа |
@@ -197,7 +197,7 @@ Compiled artifact nested schema стоит 649 слов, или 5 192 байта
 # Воспроизведение
 
 ```sh
-cd _checkouts/valid_json_bench
+cd bench
 
 PROFILE_CASE=nested_object PROFILE_VALIDITY=valid PROFILE_FORMAT=flag \
 PROFILE_LAYER=full PROFILE_TYPE=all PROFILE_ITERATIONS=1000 \

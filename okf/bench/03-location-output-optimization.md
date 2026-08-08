@@ -208,10 +208,10 @@ Locations больше не являются главным источником
 * `./silent_rebar3 as ci eunit`: 7027 tests, 0 failures;
 * `./silent_rebar3 as ci conformance`: 5327 tests, 0 failures.
 
-Основной runner и профилировщик находятся в `_checkouts/valid_json_bench`.
+Основной runner и профилировщик находятся в `bench/`.
 
 ```sh
-cd _checkouts/valid_json_bench
+cd bench
 
 BENCH_FORMAT=compact BENCH_WARMUP=0 BENCH_TIME=1 \
 BENCH_MEMORY_TIME=1 BENCH_REDUCTION_TIME=1 \

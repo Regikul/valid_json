@@ -466,6 +466,39 @@
   dialect подтверждён, `rebar3 as ci compile`, `rebar3 as ci conformance` и
   `rebar3 as ci eunit` зелёные.
 
+## P10 — umbrella repository и инструменты разработки
+
+Фаза меняет раскладку репозитория, но не публичный API валидатора. Будущий
+`rebar3_valid_json` станет отдельным OTP application после завершения переноса;
+реализация самого plugin в P10 не входит.
+
+- [ ] **Фаза P10 завершена**
+- [x] Перенести comparison benchmark из игнорируемого `_checkouts` в
+  отслеживаемый `bench/`: Mix project использует родительский `valid_json`,
+  закрепляет Jesse и JSONSchex полными commit SHA, печатает revisions и
+  поддерживает внешний target через `VALID_JSON_PATH`. Старые result snapshots
+  не перенесены; полный cross-validator self-check проходит.
+- [ ] Перенести OTP application `valid_json` в `apps/valid_json`, сохранив
+  собственные `src`, `include`, `priv`, `test`, vendored compatibility modules
+  и app-specific `rebar.config.script`.
+- [ ] Оставить в корне общую umbrella-конфигурацию, profiles и aliases, а
+  зависящие от приложения hooks, source directories и package metadata держать
+  внутри `apps/valid_json`.
+- [ ] Сохранить потребление библиотеки отдельно от всего umbrella: подготовить
+  Hex package и документировать Git dependency через `git_subdir` на
+  `apps/valid_json`; версии приложений и release tags не связывать общей
+  версией репозитория.
+- [ ] Перенастроить benchmark на `apps/valid_json`, не меняя scenarios,
+  измеряемые cold/hot boundaries и pinned revisions сравниваемых библиотек.
+- [ ] Адаптировать CI, `silent_rebar3`, shell config, test fixture discovery и
+  документацию к новой раскладке. Conformance остаётся отдельной проверкой
+  `valid_json`, а будущий plugin получает собственные unit и fixture-project
+  integration tests.
+- [ ] Приёмка P10: чистая сборка после удаления прежних `_build` artifacts,
+  полный EUnit и conformance, benchmark self-check и CI-матрица OTP 20–29
+  проходят из корня umbrella; установка `valid_json` как самостоятельной
+  зависимости подтверждена отдельным consumer fixture.
+
 ## Runtime — хранение и эксплуатация
 
 Runtime не входит в conformance-фазы и развивается отдельным чеклистом.

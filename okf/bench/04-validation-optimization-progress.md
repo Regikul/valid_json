@@ -140,7 +140,7 @@ property traversal и подготовку array applications.
 # Воспроизведение
 
 ```sh
-cd _checkouts/valid_json_bench
+cd bench
 
 PROFILE_CASE=array_100_last_error PROFILE_VALIDITY=invalid \
 PROFILE_FORMAT=flag PROFILE_LAYER=eval PROFILE_TYPE=all \

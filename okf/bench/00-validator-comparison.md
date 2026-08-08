@@ -11,9 +11,10 @@ tags: [benchmark, performance, json-schema, jesse, jsonschex, output]
 JSONSchex. Это не переносимая на любое оборудование характеристика: перед
 расчётом ёмкости результаты нужно повторить на целевой машине и версии VM.
 
-Исходный benchmark находится в локальном, игнорируемом Git каталоге
-`_checkouts/valid_json_bench`. Он использует соседние checkout'ы библиотек, не
-изменяя их исходный код.
+Исходный benchmark находится в отслеживаемом Git каталоге `bench/`. Текущая
+версия runner закрепляет revisions сравниваемых библиотек в собственном
+`mix.lock`; во время этого исторического замера использовались те же revisions,
+названные ниже.
 
 # Предмет сравнения
 
@@ -199,7 +200,7 @@ Benchmark выбирает установленную совместимую п�
 `.tool-versions`:
 
 ```sh
-cd _checkouts/valid_json_bench
+cd bench
 mix deps.get
 mix run bench/verify.exs
 mix run bench/compare.exs
