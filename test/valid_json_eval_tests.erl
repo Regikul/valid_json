@@ -425,19 +425,32 @@ ref_test_() ->
      ?_assertEqual({[<<"a">>], 0, []},
                    coverage_of(Covering, #{<<"a">> => 1}))].
 
-%% Guard хранит active frame, а не множество когда-либо посещённых адресов:
-%% self-reference останавливается, два последовательных перехода к одной цели
-%% разрешены.
+%% Guard хранит только предков текущего node на той же позиции instance:
+%% прямой и косвенный in-place циклы останавливаются, два sibling-перехода к
+%% одной цели разрешены, а повтор адреса после consuming descent — это прогресс.
 ref_cycle_guard_test_() ->
     Self = artifact(schema_node([{ref, addr(<<>>)}])),
     Target = addr(<<"/$defs/value">>),
+    Indirect = tree(
+                 #{<<>> => schema_node([{ref, addr(<<"/$defs/loop">>)}]),
+                   <<"/$defs/loop">> => schema_node([{ref, addr(<<>>)}])}),
     Repeated = tree(
                  #{<<>> => schema_node([{ref, Target}, {ref, Target}]),
                    <<"/$defs/value">> => true}),
+    Progressing = artifact(
+                    schema_node(
+                      [{properties, #{<<"next">> => addr(<<>>)},
+                        undefined, undefined}])),
     [?_assertEqual({error, {no_progress, addr(<<>>)}},
                    valid_json_eval:run(Self, 1, flag)),
+     ?_assertEqual({error, {no_progress, addr(<<>>)}},
+                   valid_json_eval:run(Indirect, 1, flag)),
      ?_assertMatch({ok, #eval_result{valid = true}},
-                   valid_json_eval:run(Repeated, 1, flag))].
+                   valid_json_eval:run(Repeated, 1, flag)),
+     ?_assertMatch(
+        {ok, #eval_result{valid = true}},
+        valid_json_eval:run(
+          Progressing, #{<<"next">> => #{<<"next">> => 1}}, flag))].
 
 %% keywordLocation продолжает syntactic path через `/$ref`, а absolute location
 %% ref unit и target keywords строится от target resource.
@@ -1728,7 +1741,7 @@ coverage_of(Artifact, Instance) ->
                             keyword_location  = [],
                             instance_location = {0, []},
                             dynamic_scope     = [Root],
-                            guard             = sets:new(),
+                            guard             = #{},
                             format            = flag,
                             need_coverage     = true},
     #eval_result{evaluated = Evaluated} =

@@ -390,12 +390,14 @@ coverage(false, _Applied, #eval_context{}) ->
 branch(Addr, _Location, _Name, Value,
        #eval_context{format = flag,
                      instance_location = {Depth, _Instance}} = Context) ->
-    valid_json_eval:eval_at(Addr, Value, [], {Depth + 1, []}, false, Context);
+    valid_json_eval:eval_child_at(
+      Addr, Value, [], {Depth + 1, []}, false, Context);
 branch(Addr, Location, Name, Value, Context) ->
     #eval_context{keyword_location = Keywords,
                   instance_location = {Depth, Instance}} = Context,
-    valid_json_eval:eval_at(Addr, Value, branch_keywords(Location, Name, Keywords),
-                            {Depth + 1, [Name | Instance]}, false, Context).
+    valid_json_eval:eval_child_at(
+      Addr, Value, branch_keywords(Location, Name, Keywords),
+      {Depth + 1, [Name | Instance]}, false, Context).
 
 -spec branch_keywords(branch_location(), binary(), [binary()]) -> [binary()].
 branch_keywords(properties, Name, Keywords) ->

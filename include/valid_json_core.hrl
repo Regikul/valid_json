@@ -117,11 +117,11 @@
     error = undefined :: eval_error() | undefined
 }).
 
-%% Локация инстанса несёт свою глубину рядом с сегментами: кадр cycle guard
-%% называет позицию глубиной, а не списком. Разными полями их держать опаснее —
-%% разойдясь, они сделали бы guard неверным, и заметить это было бы нечем.
+%% Локация инстанса несёт глубину рядом с сегментами. Структурные форматы
+%% используют оба значения, а flag сохраняет только дешёвую глубину на границах
+%% consuming applicators.
 -type instance_location() :: {Depth :: non_neg_integer(), [binary()]}.
--type frame() :: {addr(), Depth :: non_neg_integer()}.
+-type eval_guard() :: #{addr() => true}.
 
 %% node — адрес вычисляемого сейчас node. Отдельного поля под текущий resource
 %% нет: это первая половина адреса, а вторая задаёт абсолютную локацию units.
@@ -135,7 +135,7 @@
     keyword_location  :: [binary()],
     instance_location :: instance_location(),
     dynamic_scope     :: [rid()],
-    guard             :: sets:set(frame()),
+    guard             :: eval_guard(),
     format            :: format(),
     need_coverage     :: boolean()
 }).

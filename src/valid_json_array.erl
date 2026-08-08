@@ -305,7 +305,7 @@ marks(true, true, Matched, _Count, _Length, #eval_context{}) ->
 %% Локация keyword следует схеме, локация инстанса — значению: индекс элемента
 %% двигает второй стек, а сегменты первого зависят от применившегося keyword.
 %% Флаг `need_coverage` при спуске гаснет: покрытие дочерней schema принадлежит ей
-%% самой. В формате flag сохраняется только глубина инстанса для cycle guard,
+%% самой. В формате flag consuming-переход задаётся отдельным входом evaluator,
 %% поэтому не строятся ни стеки локаций, ни binary-представление индекса
 %% (validator-core.md, «Контекст и cycle guard»).
 -spec branch(addr(), [binary()], non_neg_integer(), json(), #eval_context{}) ->
@@ -313,11 +313,12 @@ marks(true, true, Matched, _Count, _Length, #eval_context{}) ->
 branch(Addr, _Tail, _Index, Element,
        #eval_context{format = flag,
                      instance_location = {Depth, _Instance}} = Context) ->
-    valid_json_eval:eval_at(Addr, Element, [], {Depth + 1, []}, false, Context);
+    valid_json_eval:eval_child_at(
+      Addr, Element, [], {Depth + 1, []}, false, Context);
 branch(Addr, Tail, Index, Element, Context) ->
     #eval_context{keyword_location = Keywords,
                   instance_location = {Depth, Instance}} = Context,
-    valid_json_eval:eval_at(
+    valid_json_eval:eval_child_at(
       Addr, Element, Tail ++ Keywords,
       {Depth + 1, [integer_to_binary(Index) | Instance]}, false, Context).
 

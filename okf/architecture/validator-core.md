@@ -183,7 +183,7 @@ Boolean schema хранится значением `true` или `false` и не
 
 ## Контракт handler'а
 
-Каждый handler получает constraint, instance value и `#eval_context{}` и возвращает `#eval_result{}`. Он не читает schema JSON, dialect или registry. Applicator вызывает общий вход evaluator'а по `addr()`; прямой вызов чужого handler запрещён, иначе потеряются локации, dynamic scope и cycle guard.
+Каждый handler получает constraint, instance value и `#eval_context{}` и возвращает `#eval_result{}`. Он не читает schema JSON, dialect или registry. Applicator вызывает один из двух входов evaluator'а по `addr()`: consuming при переходе к дочернему значению instance либо in-place при применении подсхемы к тому же значению. Прямой вызов чужого handler запрещён, иначе потеряются локации, dynamic scope и cycle guard.
 
 Keywords применяются только к своим instance types. Значение другого типа даёт успешный unit без error/annotation, а не отказ: например `maxLength` не ограничивает number, `properties` не ограничивает array. `type`, `enum`, `const` и applicators над любым значением являются исключениями по собственной семантике, не по dispatcher'у.
 
@@ -285,7 +285,8 @@ unknown annotations, а не псевдонимами dynamic keywords.
 
 Evaluator выполняет node в одном порядке, независимо от dialect:
 
-1. проверяет active-frame guard;
+1. на consuming-переходе начинает guard новой позиции instance, а на in-place
+   переходе проверяет target против текущего node и его предков;
 2. добавляет resource в dynamic scope при входе через resource boundary;
 3. выполняет `constraints`, накапливая validity и diagnostic units, а coverage
    — только когда его запросил предок либо собственный `unevaluated`;
@@ -295,13 +296,14 @@ Evaluator выполняет node в одном порядке, независи
    запросил предок;
 6. передаёт плоские значимые units наверх для `basic` либо выпускает
    собственный tree unit с units выполненных constraints;
-7. снимает frame и resource scope, возвращает `#eval_result{}`.
+7. возвращает `#eval_result{}`; immutable context родителя автоматически
+   восстанавливает его guard и resource scope для следующей sibling-ветви.
 
 Порядок обычных constraints семантически свободен. Compiler может ставить дешёвые assertions раньше applicators ради `flag`; evaluator может обходить maps и накапливать sibling units в удобном ему порядке. Порядок элементов в `errors` и `annotations` не является API-контрактом. Потребитель различает результаты по `keywordLocation`, `absoluteKeywordLocation` и `instanceLocation`, а тесты ищут нужные units или сравнивают их как множества.
 
 Boolean `true` возвращает success с нейтральным `evaluated`, boolean `false` — failure. Annotations boolean schemas не производят, но остаются обычными адресуемыми nodes: собственный unit выпускают и они, а поскольку keywords у них нет, сообщение о провале несёт этот unit сам.
 
-Resource boundary определяется target `rid`, а не синтаксическим видом перехода: child applicator тоже может войти во встроенный resource с `$id`. Поэтому dynamic scope обновляет общий evaluator вход после `resolve/2`, а не только обработчики ссылок.
+Resource boundary определяется target `rid`, а не синтаксическим видом перехода: child applicator тоже может войти во встроенный resource с `$id`. Поэтому после выбора consuming либо in-place стратегии dynamic scope обновляет общий завершающий вход evaluator, а не только обработчики ссылок.
 
 ## Два результата
 
@@ -457,17 +459,22 @@ Evaluator выбирает стратегию по `#eval_context.format`: `basi
     schema            :: compiled(),
     node              :: addr(),
     keyword_location  :: [binary()],
-    instance_location :: [binary()],
+    instance_location :: {non_neg_integer(), [binary()]},
     dynamic_scope     :: [rid()],
-    guard             :: sets:set(frame()),
+    guard             :: eval_guard(),
     format            :: format(),
     need_coverage     :: boolean()
 }).
 
--type frame() :: {addr(), [binary()]}.
+-type eval_guard() :: #{addr() => true}.
 ```
 
 `node` — адрес вычисляемого сейчас node. Отдельного поля под текущий resource нет: это первая половина адреса, и граница определяется её сравнением. Вторая половина, pointer, задаёт путь от корня resource и потому полностью определяет абсолютную локацию всех units этого node. Обработчик сохраняет этот адрес в unit, а проекция позднее материализует публичную локацию; от родителя она не наследуется.
+
+`instance_location` хранит глубину рядом с обратным стеком сегментов. В
+структурных форматах сегменты нужны output units; в `flag` ветви не строят этот
+стек и передают пустой список. Глубина не входит в guard: вид входа evaluator'а
+явно говорит, сохранилась ли позиция instance.
 
 `need_coverage` говорит не о наличии уже построенной маски, а о demand: ждёт ли
 её от этого поддерева какой-нибудь `unevaluated*` выше по обходу. При `true`
@@ -485,7 +492,25 @@ output format.
 schema принадлежит ей самой и наверх не идёт, а значит под ней обрыв снова
 разрешён.
 
-Guard — множество активных кадров, не глобальный visited set. Кадр добавляется на входе в node и удаляется на выходе: повтор пары schema/instance внутри собственного поддерева означает цикл, тот же повтор в соседней ветви допустим. Dynamic scope в кадр не входит, и `$dynamicRef` этого не изменил: новый resource попадает в scope только с внутреннего конца, а лексический fallback сам вносит resource своей цели, поэтому у повторно встреченной пары динамическая цель та же, что и в прошлый раз. Обратный вариант — положить в кадр сам стек — сломал бы детекцию: стек растёт неограниченно, и кадр не повторился бы никогда.
+Guard — map адресов предков текущего node на той же позиции instance, не
+глобальный visited set. Сам текущий адрес уже лежит в `context.node` и потому в
+map не дублируется. In-place вход сначала сравнивает target с `node` и ключами
+guard; если повтора нет, добавляет текущий node в map и входит в target.
+Immutable context не сливает состояния sibling-ветвей, поэтому повтор target в
+соседней ветви допустим.
+
+Consuming applicator применяет подсхему к другому JSON value: `properties`,
+`patternProperties`, `additionalProperties`, `propertyNames`, array applicators
+и `unevaluated*` входят в target с пустым guard. Повтор того же schema address
+после такого перехода означает рекурсивную проверку новой позиции, а не цикл.
+In-place applicators — references, логические applicators и schema dependencies
+— позиции не меняют и продолжают текущий guard.
+
+Dynamic scope в guard не входит, и `$dynamicRef` этого не изменил: новый
+resource попадает в scope только с внутреннего конца, а лексический fallback
+сам вносит resource своей цели, поэтому у повторно встреченного адреса на той
+же позиции динамическая цель та же, что и в прошлый раз. Dynamic scope не
+сбрасывается вместе с guard на consuming-переходе.
 
 Обнаружение цикла не даёт validation verdict. Ложных срабатываний у guard'а не бывает: вернуться к той же паре schema/instance, не покидая текущей ветви, можно только по цепочке in-place applicators, а они не сдвигают позицию в инстансе. Значит на повторном заходе не изменилось ничего и обход повторил бы себя дословно. У такой схемы вердикта нет, и `validate/3` возвращает `{error, {no_progress, addr()}}`. Guard гарантирует termination, а не подменяет семантику applicator'а.
 

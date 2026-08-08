@@ -114,18 +114,20 @@ apply_all([{Segment, Value} | Rest], Addr, Keyword, Context, Result, Applied) ->
 %% Локация keyword следует схеме, локация инстанса — значению. Своего сегмента у
 %% ветви нет: она стоит на самом keyword. Флаг `need_coverage` при спуске гаснет:
 %% покрытие дочерней schema принадлежит ей самой (validator-core.md, «Контекст
-%% и cycle guard»). В формате flag сохраняется только глубина инстанса, а
-%% ненаблюдаемые стеки локаций не строятся.
+%% и cycle guard»). В формате flag consuming-переход задаётся отдельным входом,
+%% а ненаблюдаемые стеки локаций не строятся.
 -spec branch(addr(), binary(), binary(), json(), #eval_context{}) -> #eval_result{}.
 branch(Addr, _Keyword, _Segment, Value,
        #eval_context{format = flag,
                      instance_location = {Depth, _Instance}} = Context) ->
-    valid_json_eval:eval_at(Addr, Value, [], {Depth + 1, []}, false, Context);
+    valid_json_eval:eval_child_at(
+      Addr, Value, [], {Depth + 1, []}, false, Context);
 branch(Addr, Keyword, Segment, Value, Context) ->
     #eval_context{keyword_location = Keywords,
                   instance_location = {Depth, Instance}} = Context,
-    valid_json_eval:eval_at(Addr, Value, [Keyword | Keywords],
-                            {Depth + 1, [Segment | Instance]}, false, Context).
+    valid_json_eval:eval_child_at(
+      Addr, Value, [Keyword | Keywords],
+      {Depth + 1, [Segment | Instance]}, false, Context).
 
 -spec message(binary()) -> binary().
 message(<<"unevaluatedProperties">>) ->

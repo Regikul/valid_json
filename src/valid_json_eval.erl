@@ -4,7 +4,8 @@
 
 -include("valid_json_core.hrl").
 
--export([run/3, eval/3, eval_at/6, resolve/2, conjoin/2, conjoin_acc/2,
+-export([run/3, eval/3, eval_child_at/6, eval_in_place_at/6,
+         resolve/2, conjoin/2, conjoin_acc/2,
          conjoin_acc_discard_coverage/2, finish_acc/1, empty_result/1,
          error_result/1]).
 
@@ -16,7 +17,7 @@ run(#{root := Root} = Compiled, Instance, Format) ->
                             keyword_location  = [],
                             instance_location = {0, []},
                             dynamic_scope     = [Root],
-                            guard             = sets:new(),
+                            guard             = #{},
                             format            = Format,
                             need_coverage     = false},
     case eval({Root, <<>>}, Instance, Context) of
@@ -49,50 +50,63 @@ resolve({Rid, Pointer}, #{resources := Resources}) ->
     #resource{nodes = Nodes} = maps:get(Rid, Resources),
     maps:get(Pointer, Nodes).
 
-%% Общий вход: guard, resource scope, затем сам node. Кадр живёт только в
-%% контексте потомков, поэтому снимается на выходе без отдельного шага.
-%% Applicators входят сюда же: своей точки входа у них нет.
-%%
-%% Позицию инстанса кадр называет глубиной, а не списком сегментов. Guard
-%% заводится один раз в `run/3`, пополняется только при спуске и между ветвями
-%% не сливается, поэтому все его кадры лежат на одном пути обхода, а на одном
-%% пути глубина задаёт позицию однозначно. Список стоил бы дороже впустую: его
-%% пришлось бы хешировать целиком на каждом уровне, и стоимость вычисления
-%% росла бы квадратом глубины инстанса.
+%% Корневой вход начинает независимую ветвь. Текущий node не лежит в guard:
+%% in-place вход сравнивает цель с ним отдельно, а guard хранит только более
+%% ранних предков на той же позиции instance.
 -spec eval(addr(), json(), #eval_context{}) -> #eval_result{}.
 eval(Addr, Instance,
      #eval_context{keyword_location = Keywords,
                    instance_location = InstanceLocation,
                    need_coverage = NeedCoverage} = Context) ->
-    eval_at(Addr, Instance, Keywords, InstanceLocation, NeedCoverage, Context).
+    eval_entered(Addr, Instance, Keywords, InstanceLocation, NeedCoverage,
+                 #{}, Context).
 
-%% Branch передаёт изменившиеся координаты отдельно и не копирует весь context
-%% перед входом. После проверки guard здесь одним record update фиксируются и
-%% координаты ветви, и node/resource scope нового кадра.
--spec eval_at(addr(), json(), [binary()], instance_location(), boolean(),
-              #eval_context{}) -> #eval_result{}.
-eval_at({Rid, _} = Addr, Instance, Keywords,
-        {Depth, _Segments} = InstanceLocation, NeedCoverage,
-        #eval_context{guard = Guard, schema = Schema,
-                      node = {CurrentRid, _}, dynamic_scope = Scope} = Context) ->
-    Frame = {Addr, Depth},
-    case sets:is_element(Frame, Guard) of
+%% Consuming applicator переходит к другому JSON value. Ни один активный node
+%% прежней позиции не может образовать с ним no-progress cycle, поэтому новый
+%% guard начинается пустым и не требует ни lookup, ни allocation.
+-spec eval_child_at(addr(), json(), [binary()], instance_location(), boolean(),
+                    #eval_context{}) -> #eval_result{}.
+eval_child_at(Addr, Instance, Keywords, InstanceLocation, NeedCoverage, Context) ->
+    eval_entered(Addr, Instance, Keywords, InstanceLocation, NeedCoverage,
+                 #{}, Context).
+
+%% In-place applicator сохраняет JSON value. Возврат к текущему node или любому
+%% его предку на этой позиции дословно повторил бы тот же обход. Перед переходом
+%% текущий node становится предком цели; sibling branches получают исходный
+%% immutable context и потому друг друга не блокируют.
+-spec eval_in_place_at(addr(), json(), [binary()], instance_location(), boolean(),
+                       #eval_context{}) -> #eval_result{}.
+eval_in_place_at(Addr, Instance, Keywords, InstanceLocation, NeedCoverage,
+                 #eval_context{node = Current, guard = Guard} = Context) ->
+    case Addr =:= Current orelse maps:is_key(Addr, Guard) of
         true ->
             error_result({no_progress, Addr});
         false ->
-            DynamicScope = case Rid =:= CurrentRid of
-                               true  -> Scope;
-                               false -> [Rid | Scope]
-                           end,
-            Entered = Context#eval_context{
-                        node = Addr,
-                        keyword_location = Keywords,
-                        instance_location = InstanceLocation,
-                        dynamic_scope = DynamicScope,
-                        guard = sets:add_element(Frame, Guard),
-                        need_coverage = NeedCoverage},
-            eval_node(resolve(Addr, Schema), Instance, Entered)
+            eval_entered(Addr, Instance, Keywords, InstanceLocation,
+                         NeedCoverage, Guard#{Current => true}, Context)
     end.
+
+%% После выбора guard координаты ветви и resource scope фиксируются одним
+%% record update. Dynamic scope не связан с позицией instance и при consuming
+%% переходе продолжает расти по прежним правилам.
+-spec eval_entered(addr(), json(), [binary()], instance_location(), boolean(),
+                   eval_guard(), #eval_context{}) -> #eval_result{}.
+eval_entered({Rid, _} = Addr, Instance, Keywords, InstanceLocation,
+             NeedCoverage, Guard,
+             #eval_context{schema = Schema, node = {CurrentRid, _},
+                           dynamic_scope = Scope} = Context) ->
+    DynamicScope = case Rid =:= CurrentRid of
+                       true  -> Scope;
+                       false -> [Rid | Scope]
+                   end,
+    Entered = Context#eval_context{
+                node = Addr,
+                keyword_location = Keywords,
+                instance_location = InstanceLocation,
+                dynamic_scope = DynamicScope,
+                guard = Guard,
+                need_coverage = NeedCoverage},
+    eval_node(resolve(Addr, Schema), Instance, Entered).
 
 %% Ошибка ветви остаётся обычным значением до ближайшей boolean-операции.
 -spec error_result(eval_error()) -> #eval_result{}.
@@ -372,8 +386,8 @@ reference(Keyword, Addr, Instance,
                    flag -> [];
                    _    -> [Keyword | Location]
                end,
-    case eval_at(Addr, Instance, Keywords, InstanceLocation,
-                 NeedCoverage, Context) of
+    case eval_in_place_at(Addr, Instance, Keywords, InstanceLocation,
+                          NeedCoverage, Context) of
         #eval_result{valid = undefined} = Error ->
             Error;
         #eval_result{valid = Valid, units = Units} = Result ->

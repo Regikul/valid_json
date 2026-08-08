@@ -267,13 +267,14 @@ logical(_Keyword, {error, Error}, _Message, _Evaluated, _Units, _Context) ->
 branch(Addr, _Keyword, _Tail, Instance,
        #eval_context{format = flag, instance_location = InstanceLocation,
                      need_coverage = NeedCoverage} = Context) ->
-    valid_json_eval:eval_at(Addr, Instance, [], InstanceLocation,
-                            NeedCoverage, Context);
+    valid_json_eval:eval_in_place_at(Addr, Instance, [], InstanceLocation,
+                                     NeedCoverage, Context);
 branch(Addr, Keyword, Tail, Instance, #eval_context{keyword_location = Location} = Context) ->
     #eval_context{instance_location = InstanceLocation,
                   need_coverage = NeedCoverage} = Context,
-    valid_json_eval:eval_at(Addr, Instance, Tail ++ [Keyword | Location],
-                            InstanceLocation, NeedCoverage, Context).
+    valid_json_eval:eval_in_place_at(
+      Addr, Instance, Tail ++ [Keyword | Location], InstanceLocation,
+      NeedCoverage, Context).
 
 %% Applicator выпускает собственный unit написанного keyword, а units ветвей
 %% лежат внутри него. В режиме flag units не собираются вовсе. Сообщение `none`

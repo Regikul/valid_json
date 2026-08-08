@@ -7,3 +7,4 @@
 * [Прогресс оптимизации горячей валидации](04-validation-optimization-progress.md) - Кумулятивный эффект оптимизаций evaluator и новый профиль большого массива для всех output formats.
 * [Сравнение с Jesse и JSONSchex после оптимизации evaluator](05-validator-comparison-after-optimization.md) - Текущее положение hot, cold и trusted cold valid_json относительно Jesse и JSONSchex.
 * [Format-specific diagnostics и плоский Basic collector](06-format-specific-diagnostics.md) - Эффект прямого сбора Basic output и отказа от гарантированного порядка sibling units.
+* [Cycle guard в пределах позиции instance](07-position-scoped-cycle-guard.md) - Эффект разделения consuming и in-place входов evaluator и устранения guard-работы при структурном спуске.
