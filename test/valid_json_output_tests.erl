@@ -1,5 +1,6 @@
-%% Output builder проверяется на собственной границе: вход — дерево units,
-%% выход — JSON выбранного формата. Evaluator сюда не участвует.
+%% Output builder проверяется на собственной границе: fixture adapter подаёт
+%% дерево для detailed/verbose и плоский collector для basic, на выходе — JSON.
+%% Evaluator сюда не участвует.
 -module(valid_json_output_tests).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -245,10 +246,32 @@ verbose_visibility_test_() ->
                             <<"keywordLocation">> := <<"/anyOf/0">>}]},
                    PrintedAnyOf)].
 
+%% Эти unit-тесты задают читаемую tree-фикстуру и для Basic переводят её в тот
+%% плоский collector state, который evaluator теперь строит напрямую.
+project(basic, #output_unit{valid = Valid} = Root) ->
+    Flat = flat_basic(Valid, Root),
+    project_result(basic, Root#output_unit{nested = Flat}, Valid);
 project(Format, #output_unit{valid = Valid} = Root) ->
+    project_result(Format, Root, Valid).
+
+project_result(Format, Root, Valid) ->
     valid_json_output:project(Format, #eval_result{valid     = Valid,
                                                    evaluated = valid_json_evaluated:neutral(),
                                                    units     = [Root]}).
+
+flat_basic(Valid, #output_unit{nested = Nested}) ->
+    lists:append([flat_one(Valid, Unit) || Unit <- Nested]).
+
+flat_one(Valid, Unit) ->
+    Own = case carries(Valid, Unit) of true -> [Unit]; false -> [] end,
+    Own ++ flat_descendants(Valid, Unit).
+
+flat_descendants(true, #output_unit{valid = false}) -> [];
+flat_descendants(Valid, Unit)                       -> flat_basic(Valid, Unit).
+
+carries(false, #output_unit{detail = {error, _}})     -> true;
+carries(true, #output_unit{detail = {annotation, _}}) -> true;
+carries(_Valid, #output_unit{})                       -> false.
 
 %% Корневой unit стоит на пустых локациях: вычисление начинается от корня схемы
 %% и корня инстанса. Собственного detail у schema object нет.

@@ -171,9 +171,9 @@ empty_result_test() ->
     ?assertEqual(#eval_result{valid = false, evaluated = neutral, units = []},
                  valid_json_eval:empty_result(false)).
 
-%% Внутри длинного fold units лежат в обратном порядке, но его граница обязана
-%% вернуть тот же статический порядок, что обычная конъюнкция.
-conjoin_acc_order_test() ->
+%% Длинный fold обязан сохранить все units; порядок diagnostics контрактом не
+%% является и зависит от выбранного аккумулятора.
+conjoin_acc_units_test() ->
     Evaluated = valid_json_evaluated:neutral(),
     FirstUnit = #output_unit{detail = {annotation, first}},
     SecondUnit = #output_unit{detail = {annotation, second}},
@@ -186,7 +186,8 @@ conjoin_acc_order_test() ->
             valid_json_eval:conjoin_acc(Empty, First), Last),
     #eval_result{valid = false, units = Units} =
         valid_json_eval:finish_acc(Acc),
-    ?assertEqual([FirstUnit, SecondUnit, ThirdUnit], Units).
+    ?assertEqual(lists:sort([FirstUnit, SecondUnit, ThirdUnit]),
+                 lists:sort(Units)).
 
 conjoin_acc_discard_coverage_test() ->
     Left = #eval_result{valid = true,
@@ -425,7 +426,7 @@ ref_location_test() ->
                                      nodes =
                                          #{<<"/$defs/value">> =>
                                                schema_node([{type, [string]}])}}}},
-    [RootUnit] = collect(Artifact, 1, basic),
+    [RootUnit] = collect(Artifact, 1, verbose),
     [RefUnit] = RootUnit#output_unit.nested,
     [TargetUnit] = RefUnit#output_unit.nested,
     [TypeUnit] = TargetUnit#output_unit.nested,
@@ -498,7 +499,7 @@ dynamic_ref_cycle_test() ->
 %% target schema unit отдельно несёт каноническую разрешённую цель.
 dynamic_ref_location_test() ->
     Artifact = dynamic_tree(#{<<"item">> => <<"/$defs/item">>}),
-    [RootUnit] = collect(Artifact, <<"x">>, basic),
+    [RootUnit] = collect(Artifact, <<"x">>, verbose),
     [RefUnit] = RootUnit#output_unit.nested,
     [InnerUnit] = RefUnit#output_unit.nested,
     [DynamicUnit] = InnerUnit#output_unit.nested,
@@ -557,7 +558,7 @@ recursive_ref_location_test() ->
     RecursiveLocation = [<<"$recursiveRef">>, <<"next">>,
                          <<"properties">>, <<"$ref">>],
     [RecursiveUnit] =
-        [Unit || Unit <- keywords(collect(Artifact, Instance, basic)),
+        [Unit || Unit <- keywords(collect(Artifact, Instance, verbose)),
                  Unit#output_unit.keyword_location =:= RecursiveLocation],
     ?assertEqual({<<"https://example.com/inner-recursive">>,
                   <<"/properties/next">>},
@@ -619,7 +620,8 @@ conditional_unselected_test_() ->
     Untaken = conditional([{type, [integer]}], [{minimum, 0}], tripwire()),
     [?_assert(verdict(Skipped, <<"a">>)),
      ?_assert(verdict(Untaken, 1)),
-     %% В basic дерево units полное, но невыбранной ветви в нём всё равно нет.
+     %% Basic собирает все значимые diagnostics, но невыбранной ветви среди них
+     %% всё равно нет.
      ?_assertMatch({ok, #eval_result{valid = true}},
                    valid_json_eval:run(Skipped, <<"a">>, basic))].
 
@@ -632,12 +634,12 @@ conditional_units_test_() ->
                     {<<"/if/type">>, true, none},
                     {<<"/then">>, false, {error, _}},
                     {<<"/then/minimum">>, false, {error, _}}],
-                   printed(collect(Artifact, -1, basic))),
+                   printed(collect(Artifact, -1, verbose))),
      ?_assertMatch([{<<"/if">>, true, none},
                     {<<"/if/type">>, false, {error, _}},
                     {<<"/else">>, true, none},
                     {<<"/else/type">>, true, none}],
-                   printed(collect(Artifact, <<"a">>, basic)))].
+                   printed(collect(Artifact, <<"a">>, verbose)))].
 
 %% Покрытие складывается из вклада `if` и вклада выбранной ветви. Провалившийся
 %% `if` не вносит ничего: его подсхема очистила покрытие сама.
@@ -696,7 +698,7 @@ object_overlap_test_() ->
 %% Локация keyword следует схеме, локация инстанса — значению. Собственный unit
 %% написанного keyword стоит перед units своих ветвей.
 object_units_test_() ->
-    Units = paired(collect(object(), #{<<"a">> => 1, <<"bb">> => <<"x">>, <<"c">> => 2}, basic)),
+    Units = paired(collect(object(), #{<<"a">> => 1, <<"bb">> => <<"x">>, <<"c">> => 2}, verbose)),
     [?_assertEqual([{<<"/properties">>, <<>>},
                     {<<"/properties/a/type">>, <<"/a">>},
                     {<<"/patternProperties">>, <<>>},
@@ -713,7 +715,7 @@ object_annotation_test_() ->
     Details = fun(Instance) ->
                       [{valid_json_location:pointer(Keywords), Detail}
                        || #output_unit{keyword_location = Keywords, detail = Detail}
-                              <- own(collect(object(), Instance, basic))]
+                              <- own(collect(object(), Instance, verbose))]
               end,
     [?_assertEqual([{<<"/properties">>, {annotation, [<<"a">>]}},
                     {<<"/patternProperties">>, {annotation, [<<"bb">>, <<"bc">>]}},
@@ -764,18 +766,20 @@ property_names_test_() ->
 %% проверяется. Собственный unit стоит перед units своих ветвей.
 property_names_units_test_() ->
     Artifact = property_names([{max_length, 2}]),
-    [?_assertEqual([{<<"/propertyNames">>, <<>>},
-                    {<<"/propertyNames/maxLength">>, <<"/ab">>},
-                    {<<"/propertyNames/maxLength">>, <<"/abc">>}],
-                   paired(collect(Artifact, #{<<"abc">> => 1, <<"ab">> => 2}, basic))),
+    [?_assertEqual(lists:sort([{<<"/propertyNames">>, <<>>},
+                              {<<"/propertyNames/maxLength">>, <<"/ab">>},
+                              {<<"/propertyNames/maxLength">>, <<"/abc">>}]),
+                   lists:sort(
+                     paired(collect(Artifact, #{<<"abc">> => 1, <<"ab">> => 2},
+                                    verbose)))),
      %% Аннотации keyword не производит, поэтому у успешного unit деталей нет.
      ?_assertMatch([{<<"/propertyNames">>, true, none} | _],
-                   printed(collect(Artifact, #{<<"ab">> => 1}, basic))),
+                   printed(collect(Artifact, #{<<"ab">> => 1}, verbose))),
      ?_assertMatch([{<<"/propertyNames">>, false, {error, _}} | _],
-                   printed(collect(Artifact, #{<<"abc">> => 1}, basic))),
+                   printed(collect(Artifact, #{<<"abc">> => 1}, verbose))),
      %% Не-объект: unit успешный и без деталей.
      ?_assertEqual([{<<"/propertyNames">>, true, none}],
-                   printed(collect(Artifact, 1, basic)))].
+                   printed(collect(Artifact, 1, verbose)))].
 
 %% Аннотации keyword не производит, поэтому и покрытия не вносит: для
 %% `unevaluatedProperties` имя остаётся непокрытым.
@@ -804,12 +808,12 @@ dependent_schemas_units_test_() ->
     Artifact = dependent_schemas([{<<"a">>, [{required, [<<"b">>]}]}]),
     [?_assertEqual([{<<"/dependentSchemas">>, <<>>},
                     {<<"/dependentSchemas/a/required">>, <<>>}],
-                   paired(collect(Artifact, #{<<"a">> => 1}, basic))),
+                   paired(collect(Artifact, #{<<"a">> => 1}, verbose))),
      ?_assertMatch([{<<"/dependentSchemas">>, false, {error, _}} | _],
-                   printed(collect(Artifact, #{<<"a">> => 1}, basic))),
+                   printed(collect(Artifact, #{<<"a">> => 1}, verbose))),
      %% Ни одна зависимость не применилась: unit остаётся, деталей у него нет.
      ?_assertEqual([{<<"/dependentSchemas">>, true, none}],
-                   printed(collect(Artifact, #{}, basic)))].
+                   printed(collect(Artifact, #{}, verbose)))].
 
 %% Покрытие применившейся зависимости идёт наверх: подсхема стоит на том же
 %% значении, что и сам schema object.
@@ -856,19 +860,22 @@ prefix_items_test_() ->
 %% Собственный unit написанного keyword стоит перед units своих ветвей.
 array_units_test_() ->
     Tail = prefix_items([[{type, [integer]}]], [{type, [string]}]),
-    [?_assertEqual([{<<"/items">>, <<>>},
-                    {<<"/items/type">>, <<"/0">>},
-                    {<<"/items/type">>, <<"/1">>}],
-                   paired(collect(items([{type, [integer]}]), [1, <<"a">>], basic))),
-     ?_assertEqual([{<<"/prefixItems">>, <<>>},
-                    {<<"/prefixItems/0/type">>, <<"/0">>},
-                    {<<"/items">>, <<>>},
-                    {<<"/items/type">>, <<"/1">>},
-                    {<<"/items/type">>, <<"/2">>}],
-                   paired(collect(Tail, [1, <<"a">>, <<"b">>], basic))),
+    [?_assertEqual(lists:sort([{<<"/items">>, <<>>},
+                              {<<"/items/type">>, <<"/0">>},
+                              {<<"/items/type">>, <<"/1">>}]),
+                   lists:sort(
+                     paired(collect(items([{type, [integer]}]), [1, <<"a">>],
+                                    verbose)))),
+     ?_assertEqual(lists:sort([{<<"/prefixItems">>, <<>>},
+                              {<<"/prefixItems/0/type">>, <<"/0">>},
+                              {<<"/items">>, <<>>},
+                              {<<"/items/type">>, <<"/1">>},
+                              {<<"/items/type">>, <<"/2">>}]),
+                   lists:sort(
+                     paired(collect(Tail, [1, <<"a">>, <<"b">>], verbose)))),
      %% Не-массив: units написанных keywords остаются, но без деталей.
      ?_assertEqual([{<<"/prefixItems">>, true, none}, {<<"/items">>, true, none}],
-                   printed(collect(Tail, 1, basic)))].
+                   printed(collect(Tail, 1, verbose)))].
 
 %% Аннотация `prefixItems` — наибольший индекс, к которому он применился, либо
 %% `true`, если он применился ко всему массиву. Аннотация `items` — всегда
@@ -917,15 +924,16 @@ items_array_test_() ->
 
 items_array_units_test_() ->
     Tail = items_array([[{type, [integer]}]], [{type, [string]}]),
-    [?_assertEqual([{<<"/items">>, <<>>},
-                    {<<"/items/0/type">>, <<"/0">>},
-                    {<<"/additionalItems">>, <<>>},
-                    {<<"/additionalItems/type">>, <<"/1">>},
-                    {<<"/additionalItems/type">>, <<"/2">>}],
-                   paired(collect(Tail, [1, <<"a">>, <<"b">>], basic))),
+    [?_assertEqual(lists:sort([{<<"/items">>, <<>>},
+                              {<<"/items/0/type">>, <<"/0">>},
+                              {<<"/additionalItems">>, <<>>},
+                              {<<"/additionalItems/type">>, <<"/1">>},
+                              {<<"/additionalItems/type">>, <<"/2">>}]),
+                   lists:sort(
+                     paired(collect(Tail, [1, <<"a">>, <<"b">>], verbose)))),
      %% Не-массив: units написанных keywords остаются, но без деталей.
      ?_assertEqual([{<<"/items">>, true, none}, {<<"/additionalItems">>, true, none}],
-                   printed(collect(Tail, 1, basic)))].
+                   printed(collect(Tail, 1, verbose)))].
 
 %% Аннотация array-form `items` — наибольший индекс, к которому он применился,
 %% либо `true`, если он применился ко всему массиву. Аннотация `additionalItems`
@@ -1046,8 +1054,8 @@ items_array_coverage_test_() ->
      %% Провалившийся keyword аннотации не даёт, поэтому и покрытия не вносит.
      ?_assertEqual(neutral(), coverage_of(items_array([false], undefined), [1]))].
 
-%% Обрыв разрешён только в режиме flag; в остальных режимах обходятся все
-%% элементы, потому что дерево units должно быть полным.
+%% Обрыв разрешён только в режиме flag; остальным форматам нужны diagnostics
+%% всех применённых элементов.
 array_short_circuit_test_() ->
     Artifact = prefix_items([false, tripwire()], undefined),
     [?_assertMatch({ok, #eval_result{valid = false}},
@@ -1075,28 +1083,28 @@ contains_test_() ->
 %% стоят под ними и несут в локации индекс элемента.
 contains_units_test_() ->
     Artifact = contains([{type, [integer]}], 2, undefined),
-    [?_assertEqual([{<<"/contains">>, <<>>},
-                    {<<"/contains/type">>, <<"/0">>},
-                    {<<"/contains/type">>, <<"/1">>},
-                    {<<"/minContains">>, <<>>}],
-                   paired(collect(Artifact, [1, <<"a">>], basic))),
+    [?_assertEqual(lists:sort([{<<"/contains">>, <<>>},
+                              {<<"/contains/type">>, <<"/0">>},
+                              {<<"/contains/type">>, <<"/1">>},
+                              {<<"/minContains">>, <<>>}]),
+                   lists:sort(paired(collect(Artifact, [1, <<"a">>], verbose)))),
      %% Совпадение нашлось, поэтому сам `contains` успешен, а граница — нет.
      ?_assertMatch([{<<"/contains">>, true, {annotation, [0]}}, _, _,
                     {<<"/minContains">>, false, {error, _}}],
-                   printed(collect(Artifact, [1, <<"a">>], basic))),
+                   printed(collect(Artifact, [1, <<"a">>], verbose))),
      %% Совпали все элементы — аннотация вырождается в `true`.
      ?_assertMatch([{<<"/contains">>, true, {annotation, true}} | _],
-                   printed(collect(Artifact, [1, 2], basic))),
+                   printed(collect(Artifact, [1, 2], verbose))),
      %% На пустом массиве аннотация обязана присутствовать. Пройти его сам
      %% `contains` может только с `minContains: 0`.
      ?_assertEqual([{<<"/contains">>, true, {annotation, []}},
                     {<<"/minContains">>, true, none}],
-                   messaged(collect(contains([], 0, undefined), [], basic))),
+                   messaged(collect(contains([], 0, undefined), [], verbose))),
      ?_assertEqual([{<<"/contains">>, false,
                      <<"array does not contain a matching element">>},
                     {<<"/minContains">>, false,
                      <<"array contains too few matching elements">>}],
-                   messaged(collect(contains([], 2, undefined), [], basic))),
+                   messaged(collect(contains([], 2, undefined), [], verbose))),
      %% Units не совпавших элементов остаются рядом диагностическими.
      ?_assertEqual([{<<"/contains">>, false,
                      <<"array does not contain a matching element">>},
@@ -1104,7 +1112,7 @@ contains_units_test_() ->
                    messaged(collect(contains([{type, [integer]}], undefined, undefined),
                                     [<<"a">>], basic))),
      ?_assertEqual([{<<"/contains">>, true, none}, {<<"/maxContains">>, true, none}],
-                   printed(collect(contains(true, undefined, 1), 1, basic)))].
+                   printed(collect(contains(true, undefined, 1), 1, verbose)))].
 
 %% Разреженную часть маски порождает только `contains` и только в Draft 2020-12:
 %% в Draft 2019-09 его аннотация на `unevaluatedItems` не влияет.
@@ -1174,7 +1182,7 @@ unevaluated_annotation_test_() ->
     Details = fun(Artifact, Instance) ->
                       [{valid_json_location:pointer(Keywords), Detail}
                        || #output_unit{keyword_location = Keywords, detail = Detail}
-                              <- own(collect(Artifact, Instance, basic))]
+                              <- own(collect(Artifact, Instance, verbose))]
               end,
     Properties = unevaluated_properties(true),
     Items = unevaluated_items(true),
@@ -1316,7 +1324,7 @@ short_circuit_test_() ->
                    valid_json_eval:run(Matching, 1, flag)),
      ?_assertMatch({ok, #eval_result{valid = false}},
                    valid_json_eval:run(Second, 1, flag)),
-     %% В basic дерево units должно быть полным, поэтому обходятся все ветви.
+     %% Basic должен собрать diagnostics всех вычисляемых ветвей.
      ?_assertError({badkey, _}, valid_json_eval:run(Failing, 1, basic))].
 
 %% Applicator выпускает собственный unit написанного keyword, а units ветвей
@@ -1327,17 +1335,17 @@ applicator_units_test_() ->
     Negated = branching([{'not', addr(<<"/not">>)}], [{<<"/not">>, [{const, 1}]}]),
     [?_assertMatch([{<<"/anyOf">>, false, {error, _}},
                     {<<"/anyOf/1/type">>, false, {error, _}}],
-                   printed(collect(Listed, 1, basic))),
+                   printed(collect(Listed, 1, verbose))),
      %% Units опровергнутой внутренней схемы остаются диагностическими.
      ?_assertMatch([{<<"/not">>, false, {error, _}},
                     {<<"/not/const">>, true, none}],
-                   printed(collect(Negated, 1, basic))),
+                   printed(collect(Negated, 1, verbose))),
      %% Ветвь-boolean своих keywords не имеет, поэтому сообщение несёт её
      %% собственный unit — и в плоскую проекцию он попадает наравне с keywords.
-     ?_assertMatch([#{<<"keywordLocation">> := <<"/anyOf">>},
-                    #{<<"keywordLocation">> := <<"/anyOf/0">>, <<"error">> := _},
-                    #{<<"keywordLocation">> := <<"/anyOf/1/type">>}],
-                   errors(Listed, 1))].
+     ?_assertEqual(lists:sort([<<"/anyOf">>, <<"/anyOf/0">>,
+                              <<"/anyOf/1/type">>]),
+                   lists:sort([maps:get(<<"keywordLocation">>, Error)
+                               || Error <- errors(Listed, 1)]))].
 
 %% Абсолютная локация выводится из адреса node, а не накапливается обходом,
 %% поэтому у названного resource она появляется сама и печатается вместе с unit.
@@ -1390,7 +1398,7 @@ message_test_() ->
                    message({dependent_required, #{<<"bar">> => [<<"foo">>]}},
                            #{<<"bar">> => 1}))].
 
-%% Публичный вызов доводит дерево units до плоской проекции basic.
+%% Публичный вызов оборачивает плоский basic collector корневым unit.
 basic_output_test_() ->
     Schema = schema_node([{type, [string]}, {min_length, 2}]),
     [?_assertEqual({ok, #{<<"valid">>            => true,
@@ -1439,7 +1447,7 @@ dropped_annotation_test_() ->
                     {<<"/anyOf/0/properties">>, true, {annotation, [<<"a">>]}},
                     {<<"/anyOf/0/type">>, false,
                      {error, <<"expected string, got object">>}}],
-                   printed(collect(Artifact, Instance, basic)))].
+                   printed(collect(Artifact, Instance, verbose)))].
 
 %% Публичный результат — JSON выбранного формата; valid = false остаётся ok.
 flag_output_test_() ->
@@ -1468,9 +1476,9 @@ valid(Constraints, Instance) ->
 %% Локация печатается прямо в тесте: обратный стек сегментов читается хуже, чем
 %% готовый указатель, а его построение проверено отдельно.
 located(Node, Instance) when is_boolean(Node) ->
-    printed(units(Node, Instance, basic));
+    printed(units(Node, Instance, verbose));
 located(Constraints, Instance) ->
-    printed(units(Constraints, Instance, basic)).
+    printed(units(Constraints, Instance, verbose)).
 
 printed(Units) ->
     [shown(Unit) || Unit <- keywords(Units)].
@@ -1499,11 +1507,11 @@ own([#output_unit{nested = Keywords}]) -> Keywords.
 own_details(Artifact, Instance) ->
     [{valid_json_location:pointer(Keywords), Detail}
      || #output_unit{keyword_location = Keywords, detail = Detail}
-            <- own(collect(Artifact, Instance, basic))].
+            <- own(collect(Artifact, Instance, verbose))].
 
 %% Собственный unit node: он один, потому что вычисление начинается от корня.
 node_unit(Node, Instance) ->
-    [Unit] = units(Node, Instance, basic),
+    [Unit] = units(Node, Instance, verbose),
     Unit.
 
 units(Node, Instance, Format) when is_boolean(Node); is_map(Node) ->
@@ -1702,7 +1710,7 @@ tripwire() ->
     schema_node([{ref, addr(<<"/missing">>)}]).
 
 schema_locations(Artifact, Instance) ->
-    {ok, #eval_result{units = Units}} = valid_json_eval:run(Artifact, Instance, basic),
+    {ok, #eval_result{units = Units}} = valid_json_eval:run(Artifact, Instance, verbose),
     [Location || #output_unit{schema_location = Location} <- keywords(Units)].
 
 %% Проекция печатает ту же локацию отдельным ключом.

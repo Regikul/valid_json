@@ -239,7 +239,7 @@ Compiler и evaluator проверяются раздельно, не через
 | compiler | schema JSON + options | точное равенство полного `compiled()` |
 | address resolver | готовый `compiled()` + `addr()` | тотальный выбор ожидаемого node |
 | evaluator | вручную собранный `compiled()` + instance | `#eval_result{}` и units до JSON projection |
-| output builder | дерево units | golden JSON каждого формата |
+| output builder | format-specific units | golden JSON каждого формата |
 
 Эталон regex constraint несёт вместо `re:mp()` исходный текст паттерна, и фактический `compiled()` перед сравнением тот же терм стирает: `re:mp()` — непрозрачный тип, равенство двух его значений не определено, и опираться на него fixture не может. Разбирать внутренний bytecode тем более нельзя, поэтому опции компиляции закрепляет отдельный тест по наблюдаемому поведению паттерна. Все остальные элементы IR — обычные Erlang data и должны быть печатаемы и сравнимы без элизий.
 
@@ -290,10 +290,11 @@ Evaluator выполняет node в одном порядке, независи
 3. выполняет `constraints`, накапливая validity, coverage и diagnostic units;
 4. при необходимости выполняет `unevaluated` над оставшимися properties/items;
 5. очищает effective coverage, если весь schema object провалился;
-6. выпускает собственный unit и кладёт внутрь него units выполненных constraints;
+6. передаёт плоские значимые units наверх для `basic` либо выпускает
+   собственный tree unit с units выполненных constraints;
 7. снимает frame и resource scope, возвращает `#eval_result{}`.
 
-Порядок обычных constraints семантически свободен. Compiler может ставить дешёвые assertions раньше applicators ради `flag`, но observable tree не должен зависеть от оптимизации: для `basic`, `detailed`, `verbose` units сериализуются в детерминированном schema/keyword order.
+Порядок обычных constraints семантически свободен. Compiler может ставить дешёвые assertions раньше applicators ради `flag`; evaluator может обходить maps и накапливать sibling units в удобном ему порядке. Порядок элементов в `errors` и `annotations` не является API-контрактом. Потребитель различает результаты по `keywordLocation`, `absoluteKeywordLocation` и `instanceLocation`, а тесты ищут нужные units или сравнивают их как множества.
 
 Boolean `true` возвращает success с пустым coverage, boolean `false` — failure. Annotations boolean schemas не производят, но остаются обычными адресуемыми nodes: собственный unit выпускают и они, а поскольку keywords у них нет, сообщение о провале несёт этот unit сам.
 
@@ -301,7 +302,7 @@ Resource boundary определяется target `rid`, а не синтакс�
 
 ## Два результата
 
-Покрытие для `unevaluated*` содержит только эффективные аннотации успешных schema objects ([core.txt:1206](../references/json-schema/draft-2020-12/core.txt)). Диагностическое дерево содержит также провалы и успешные ветви внутри `not`, нужные `verbose` ([core.txt:3254](../references/json-schema/draft-2020-12/core.txt)).
+Покрытие для `unevaluated*` содержит только эффективные аннотации успешных schema objects ([core.txt:1206](../references/json-schema/draft-2020-12/core.txt)). Представление diagnostics зависит от формата: `basic` сразу накапливает плоские значимые results, а `detailed` и `verbose` строят дерево. Полное дерево содержит также провалы и успешные ветви внутри `not`, нужные `verbose` ([core.txt:3254](../references/json-schema/draft-2020-12/core.txt)).
 
 ```erlang
 -record(eval_result, {
@@ -321,7 +322,7 @@ Resource boundary определяется target `rid`, а не синтакс�
 
 Разделение на префикс и разреженную часть обязательно, потому что «максимальный покрытый индекс» неверен. `prefixItems`, `items` и `additionalItems` покрывают непрерывный префикс либо весь массив, но успешный `contains` отмечает произвольные indexes: на схеме `{"allOf": [{"contains": {"multipleOf": 2}}, {"contains": {"multipleOf": 3}}], "unevaluatedItems": {"multipleOf": 5}}` и инстансе `[2, 3, 4, 7, 8]` покрыты индексы 0, 1, 2 и 4, а индекс 3 обязан дойти до `unevaluatedItems`. Максимум дал бы 4 и признал массив покрытым целиком. При этом хранить одно множество всех индексов нельзя: `items` на массиве в сто тысяч элементов материализовал бы сто тысяч целых. Разреженную часть порождает только `contains`, и по спецификации при совпадении со всеми элементами его аннотация равна `true`, поэтому `Sparse` всегда меньше длины массива.
 
-`evaluated` собирается во всех форматах; `units` — во всех, кроме `flag`. При провале schema object его `evaluated` очищается, но `units` сохраняются.
+`evaluated` собирается во всех форматах; `units` — во всех, кроме `flag`. Для `basic` это плоский collector, для `detailed` и `verbose` — дерево. При провале schema object его `evaluated` очищается; diagnostics сохраняются, но effective annotations такого node отбрасываются.
 
 | Конструкция | Покрытие при успехе |
 | --- | --- |
@@ -387,9 +388,9 @@ unevaluated_indexes({P, S}, L) ->
 }).
 ```
 
-Units образуют дерево, и уровни в нём чередуются. `kind` различает unit schema node и unit фактического keyword без эвристик по одинаковым локациям. Каждый node выпускает собственный unit на своей локации, внутри него лежат units его keywords, а внутри unit'а applicator-keyword'а — units nodes, к которым этот keyword применился. Составной constraint чередования не нарушает: units ветви он кладёт внутрь того keyword'а, который её применил.
+В `detailed` и `verbose` units образуют дерево, и уровни в нём чередуются. `kind` различает unit schema node и unit фактического keyword без эвристик по одинаковым локациям. Каждый node выпускает собственный unit на своей локации, внутри него лежат units его keywords, а внутри unit'а applicator-keyword'а — units nodes, к которым этот keyword применился. Составной constraint чередования не нарушает: units ветви он кладёт внутрь того keyword'а, который её применил. В `basic` те же обработчики сразу передают наверх только плоские units со значимым detail; промежуточные schema/applicator containers не строятся.
 
-Собственный unit schema object не несёт ни сообщения, ни аннотации. Он говорит только о том, что подсхема применялась и чем это кончилось, а причину провала называют его дети; спецификация прямо освобождает узлы ветвления от сообщения ([core.txt:3150](../references/json-schema/draft-2020-12/core.txt)). Сообщение появляется у node лишь там, где детей нет вовсе, — у boolean `false`.
+В tree-стратегии собственный unit schema object не несёт ни сообщения, ни аннотации. Он говорит только о том, что подсхема применялась и чем это кончилось, а причину провала называют его дети; спецификация прямо освобождает узлы ветвления от сообщения ([core.txt:3150](../references/json-schema/draft-2020-12/core.txt)). Сообщение появляется у node лишь там, где детей нет вовсе, — у boolean `false`. Плоский `basic` промежуточный schema unit не создаёт.
 
 `keywordLocation` и `instanceLocation` — обратные стеки сегментов: push/pop выполняется за O(1), JSON Pointer escaping делается при печати. `schema_location` хранит адрес физического schema node как готовый compiled pointer. `keywordLocation` проходит сквозь ссылки; `absoluteKeywordLocation` материализуется из `schema_location` только при печати и присутствует всегда, кроме anonymous resource.
 
@@ -406,7 +407,7 @@ Pointer. Draft 2019-09 prose требует fragment-encoded форму, но з
 output fixtures и output schema требуют JSON Pointer; compatibility policy
 выбирает проверяемый контракт сьюта и не вводит второй output profile.
 
-Каждый constraint порождает unit. Поэтому присутствие `properties: {}`, no-op assertions и полная иерархия `verbose` восстанавливаются без исходной схемы или presence mask.
+В tree-стратегии `detailed`/`verbose` каждый constraint порождает unit. Поэтому присутствие `properties: {}`, no-op assertions и полная иерархия `verbose` восстанавливаются без исходной схемы или presence mask; `detailed` фильтрует и сжимает это дерево при проекции. `basic` не материализует silent results, которые его проекция всё равно отбросила бы; `flag` не создаёт units вовсе.
 
 `flag` — единственный режим с short-circuit, что соответствует рекомендации спецификации ([core.txt:3048](../references/json-schema/draft-2020-12/core.txt)). Даже в нём обрыв запрещён внутри node с непустым `unevaluated`, пока не рассчитано нужное покрытие, и запрет этот действует не только на сам node: успех первой ветви `anyOf`, стоящего сколь угодно глубоко под цепочкой in-place applicators, не отменяет аннотаций остальных ветвей. Переносит запрет поле `coverage` в контексте.
 
@@ -415,19 +416,19 @@ output fixtures и output schema требуют JSON Pointer; compatibility poli
 | Формат | Что строится |
 | --- | --- |
 | `flag` | только корневое `valid`; units не собираются, short-circuit разрешён |
-| `basic` | плоские error/annotation units всех применённых keywords |
+| `basic` | сразу плоский collector значимых error/annotation units |
 | `detailed` | минимальная вложенная структура значимых результатов с валидностью корня |
 | `verbose` | полная несвёрнутая hierarchy schema results, включая успехи и отброшенные results |
 
-Все три структурных формата строятся из одного дерева units; отдельного evaluator API на формат нет. Официальный snapshot закрепляет только `basic`. Контракты `detailed` и `verbose` зафиксированы собственными golden/structure tests обоих dialects и проверкой canonical output schemas.
+Evaluator выбирает стратегию по `#eval_context.format`: `basic` не строит дерево и не запускает отдельный flatten pass, а `detailed`/`verbose` сохраняют структурный collector. Публичный evaluator API остаётся общим. Официальный snapshot закрепляет только `basic`. Контракты `detailed` и `verbose` зафиксированы собственными golden/structure tests обоих dialects и проверкой canonical output schemas.
 
-Корнем `basic` служит unit корневого node: его локации и его собственный detail печатаются прямо в объекте результата, а плоский список идёт в `errors` либо `annotations` — по валидности этого же корня. В список попадает то, что несёт detail: сообщение при провале, аннотацию при успехе. Собирая аннотации, обход не спускается в провалившийся unit: провалившийся schema object не производит аннотаций ни своими keywords, ни keywords своих подсхем ([core.txt:1206](../references/json-schema/draft-2020-12/core.txt)). Из дерева эти аннотации не исчезают — их показывает `verbose`. Поэтому units ветвлений в нём не видны — своего сообщения у них нет, — а провалившаяся boolean-схема видна, потому что сообщение есть только у неё самой. Пустой список остаётся ключом: `errors` обязателен при `valid = false`, `annotations` — при `valid = true`, и второго ключа рядом быть не должно ([output-schema.json](../../test/fixtures/json-schema-test-suite/output-tests/draft2020-12/output-schema.json)).
+Корнем `basic` служит unit корневого node: его локации и его собственный detail печатаются прямо в объекте результата, а собранный плоский список идёт в `errors` либо `annotations` — по валидности этого же корня. Keyword без detail не добавляет container. Schema node без собственного detail передаёт список детей наверх; провалившийся node удаляет из него annotations, потому что не производит их ни своими keywords, ни keywords своих подсхем ([core.txt:1206](../references/json-schema/draft-2020-12/core.txt)). Полную диагностическую ветвь сохраняет `verbose`. Поэтому units ветвлений в `basic` не видны — своего сообщения у них нет, — а провалившаяся boolean-схема видна, потому что сообщение есть только у неё самой. Корневая обёртка создаётся один раз по завершении evaluator. Пустой список остаётся ключом: `errors` обязателен при `valid = false`, `annotations` — при `valid = true`, и второго ключа рядом быть не должно ([output-schema.json](../../test/fixtures/json-schema-test-suite/output-tests/draft2020-12/output-schema.json)).
 
 `detailed` рекурсивно оставляет только результаты с той же валидностью, что и корень: для провалившегося корня — invalid branches с ошибками, для успешного — valid branches с эффективными аннотациями. Поэтому успешные альтернативы провалившегося applicator и провалившиеся альтернативы успешного applicator в результат не входят. Generic error структурного unit отбрасывается, если причину уже показывают его значимые потомки; локальная leaf-ошибка без таких потомков сохраняется, как у `not`. Эффективная annotation сохраняется и рядом с вложенными результатами.
 
 После фильтрации дерево схлопывается снизу вверх. Silent unit без потомков удаляется, silent unit с единственным потомком заменяется этим потомком, а unit с двумя и более значимыми потомками сохраняется как точка ветвления. Корневой unit не схлопывается никогда. Поэтому одночленные source/schema chains, включая `$ref`, прозрачны, но canonical target остаётся самостоятельной ветвью, когда объединяет несколько причин. No-op keywords и marker units без значимых потомков в `detailed` отсутствуют. Вложенный массив называется `errors` для invalid unit и `annotations` для valid unit; после фильтрации все опубликованные units имеют валидность корня.
 
-`verbose` рекурсивно печатает корневой schema unit и все keyword results в детерминированном порядке. В него входят silent successes, неприменимые к типу и явно написанные no-op keywords, annotation внутри провалившейся ветви и успешное вычисление внутри `not`. Вложенный массив называется `errors` либо `annotations` исключительно по `valid` родителя; поэтому successful child допустим внутри `errors`, invalid child — внутри `annotations`, а локальный `error`/`annotation` может находиться рядом с массивом.
+`verbose` рекурсивно печатает корневой schema unit и все keyword results. В него входят silent successes, неприменимые к типу и явно написанные no-op keywords, annotation внутри провалившейся ветви и успешное вычисление внутри `not`. Вложенный массив называется `errors` либо `annotations` исключительно по `valid` родителя; поэтому successful child допустим внутри `errors`, invalid child — внутри `annotations`, а локальный `error`/`annotation` может находиться рядом с массивом. Порядок siblings во всех структурных форматах намеренно не задан; порядок индексов JSON instance и содержимое annotation-массивов этим не меняются.
 
 Внутренние schema units не публикуются механически. Unit без detail на той же `keywordLocation`, что applicator, прозрачен, и его keyword children поднимаются к applicator. Пустая successful schema под обычным applicator опускается, как boolean `true` под `properties` в нормативном коротком примере. Самостоятельными остаются schema units значимых структурных branches (`anyOf/0`, `properties/name` и аналогичные), boolean `false` с собственной ошибкой и canonical target после любого reference; последний сохраняется даже без keywords, чтобы physical reference и dereferenced schema не слились. Таким образом JSON отражает иерархию результатов схемы, но не служебное чередование evaluator. Compile-time `$defs` и совместимый `definitions` представлены keyword marker'ом; прочие полностью потреблённые core keywords output unit не получают.
 

@@ -17,8 +17,9 @@
 check({annotation, _Keyword, _Value}, _Instance, #eval_context{format = flag}) ->
     valid_json_eval:empty_result(true);
 check({annotation, Keyword, Value}, _Instance, Context) ->
-    Unit = valid_json_unit:keyword(Keyword, true, {annotation, Value}, Context),
-    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = [Unit]};
+    Units = valid_json_unit:keyword_units(
+              Keyword, true, {annotation, Value}, [], Context),
+    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = Units};
 %% Content keywords описывают строку, закодировавшую не-JSON документ, и к
 %% значениям других типов не применяются вовсе (validation.txt:945). Поэтому
 %% не-строка даёт успешный unit без annotation — то же правило применимости, что
@@ -29,8 +30,9 @@ check({annotation, Keyword, Value}, _Instance, Context) ->
 check({content, _Keyword, _Value}, _Instance, #eval_context{format = flag}) ->
     valid_json_eval:empty_result(true);
 check({content, Keyword, Value}, Instance, Context) when is_binary(Instance) ->
-    Unit = valid_json_unit:keyword(Keyword, true, {annotation, Value}, Context),
-    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = [Unit]};
+    Units = valid_json_unit:keyword_units(
+              Keyword, true, {annotation, Value}, [], Context),
+    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = Units};
 check({content, Keyword, _Value}, _Instance, Context) ->
-    Unit = valid_json_unit:keyword(Keyword, true, none, Context),
-    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = [Unit]}.
+    Units = valid_json_unit:keyword_units(Keyword, true, none, [], Context),
+    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = Units}.

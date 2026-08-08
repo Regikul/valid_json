@@ -18,7 +18,7 @@
 check({unevaluated_properties, Addr}, Instance, Evaluated, Context)
   when is_map(Instance) ->
     Names = valid_json_evaluated:unevaluated_properties(
-              Evaluated, lists:sort(maps:keys(Instance))),
+              Evaluated, maps:keys(Instance)),
     properties([{Name, maps:get(Name, Instance)} || Name <- Names], Addr, Context);
 %% Keyword применяется только к своему типу инстанса: другое значение даёт
 %% успешный unit без error и annotation, а не отказ.
@@ -95,14 +95,14 @@ coverage(false, _Evaluated) -> valid_json_evaluated:neutral().
 -spec apply_all([application()], addr(), binary(), #eval_context{}, #eval_result{},
                 [binary()]) -> {#eval_result{}, [binary()]}.
 apply_all([], _Addr, _Keyword, _Context, Result, Applied) ->
-    {valid_json_eval:finish_acc(Result), lists:reverse(Applied)};
+    {valid_json_eval:finish_acc(Result), Applied};
 apply_all([{Segment, Value} | Rest], Addr, Keyword, Context, Result, Applied) ->
     Merged = valid_json_eval:conjoin_acc_discard_coverage(
                Result, branch(Addr, Keyword, Segment, Value, Context)),
     case Merged#eval_result.valid =:= false andalso
-         Context#eval_context.format =:= flag of
+        Context#eval_context.format =:= flag of
         true  -> {valid_json_eval:finish_acc(Merged),
-                  lists:reverse([Segment | Applied])};
+                  [Segment | Applied]};
         false -> apply_all(Rest, Addr, Keyword, Context, Merged,
                            [Segment | Applied])
     end.
@@ -135,4 +135,5 @@ inapplicable(_Keyword, #eval_context{format = flag}) ->
 inapplicable(Keyword, Context) ->
     #eval_result{valid     = true,
                  evaluated = valid_json_evaluated:neutral(),
-                 units     = [valid_json_unit:keyword(Keyword, true, none, Context)]}.
+                 units     = valid_json_unit:keyword_units(
+                               Keyword, true, none, [], Context)}.

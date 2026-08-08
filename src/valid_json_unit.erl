@@ -27,6 +27,11 @@ keyword(Keyword, Valid, Detail, Nested, #eval_context{keyword_location = Locatio
           [#output_unit{}].
 keyword_units(_Keyword, _Valid, _Detail, _Nested, #eval_context{format = flag}) ->
     [];
+keyword_units(_Keyword, _Valid, none, Nested, #eval_context{format = basic}) ->
+    Nested;
+keyword_units(Keyword, Valid, Detail, Nested,
+              #eval_context{format = basic} = Context) ->
+    [keyword(Keyword, Valid, Detail, [], Context) | Nested];
 keyword_units(Keyword, Valid, Detail, Nested, Context) ->
     [keyword(Keyword, Valid, Detail, Nested, Context)].
 

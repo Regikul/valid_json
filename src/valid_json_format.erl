@@ -43,12 +43,13 @@ holds(true, _Name, _Instance) ->
 %% annotations и так теряет, поэтому там остаётся одно сообщение.
 -spec report(binary(), boolean(), #eval_context{}) -> #eval_result{}.
 report(Name, true, Context) ->
-    Unit = valid_json_unit:keyword(<<"format">>, true, {annotation, Name}, Context),
-    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = [Unit]};
+    Units = valid_json_unit:keyword_units(
+              <<"format">>, true, {annotation, Name}, [], Context),
+    #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = Units};
 report(Name, false, Context) ->
-    Unit = valid_json_unit:keyword(<<"format">>, false,
-                                   {error, message(Name)}, Context),
-    #eval_result{valid = false, evaluated = valid_json_evaluated:neutral(), units = [Unit]}.
+    Units = valid_json_unit:keyword_units(
+              <<"format">>, false, {error, message(Name)}, [], Context),
+    #eval_result{valid = false, evaluated = valid_json_evaluated:neutral(), units = Units}.
 
 -spec message(binary()) -> binary().
 message(Name) ->

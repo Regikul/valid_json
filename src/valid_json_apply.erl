@@ -12,7 +12,7 @@
 
 %% Условие обрыва каждый applicator задаёт сам: allOf останавливается на первом
 %% провале, anyOf — на первом успехе, oneOf — на втором. Действует оно только в
-%% режиме flag; в остальных режимах дерево units должно быть полным.
+%% режиме flag; в остальных режимах diagnostics должны быть полными.
 -spec check(constraint(), json(), #eval_context{}) -> #eval_result{}.
 check({all_of, Addrs}, Instance, Context) ->
     {Matched, Seen, Error, Evaluated, Units} =
@@ -42,19 +42,20 @@ check({'not', Addr}, Instance, Context) ->
 check({if_then_else, If, Then, Else}, Instance, Context) ->
     conditional(If, Then, Else, Instance, Context);
 %% Подсхему выбирает присутствие свойства, а применяется она ко всему instance,
-%% поэтому keyword остаётся in-place applicator. Порядок обхода задан сортировкой
-%% имён: наблюдаемое дерево units не должно зависеть от порядка обхода map.
+%% поэтому keyword остаётся in-place applicator. Порядок свойств JSON object не
+%% наблюдаем и не входит в output contract, поэтому map обходится напрямую.
 check({dependent_schemas, Schemas}, Instance, Context) when is_map(Instance) ->
-    Present = [{Name, maps:get(Name, Schemas)}
-               || Name <- lists:sort(maps:keys(Schemas)), maps:is_key(Name, Instance)],
+    Present = [{Name, Addr}
+               || {Name, Addr} <- maps:to_list(Schemas), maps:is_key(Name, Instance)],
     dependent(Present, Instance, Context);
 %% Keyword применяется только к объекту: другое значение даёт успешный unit без
 %% error и annotation, а не отказ.
 check({dependent_schemas, _Schemas}, _Instance, Context) ->
     result(<<"dependentSchemas">>, true, none, valid_json_evaluated:neutral(), [], Context);
 check({dependencies, Dependencies}, Instance, Context) when is_map(Instance) ->
-    Present = [{Name, maps:get(Name, Dependencies)}
-               || Name <- lists:sort(maps:keys(Dependencies)), maps:is_key(Name, Instance)],
+    Present = [{Name, Dependency}
+               || {Name, Dependency} <- maps:to_list(Dependencies),
+                  maps:is_key(Name, Instance)],
     legacy_dependencies(Present, Instance, Context);
 check({dependencies, _Dependencies}, _Instance, Context) ->
     result(<<"dependencies">>, true, none, valid_json_evaluated:neutral(), [], Context).
@@ -214,7 +215,7 @@ scan([Addr | Rest], Index, Keyword, Instance, Context, Stop,
     end.
 
 finish({Matched, Seen, Error, Evaluated, Units}) ->
-    {Matched, Seen, Error, Evaluated, lists:reverse(Units)}.
+    {Matched, Seen, Error, Evaluated, Units}.
 
 %% Обрыв разрешён только там, где покрытия уже никто не ждёт: `anyOf`
 %% останавливается на первом успехе, а аннотации остальных ветвей могут
@@ -284,8 +285,9 @@ result(_Keyword, Valid, _Message, neutral, _Units, #eval_context{format = flag})
 result(_Keyword, Valid, _Message, Evaluated, _Units, #eval_context{format = flag}) ->
     #eval_result{valid = Valid, evaluated = Evaluated, units = []};
 result(Keyword, Valid, Message, Evaluated, Units, Context) ->
-    Unit = valid_json_unit:keyword(Keyword, Valid, detail(Valid, Message), Units, Context),
-    #eval_result{valid = Valid, evaluated = Evaluated, units = [Unit]}.
+    Diagnostic = valid_json_unit:keyword_units(
+                   Keyword, Valid, detail(Valid, Message), Units, Context),
+    #eval_result{valid = Valid, evaluated = Evaluated, units = Diagnostic}.
 
 -spec detail(boolean(), binary() | none) -> detail().
 detail(true, _Message)  -> none;

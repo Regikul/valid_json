@@ -19,12 +19,11 @@
 -define(CONTENT, [<<"contentEncoding">>, <<"contentMediaType">>,
                   <<"contentSchema">>]).
 
-%% Порядок constraints в node задан статически. Наблюдаемое дерево units не
-%% должно зависеть от порядка обхода map, поэтому обход идёт по этому списку,
-%% а не по maps:keys/1. Элемент — один constraint: обычно это сам keyword, а
-%% составной перечисляет свои keywords списком и компилируется за один шаг.
-%% Annotation-only keywords стоят в конце: сначала идёт то, что определяет
-%% вердикт, потом то, что только описывает значение.
+%% Порядок constraints в node задан статически ради предсказуемого short-circuit
+%% и канонического compiler IR. Он не обещает порядок sibling output units.
+%% Элемент — один constraint: обычно это сам keyword, а составной перечисляет
+%% свои keywords списком и компилируется за один шаг. Annotation-only keywords
+%% стоят в конце: сначала идёт то, что определяет вердикт, потом описание.
 -define(ORDER, [<<"$ref">>, <<"$dynamicRef">>, <<"$recursiveRef">>,
                 <<"type">>, <<"enum">>, <<"const">>,
                 <<"multipleOf">>,
@@ -758,8 +757,8 @@ named(Value, Position, State) when is_map(Value) ->
 named(Value, Position, _State) ->
     {error, schema_error({bad_keyword_value, Value}, Position)}.
 
-%% Сегмент локации — исходный текст паттерна. Порядок списка задан сортировкой
-%% по нему же: от порядка обхода map наблюдаемое дерево units зависеть не должно.
+%% Сегмент локации — исходный текст паттерна. Список канонизируется по нему для
+%% стабильного compiler IR; публичный порядок sibling diagnostics не обещается.
 -spec patterned(json(), position(), state()) ->
           {ok, [{regex(), addr()}], state()} | {error, #schema_error{}}.
 patterned(Value, Position, State) when is_map(Value) ->

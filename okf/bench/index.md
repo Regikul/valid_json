@@ -5,3 +5,5 @@
 * [Профиль горячей валидации](02-validate-profile.md) - Распределение вызовов, heap allocations и времени внутри valid_json:validate/3 на Draft 2020-12.
 * [Результаты оптимизации output locations](03-location-output-optimization.md) - Повторный benchmark после ленивого построения absoluteKeywordLocation и fast paths сериализации locations.
 * [Прогресс оптимизации горячей валидации](04-validation-optimization-progress.md) - Кумулятивный эффект оптимизаций evaluator и новый профиль большого массива для всех output formats.
+* [Сравнение с Jesse и JSONSchex после оптимизации evaluator](05-validator-comparison-after-optimization.md) - Текущее положение hot, cold и trusted cold valid_json относительно Jesse и JSONSchex.
+* [Format-specific diagnostics и плоский Basic collector](06-format-specific-diagnostics.md) - Эффект прямого сбора Basic output и отказа от гарантированного порядка sibling units.

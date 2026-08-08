@@ -21,8 +21,27 @@ run(#{root := Root} = Compiled, Instance, Format) ->
                             coverage          = false},
     case eval({Root, <<>>}, Instance, Context) of
         #eval_result{valid = undefined, error = Error} -> {error, Error};
-        #eval_result{} = Result -> {ok, Result}
+        #eval_result{} = Result ->
+            {ok, finish_root(resolve({Root, <<>>}, Compiled), Result, Context)}
     end.
+
+%% Basic собирается сразу плоским, но публичный формат всё равно имеет один
+%% корневой output unit. Оборачиваем его только здесь: дочерним nodes такой
+%% контейнер не нужен. У boolean false собственная ошибка принадлежит корню, а
+%% не дублируется в его `errors`.
+-spec finish_root(schema_node(), #eval_result{}, #eval_context{}) -> #eval_result{}.
+finish_root(_Root, Result, #eval_context{format = flag}) ->
+    Result;
+finish_root(false, #eval_result{valid = false} = Result,
+            #eval_context{format = basic} = Context) ->
+    Root = valid_json_unit:schema(false, {error, <<"schema is false">>}, [], Context),
+    Result#eval_result{units = [Root]};
+finish_root(_Root, #eval_result{valid = Valid, units = Units} = Result,
+            #eval_context{format = basic} = Context) ->
+    Root = valid_json_unit:schema(Valid, none, Units, Context),
+    Result#eval_result{units = [Root]};
+finish_root(_Root, Result, #eval_context{}) ->
+    Result.
 
 %% Разрешение адреса в готовом артефакте тотально.
 -spec resolve(addr(), compiled()) -> schema_node().
@@ -94,7 +113,8 @@ empty_result(false) ->
 
 %% Конъюнкция используется schema object и container applicators. `false`
 %% окончательно определяет результат и потому поглощает no-progress другой
-%% ветви; без провала первая ошибка сохраняется в статическом порядке обхода.
+%% ветви; без провала сохраняется первая встретившаяся ошибка. Порядок sibling
+%% diagnostics не является частью публичного контракта.
 -spec conjoin(#eval_result{}, #eval_result{}) -> #eval_result{}.
 conjoin(#eval_result{valid = true, evaluated = neutral, units = [],
                      error = undefined}, Right) ->
@@ -106,11 +126,9 @@ conjoin(Left, Right) ->
     conjoined(Left, Right,
               Left#eval_result.units ++ Right#eval_result.units).
 
-%% Длинный левый fold хранит накопленные units в обратном порядке. Очередной
-%% правый результат всё ещё приходит в обычном порядке, поэтому его достаточно
-%% развернуть в голову аккумулятора: уже собранный префикс больше не копируется.
-%% За пределы fold такой результат не выходит — finish_acc/1 восстанавливает
-%% наблюдаемый статический порядок.
+%% Длинный левый fold кладёт очередные units в голову аккумулятора: уже
+%% собранный префикс больше не копируется. Порядок siblings не нормализуется,
+%% поэтому finish_acc/1 не требует отдельного прохода.
 -spec conjoin_acc(#eval_result{}, #eval_result{}) -> #eval_result{}.
 conjoin_acc(Left, Right) ->
     Units = reverse_prepend(Right#eval_result.units, Left#eval_result.units),
@@ -132,10 +150,8 @@ conjoin_acc_discard_coverage(Left, Right) ->
 -spec finish_acc(#eval_result{}) -> #eval_result{}.
 finish_acc(#eval_result{units = []} = Result) ->
     Result;
-finish_acc(#eval_result{units = [_]} = Result) ->
-    Result;
-finish_acc(#eval_result{units = Units} = Result) ->
-    Result#eval_result{units = lists:reverse(Units)}.
+finish_acc(#eval_result{} = Result) ->
+    Result.
 
 -spec reverse_prepend([#output_unit{}], [#output_unit{}]) -> [#output_unit{}].
 reverse_prepend([], Acc) ->
@@ -232,8 +248,28 @@ eval_all(Constraints, Unevaluated, Instance, Context) ->
 -spec node_units(boolean(), detail(), [#output_unit{}], #eval_context{}) -> [#output_unit{}].
 node_units(_Valid, _Detail, _Nested, #eval_context{format = flag}) ->
     [];
+node_units(Valid, Detail, Nested, #eval_context{format = basic} = Context) ->
+    Kept = case Valid of
+               true  -> Nested;
+               false -> drop_annotations(Nested)
+           end,
+    case Detail of
+        none -> Kept;
+        _    -> [valid_json_unit:schema(Valid, Detail, [], Context) | Kept]
+    end;
 node_units(Valid, Detail, Nested, Context) ->
     [valid_json_unit:schema(Valid, Detail, Nested, Context)].
+
+%% Аннотации провалившегося schema object не являются effective. В tree-режиме
+%% их сохраняет hierarchy ради verbose и позднее фильтрует Basic; плоский Basic
+%% обязан отбросить их прямо на границе node.
+-spec drop_annotations([#output_unit{}]) -> [#output_unit{}].
+drop_annotations(Units) ->
+    [Unit || #output_unit{detail = Detail} = Unit <- Units,
+             not is_annotation(Detail)].
+
+is_annotation({annotation, _}) -> true;
+is_annotation(_Detail)         -> false.
 
 %% Schema object есть конъюнкция независимых ограничений. Обрыв разрешён только
 %% в режиме flag и только там, где покрытие уже никому не нужно: аргумент `Short`
@@ -317,7 +353,8 @@ marker(_Keyword, #eval_context{format = flag}) ->
 marker(Keyword, Context) ->
     #eval_result{valid = true,
                  evaluated = valid_json_evaluated:neutral(),
-                 units = [valid_json_unit:keyword(Keyword, true, none, Context)]}.
+                 units = valid_json_unit:keyword_units(
+                           Keyword, true, none, [], Context)}.
 
 %% Reference применяет target к тому же instance через общий вход evaluator'а:
 %% только так сохраняются resource scope и cycle guard. Keyword location
@@ -340,6 +377,8 @@ reference(Keyword, Addr, Instance,
         #eval_result{valid = Valid, units = Units} = Result ->
             case Format of
                 flag ->
+                    Result;
+                basic ->
                     Result;
                 _ ->
                     Unit = valid_json_unit:reference(

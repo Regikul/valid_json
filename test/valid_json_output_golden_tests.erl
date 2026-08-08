@@ -64,11 +64,11 @@ recursive_decisive_output_test_() ->
         Format <- [flag, basic, detailed, verbose],
         Id <- [id(Tag, <<"recursive-decisive">>)]].
 
-%% Constraint order задан emitter'ом, а не внутренним порядком map. Golden
-%% фиксирует наблюдаемый порядок всех одновременно провалившихся assertions.
-error_order_test_() ->
+%% Одновременно провалившиеся assertions сравниваются как множество siblings:
+%% порядок output units не является контрактом.
+error_set_test_() ->
     [?_assertEqual(
-        root(false, Id, <<"errors">>,
+        unordered(root(false, Id, <<"errors">>,
              [unit(false, <<"/type">>, <<Id/binary, "#/type">>,
                    <<"error">>, <<"expected string, got integer">>),
               unit(false, <<"/enum">>, <<Id/binary, "#/enum">>,
@@ -76,37 +76,37 @@ error_order_test_() ->
               unit(false, <<"/const">>, <<Id/binary, "#/const">>,
                    <<"error">>, <<"value is not equal to the constant">>),
               unit(false, <<"/maximum">>, <<Id/binary, "#/maximum">>,
-                   <<"error">>, <<"value is greater than the maximum 5">>)]),
-        basic(schema(Dialect, Id,
+                   <<"error">>, <<"value is greater than the maximum 5">>)])),
+        unordered(basic(schema(Dialect, Id,
                      #{<<"maximum">> => 5,
                        <<"const">> => 2,
                        <<"enum">> => [1],
                        <<"type">> => <<"string">>}),
-              10))
+              10)))
      || {Tag, Dialect} <- ?DRAFTS,
         Id <- [id(Tag, <<"error-order">>)]].
 
-%% Annotation-only keywords тоже идут в статическом порядке, независимо от map.
-annotation_order_test_() ->
+%% Annotation-only siblings имеют тот же неупорядоченный контракт.
+annotation_set_test_() ->
     [?_assertEqual(
-        root(true, Id, <<"annotations">>,
+        unordered(root(true, Id, <<"annotations">>,
              [unit(true, <<"/title">>, <<Id/binary, "#/title">>,
                    <<"annotation">>, <<"title">>),
               unit(true, <<"/description">>, <<Id/binary, "#/description">>,
                    <<"annotation">>, <<"description">>),
               unit(true, <<"/default">>, <<Id/binary, "#/default">>,
-                   <<"annotation">>, 42)]),
-        basic(schema(Dialect, Id,
+                   <<"annotation">>, 42)])),
+        unordered(basic(schema(Dialect, Id,
                      #{<<"default">> => 42,
                        <<"description">> => <<"description">>,
                        <<"title">> => <<"title">>}),
-              null))
+              null)))
      || {Tag, Dialect} <- ?DRAFTS,
         Id <- [id(Tag, <<"annotation-order">>)]].
 
 %% Нормативная polygon-форма: silent successes и успешный первый item удалены,
 %% цепочка items/source-ref свёрнута, а canonical target сохраняет развилку
-%% required/additionalProperties. Порядок соответствует статическому emitter.
+%% required/additionalProperties. Sibling order при сравнении не учитывается.
 detailed_normative_test_() ->
     Point = #{<<"type">> => <<"object">>,
               <<"properties">> =>
@@ -368,8 +368,23 @@ assert_structured(Format, Dialect, {ok, Expected}, Schema, Instance) ->
                                    [{default_dialect, Dialect},
                                     {trust_schema, true}]),
     {ok, Actual} = valid_json_core:validate(Artifact, Instance, [{output, Format}]),
-    ?assertEqual(Expected, Actual),
+    ?assertEqual(unordered(Expected), unordered(Actual)),
     assert_output_schema(Dialect, Actual).
+
+%% `errors` и `annotations` — коллекции sibling results. Их порядок не задан;
+%% вложенные коллекции нормализуются рекурсивно, остальные JSON-массивы остаются
+%% без изменений, поскольку могут быть значением annotation.
+unordered({ok, Output}) ->
+    {ok, unordered(Output)};
+unordered(Output) when is_map(Output) ->
+    maps:map(
+      fun(<<"errors">>, Units) when is_list(Units) ->
+              lists:sort([unordered(Unit) || Unit <- Units]);
+         (<<"annotations">>, Units) when is_list(Units) ->
+              lists:sort([unordered(Unit) || Unit <- Units]);
+         (_Key, Value) ->
+              Value
+      end, Output).
 
 assert_output_schema(Dialect, Actual) ->
     OutputSchema = read_json(filename:join(output_dir(Dialect),

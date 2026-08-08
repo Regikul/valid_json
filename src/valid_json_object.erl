@@ -15,7 +15,7 @@
 
 -spec check(constraint(), json(), #eval_context{}) -> #eval_result{}.
 check({properties, Props, Patterns, Additional}, Instance, Context) when is_map(Instance) ->
-    Names = lists:sort(maps:keys(Instance)),
+    Names = maps:keys(Instance),
     %% Остаток считается по статически сохранённым именам и паттернам, а не по
     %% аннотациям соседей: общего накопителя у составного constraint нет.
     Rest = Names -- covered(Props, Patterns, Names),
@@ -30,7 +30,7 @@ check({properties, Props, Patterns, Additional}, _Instance, Context) ->
                   {<<"patternProperties">>, Patterns},
                   {<<"additionalProperties">>, Additional}], Context);
 check({property_names, Addr}, Instance, Context) when is_map(Instance) ->
-    names(lists:sort(maps:keys(Instance)), Addr, Context);
+    names(maps:keys(Instance), Addr, Context);
 check({property_names, Addr}, _Instance, Context) ->
     inapplicable([{<<"propertyNames">>, Addr}], Context).
 
@@ -111,8 +111,8 @@ additional(undefined, _Rest) ->
 additional(Addr, Rest) ->
     [{[<<"additionalProperties">>], Name, Addr} || Name <- Rest].
 
-%% Обрыв разрешён только в режиме flag; в остальных режимах выполняются все три
-%% keyword'а, потому что дерево units должно быть полным.
+%% Обрыв разрешён только в режиме flag; структурным форматам нужны diagnostics
+%% всех написанных keyword'ов, а не только первый провал.
 -spec evaluate([{binary(), [application()] | undefined}], json(), #eval_context{}) ->
           #eval_result{}.
 evaluate(Written, Instance, Context) ->
@@ -160,14 +160,14 @@ coverage(false, _Applied) -> valid_json_evaluated:neutral().
 -spec apply_all([application()], json(), #eval_context{}, #eval_result{},
                 [binary()]) -> {#eval_result{}, [binary()]}.
 apply_all([], _Instance, _Context, Result, Names) ->
-    {valid_json_eval:finish_acc(Result), lists:reverse(Names)};
+    {valid_json_eval:finish_acc(Result), Names};
 apply_all([{Tail, Name, Addr} | Rest], Instance, Context, Result, Names) ->
     Merged = valid_json_eval:conjoin_acc_discard_coverage(
                Result,
                branch(Addr, Tail, Name, maps:get(Name, Instance), Context)),
     case Merged#eval_result.valid =:= false andalso
-         Context#eval_context.format =:= flag of
-        true  -> {valid_json_eval:finish_acc(Merged), lists:reverse([Name | Names])};
+        Context#eval_context.format =:= flag of
+        true  -> {valid_json_eval:finish_acc(Merged), [Name | Names]};
         false -> apply_all(Rest, Instance, Context, Merged, [Name | Names])
     end.
 
@@ -206,6 +206,8 @@ message(<<"propertyNames">>) ->
 inapplicable(_Slots, #eval_context{format = flag}) ->
     valid_json_eval:empty_result(true);
 inapplicable(Slots, Context) ->
-    Units = [valid_json_unit:keyword(Keyword, true, none, Context)
-             || {Keyword, Slot} <- Slots, Slot =/= undefined],
+    Units = lists:append(
+              [valid_json_unit:keyword_units(
+                 Keyword, true, none, [], Context)
+               || {Keyword, Slot} <- Slots, Slot =/= undefined]),
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = Units}.

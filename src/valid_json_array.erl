@@ -83,8 +83,8 @@ elements(Keyword, Addr, Elements, Index) ->
         {I, Element} <- lists:zip(lists:seq(Index, Index + length(Elements) - 1),
                                   Elements)].
 
-%% Обрыв разрешён только в режиме flag; в остальных режимах выполняются оба
-%% keyword'а, потому что дерево units должно быть полным.
+%% Обрыв разрешён только в режиме flag; структурным форматам нужны diagnostics
+%% всех написанных keyword'ов, а не только первый провал.
 -spec evaluate([{binary(), role(), [application()] | undefined}], non_neg_integer(),
                #eval_context{}) -> #eval_result{}.
 evaluate(Written, Length, Context) ->
@@ -235,7 +235,7 @@ incomplete_decided(Valid) ->
           {[non_neg_integer()], non_neg_integer(), eval_error() | undefined,
            [#output_unit{}]}.
 scan(_Addr, [], _Index, _Context, Matched, ErrorCount, Error, Units) ->
-    {lists:reverse(Matched), ErrorCount, Error, lists:reverse(Units)};
+    {lists:reverse(Matched), ErrorCount, Error, Units};
 scan(Addr, [Element | Rest], Index, Context, Matched, ErrorCount, Error, Units) ->
     case branch(Addr, [<<"contains">>], Index, Element, Context) of
         #eval_result{valid = undefined, error = ErrorOne} ->
@@ -337,6 +337,8 @@ message(<<"maxContains">>) ->
 inapplicable(_Slots, #eval_context{format = flag}) ->
     valid_json_eval:empty_result(true);
 inapplicable(Slots, Context) ->
-    Units = [valid_json_unit:keyword(Keyword, true, none, Context)
-             || {Keyword, Slot} <- Slots, Slot =/= undefined],
+    Units = lists:append(
+              [valid_json_unit:keyword_units(
+                 Keyword, true, none, [], Context)
+               || {Keyword, Slot} <- Slots, Slot =/= undefined]),
     #eval_result{valid = true, evaluated = valid_json_evaluated:neutral(), units = Units}.

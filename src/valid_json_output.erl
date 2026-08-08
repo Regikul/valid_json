@@ -22,29 +22,18 @@ project(verbose, #eval_result{units = [Root]}) ->
 %% должно (validator-core.md, «Проекции output»).
 -spec basic(#output_unit{}) -> output().
 basic(#output_unit{valid = Valid} = Root) ->
-    (unit(Root))#{key(Valid) => [unit(Unit) || Unit <- flatten(Valid, Root)]}.
+    (unit(Root))#{key(Valid) =>
+                      [unit(Unit) || Unit <- Root#output_unit.nested,
+                                     carries(Valid, Unit)]}.
 
 key(false) -> <<"errors">>;
 key(true)  -> <<"annotations">>.
 
-%% Потомки в порядке обхода: своё дерево unit уже потерял, поэтому вложенность
-%% в плоском списке не печатается.
--spec flatten(boolean(), #output_unit{}) -> [#output_unit{}].
-flatten(Valid, #output_unit{nested = Nested}) ->
-    lists:append([[Unit || carries(Valid, Unit)] ++ descend(Valid, Unit) || Unit <- Nested]).
-
-%% Провалившийся schema object не производит аннотаций ни своими keywords, ни
-%% keywords своих подсхем (core.txt:1206), поэтому обход в него не спускается.
-%% Из дерева аннотации не исчезают: их показывает verbose. При провале корня
-%% обходится всё — units успешных ветвей остаются диагностическими.
--spec descend(boolean(), #output_unit{}) -> [#output_unit{}].
-descend(true, #output_unit{valid = false}) -> [];
-descend(Valid, Unit)                       -> flatten(Valid, Unit).
-
-%% В список попадает то, что несёт detail. Unit без него из дерева не исчезает:
-%% его показывает verbose. Ветвление своего сообщения не имеет и потому в
-%% плоском списке не видно, а провалившаяся boolean-схема видна: сообщение есть
-%% только у неё самой.
+%% Basic получает готовый плоский collector: вложенность уже не строилась.
+%% В список попадает то, что несёт detail с валидностью корня. Silent results
+%% существуют только в tree-стратегии для verbose. Ветвление своего сообщения
+%% не имеет и потому в basic не видно, а провалившаяся boolean-схема видна:
+%% сообщение есть только у неё самой.
 -spec carries(boolean(), #output_unit{}) -> boolean().
 carries(false, #output_unit{detail = {error, _}})     -> true;
 carries(true, #output_unit{detail = {annotation, _}}) -> true;
