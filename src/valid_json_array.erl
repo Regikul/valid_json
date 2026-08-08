@@ -114,7 +114,7 @@ keyword(Keyword, Role, Applications, Length, Context) ->
             Error#eval_result{evaluated = valid_json_evaluated:neutral(), units = []};
         #eval_result{valid = Valid, units = Units} ->
             #eval_result{valid     = Valid,
-                         evaluated = coverage(Role, Valid, Applied, Length),
+                         evaluated = coverage(Role, Valid, Applied, Length, Context),
                          units     = valid_json_unit:keyword_units(
                                        Keyword, Valid,
                                        detail(Role, Keyword, Valid, Applied, Length),
@@ -140,14 +140,18 @@ apply_all([{Tail, Index, Element, Addr} | Rest], Context, Result, Applied) ->
 %% длиной в число применённых схем, а если их хватило на весь массив, то и его
 %% целиком (validator-core.md, «Покрытие при успехе»). Провалившийся keyword
 %% аннотации не производит и потому покрытия не вносит.
--spec coverage(role(), boolean(), non_neg_integer(), non_neg_integer()) -> evaluated().
-coverage(_Role, false, _Applied, _Length) ->
+-spec coverage(role(), boolean(), non_neg_integer(), non_neg_integer(),
+               #eval_context{}) -> evaluated().
+coverage(_Role, _Valid, _Applied, _Length,
+         #eval_context{need_coverage = false}) ->
     valid_json_evaluated:neutral();
-coverage(rest, true, _Applied, _Length) ->
+coverage(_Role, false, _Applied, _Length, #eval_context{}) ->
+    valid_json_evaluated:neutral();
+coverage(rest, true, _Applied, _Length, #eval_context{}) ->
     valid_json_evaluated:items(all);
-coverage(prefix, true, Applied, Length) when Applied >= Length ->
+coverage(prefix, true, Applied, Length, #eval_context{}) when Applied >= Length ->
     valid_json_evaluated:items(all);
-coverage(prefix, true, Applied, _Length) ->
+coverage(prefix, true, Applied, _Length, #eval_context{}) ->
     valid_json_evaluated:items({Applied, []}).
 
 %% Аннотация keyword префикса — наибольший индекс, к которому он применился,
@@ -196,7 +200,7 @@ contains_complete(Min, Max, Marks, Instance, Matched, Units, Context) ->
               ++ bounded(<<"minContains">>, Min, at_least(Count, Min))
               ++ bounded(<<"maxContains">>, Max, at_most(Count, Max)),
     #eval_result{valid     = lists:all(fun({_K, Valid, _D, _N}) -> Valid end, Written),
-                 evaluated = marks(Marks, Found, Matched, Count, Length),
+                 evaluated = marks(Marks, Found, Matched, Count, Length, Context),
                  units     = lists:append(
                                [valid_json_unit:keyword_units(Keyword, Valid, Detail,
                                                               Nested, Context)
@@ -217,7 +221,7 @@ contains_incomplete(Min, Max, Marks, Known, Unknown, Error, Context) ->
             incomplete_decided(false);
         Least >= Lower,
         (Max =:= undefined orelse Most =< Max),
-        not (Marks andalso Context#eval_context.coverage) ->
+        not (Marks andalso Context#eval_context.need_coverage) ->
             incomplete_decided(true);
         true ->
             valid_json_eval:error_result(Error)
@@ -284,19 +288,23 @@ at_most(Count, Max)        -> Count =< Max.
 %% в Draft 2019-09 его аннотация на `unevaluatedItems` не влияет
 %% (validator-core.md, «Составные constraints»).
 -spec marks(boolean(), boolean(), [non_neg_integer()], non_neg_integer(),
-            non_neg_integer()) -> evaluated().
-marks(false, _Found, _Matched, _Count, _Length) ->
+            non_neg_integer(), #eval_context{}) -> evaluated().
+marks(_Marks, _Found, _Matched, _Count, _Length,
+      #eval_context{need_coverage = false}) ->
     valid_json_evaluated:neutral();
-marks(true, false, _Matched, _Count, _Length) ->
+marks(false, _Found, _Matched, _Count, _Length, #eval_context{}) ->
     valid_json_evaluated:neutral();
-marks(true, true, _Matched, Count, Length) when Length > 0, Count =:= Length ->
+marks(true, false, _Matched, _Count, _Length, #eval_context{}) ->
+    valid_json_evaluated:neutral();
+marks(true, true, _Matched, Count, Length, #eval_context{})
+  when Length > 0, Count =:= Length ->
     valid_json_evaluated:items(all);
-marks(true, true, Matched, _Count, _Length) ->
+marks(true, true, Matched, _Count, _Length, #eval_context{}) ->
     valid_json_evaluated:items({0, Matched}).
 
 %% Локация keyword следует схеме, локация инстанса — значению: индекс элемента
 %% двигает второй стек, а сегменты первого зависят от применившегося keyword.
-%% Флаг `coverage` при спуске гаснет: покрытие дочерней schema принадлежит ей
+%% Флаг `need_coverage` при спуске гаснет: покрытие дочерней schema принадлежит ей
 %% самой. В формате flag сохраняется только глубина инстанса для cycle guard,
 %% поэтому не строятся ни стеки локаций, ни binary-представление индекса
 %% (validator-core.md, «Контекст и cycle guard»).

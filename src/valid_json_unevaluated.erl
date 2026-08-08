@@ -81,14 +81,18 @@ keyword_result(Keyword, #eval_result{valid = Valid, units = Units},
                  false -> {error, message(Keyword)}
              end,
     #eval_result{valid     = Valid,
-                 evaluated = coverage(Valid, Evaluated),
+                 evaluated = coverage(Valid, Evaluated, Context),
                  units     = valid_json_unit:keyword_units(Keyword, Valid, Detail,
                                                            Units, Context)}.
 
 %% Провалившийся keyword аннотации не производит и потому покрытия не вносит.
--spec coverage(boolean(), evaluated()) -> evaluated().
-coverage(true, Evaluated)   -> Evaluated;
-coverage(false, _Evaluated) -> valid_json_evaluated:neutral().
+-spec coverage(boolean(), evaluated(), #eval_context{}) -> evaluated().
+coverage(_Valid, _Evaluated, #eval_context{need_coverage = false}) ->
+    valid_json_evaluated:neutral();
+coverage(true, Evaluated, #eval_context{}) ->
+    Evaluated;
+coverage(false, _Evaluated, #eval_context{}) ->
+    valid_json_evaluated:neutral().
 
 %% Родитель покрывает само свойство или индекс, а не то, что нашлось внутри
 %% значения: наверх идут применённые сегменты, а не покрытие их подсхем.
@@ -108,7 +112,7 @@ apply_all([{Segment, Value} | Rest], Addr, Keyword, Context, Result, Applied) ->
     end.
 
 %% Локация keyword следует схеме, локация инстанса — значению. Своего сегмента у
-%% ветви нет: она стоит на самом keyword. Флаг `coverage` при спуске гаснет:
+%% ветви нет: она стоит на самом keyword. Флаг `need_coverage` при спуске гаснет:
 %% покрытие дочерней schema принадлежит ей самой (validator-core.md, «Контекст
 %% и cycle guard»). В формате flag сохраняется только глубина инстанса, а
 %% ненаблюдаемые стеки локаций не строятся.

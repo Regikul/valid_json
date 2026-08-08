@@ -18,7 +18,7 @@ run(#{root := Root} = Compiled, Instance, Format) ->
                             dynamic_scope     = [Root],
                             guard             = sets:new(),
                             format            = Format,
-                            coverage          = false},
+                            need_coverage     = false},
     case eval({Root, <<>>}, Instance, Context) of
         #eval_result{valid = undefined, error = Error} -> {error, Error};
         #eval_result{} = Result ->
@@ -63,8 +63,8 @@ resolve({Rid, Pointer}, #{resources := Resources}) ->
 eval(Addr, Instance,
      #eval_context{keyword_location = Keywords,
                    instance_location = InstanceLocation,
-                   coverage = Coverage} = Context) ->
-    eval_at(Addr, Instance, Keywords, InstanceLocation, Coverage, Context).
+                   need_coverage = NeedCoverage} = Context) ->
+    eval_at(Addr, Instance, Keywords, InstanceLocation, NeedCoverage, Context).
 
 %% Branch передаёт изменившиеся координаты отдельно и не копирует весь context
 %% перед входом. После проверки guard здесь одним record update фиксируются и
@@ -72,7 +72,7 @@ eval(Addr, Instance,
 -spec eval_at(addr(), json(), [binary()], instance_location(), boolean(),
               #eval_context{}) -> #eval_result{}.
 eval_at({Rid, _} = Addr, Instance, Keywords,
-        {Depth, _Segments} = InstanceLocation, Coverage,
+        {Depth, _Segments} = InstanceLocation, NeedCoverage,
         #eval_context{guard = Guard, schema = Schema,
                       node = {CurrentRid, _}, dynamic_scope = Scope} = Context) ->
     Frame = {Addr, Depth},
@@ -90,7 +90,7 @@ eval_at({Rid, _} = Addr, Instance, Keywords,
                         instance_location = InstanceLocation,
                         dynamic_scope = DynamicScope,
                         guard = sets:add_element(Frame, Guard),
-                        coverage = Coverage},
+                        need_coverage = NeedCoverage},
             eval_node(resolve(Addr, Schema), Instance, Entered)
     end.
 
@@ -206,7 +206,7 @@ eval_node(false, _Instance, Context) ->
     #eval_result{valid = false, evaluated = valid_json_evaluated:neutral(),
                  units = node_units(false, {error, <<"schema is false">>}, [], Context)};
 eval_node(#node{constraints = Constraints, unevaluated = Unevaluated}, Instance, Context) ->
-    case discard_coverage(eval_all(Constraints, Unevaluated, Instance, Context)) of
+    case finish_coverage(eval_all(Constraints, Unevaluated, Instance, Context), Context) of
         #eval_result{valid = undefined} = Error ->
             %% Частично построенный node не является результатом вычисления и
             %% не должен попадать в diagnostic tree поглотившего его родителя.
@@ -222,10 +222,11 @@ eval_node(#node{constraints = Constraints, unevaluated = Unevaluated}, Instance,
 %% только в самом node: покрытие поднимается сюда по цепочке in-place
 %% applicators, и оборванный внутри неё `anyOf` потерял бы часть аннотаций.
 -spec eval_all([constraint()], [constraint()], json(), #eval_context{}) -> #eval_result{}.
-eval_all(Constraints, [], Instance, #eval_context{coverage = Coverage} = Context) ->
-    eval_constraints(Constraints, Instance, Context, not Coverage);
+eval_all(Constraints, [], Instance,
+         #eval_context{need_coverage = NeedCoverage} = Context) ->
+    eval_constraints(Constraints, Instance, Context, not NeedCoverage);
 eval_all(Constraints, Unevaluated, Instance, Context) ->
-    Awaited = Context#eval_context{coverage = true},
+    Awaited = Context#eval_context{need_coverage = true},
     case eval_constraints(Constraints, Instance, Awaited, false) of
         #eval_result{valid = undefined} = Error ->
             %% Без полной маски нельзя определить, к чему применять
@@ -365,13 +366,14 @@ marker(Keyword, Context) ->
 reference(Keyword, Addr, Instance,
           #eval_context{keyword_location = Location,
                         instance_location = InstanceLocation,
-                        format = Format, coverage = Coverage} = Context) ->
+                        format = Format,
+                        need_coverage = NeedCoverage} = Context) ->
     Keywords = case Format of
                    flag -> [];
                    _    -> [Keyword | Location]
                end,
     case eval_at(Addr, Instance, Keywords, InstanceLocation,
-                 Coverage, Context) of
+                 NeedCoverage, Context) of
         #eval_result{valid = undefined} = Error ->
             Error;
         #eval_result{valid = Valid, units = Units} = Result ->
@@ -432,12 +434,16 @@ recursive_target([Rid | Outer], Resources, Found) ->
                end,
     recursive_target(Outer, Resources, Declared).
 
-%% Провалившийся schema object не отдаёт эффективных аннотаций, но свои
-%% диагностические units сохраняет.
--spec discard_coverage(#eval_result{}) -> #eval_result{}.
-discard_coverage(#eval_result{valid = false} = Result) ->
+%% Покрытие покидает node только по явному запросу предка. Провалившийся или
+%% незавершённый schema object в любом случае не отдаёт effective annotations,
+%% но свои законченные diagnostic units сохраняет.
+-spec finish_coverage(#eval_result{}, #eval_context{}) -> #eval_result{}.
+finish_coverage(#eval_result{valid = false} = Result, _Context) ->
     Result#eval_result{evaluated = valid_json_evaluated:neutral()};
-discard_coverage(#eval_result{valid = undefined} = Result) ->
+finish_coverage(#eval_result{valid = undefined} = Result, _Context) ->
     Result#eval_result{evaluated = valid_json_evaluated:neutral()};
-discard_coverage(#eval_result{} = Result) ->
+finish_coverage(#eval_result{} = Result,
+                #eval_context{need_coverage = false}) ->
+    Result#eval_result{evaluated = valid_json_evaluated:neutral()};
+finish_coverage(#eval_result{} = Result, #eval_context{need_coverage = true}) ->
     Result.

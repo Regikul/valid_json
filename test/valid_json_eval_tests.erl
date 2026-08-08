@@ -209,6 +209,19 @@ coverage_test_() ->
     [{"успех", ?_assertEqual(neutral(), coverage([{type, [integer]}], 1))},
      {"провал", ?_assertEqual(neutral(), coverage([{type, [integer]}], 1.5))}].
 
+%% Публичный run не запрашивает служебную маску: покрывающие handlers строят её
+%% только для `unevaluated*` либо для явного внутреннего запроса теста.
+coverage_is_demand_driven_test_() ->
+    Artifact = object(),
+    Instance = #{<<"a">> => 1},
+    [?_assertEqual(neutral(),
+                   begin
+                       {ok, #eval_result{evaluated = Evaluated}} =
+                           valid_json_eval:run(Artifact, Instance, Format),
+                       expand(Evaluated)
+                   end)
+     || Format <- [flag, basic, detailed, verbose]].
+
 boolean_schema_test_() ->
     [?_assertEqual({ok, #{<<"valid">> => true}}, validate(true, 1)),
      ?_assertEqual({ok, #{<<"valid">> => false}}, validate(false, 1))].
@@ -245,6 +258,26 @@ mode_test_() ->
     [?_assertEqual([], units(Constraints, 1, flag)),
      ?_assertMatch([{<<"/type">>, false, _}, {<<"/const">>, true, none}],
                    located(Constraints, 1))].
+
+%% Basic и Detailed не материализуют successful assertion без detail; Verbose
+%% сохраняет его как silent result. Провал остаётся значимым во всех трёх
+%% структурных форматах.
+assertion_mode_units_test_() ->
+    Success = [{type, [string]}],
+    Failure = [{type, [string]}],
+    [?_assertMatch([#output_unit{nested = []}],
+                   units(Success, <<"value">>, basic)),
+     ?_assertMatch([#output_unit{nested = []}],
+                   units(Success, <<"value">>, detailed)),
+     ?_assertMatch([#output_unit{nested = [#output_unit{valid = true,
+                                                        detail = none}]}],
+                   units(Success, <<"value">>, verbose)),
+     ?_assertMatch([#output_unit{nested = [#output_unit{valid = false,
+                                                        detail = {error, _}}]}],
+                   units(Failure, 1, basic)),
+     ?_assertMatch([#output_unit{nested = [#output_unit{valid = false,
+                                                        detail = {error, _}}]}],
+                   units(Failure, 1, detailed))].
 
 %% Boolean-схема сегмента не добавляет: она стоит там же, где схема. Keywords у
 %% неё нет, поэтому сообщение о провале несёт её собственный unit.
@@ -688,7 +721,19 @@ object_overlap_test_() ->
                           {<<"/patternProperties/^b">>, [{minimum, 0}]},
                           {<<"/patternProperties/b$">>, [{maximum, 10}]},
                           {<<"/additionalProperties">>, false}]),
+    PatternAnnotation = fun(Instance) ->
+                                [Names] =
+                                    [Names || #output_unit{
+                                                  keyword_location =
+                                                      [<<"patternProperties">>],
+                                                  detail = {annotation, Names}}
+                                                   <- own(collect(Artifact, Instance,
+                                                                  verbose))],
+                                Names
+                        end,
     [?_assert(verdict(Artifact, #{<<"b">> => 5})),
+     %% Два совпавших паттерна применяются оба, но аннотация называет имя один раз.
+     ?_assertEqual([<<"b">>], PatternAnnotation(#{<<"b">> => 5})),
      %% Совпали оба паттерна, и нарушение любого из них видно.
      ?_assertNot(verdict(Artifact, #{<<"b">> => -1})),
      ?_assertNot(verdict(Artifact, #{<<"b">> => 11})),
@@ -712,8 +757,13 @@ object_units_test_() ->
 object_annotation_test_() ->
     %% Берутся только units самих keywords: units ветвей стоят глубже и говорят
     %% о своих значениях, а не о применении.
+    Normalize = fun({annotation, Names}) when is_list(Names) ->
+                        {annotation, lists:sort(Names)};
+                   (Detail) ->
+                        Detail
+                end,
     Details = fun(Instance) ->
-                      [{valid_json_location:pointer(Keywords), Detail}
+                      [{valid_json_location:pointer(Keywords), Normalize(Detail)}
                        || #output_unit{keyword_location = Keywords, detail = Detail}
                               <- own(collect(object(), Instance, verbose))]
               end,
@@ -1672,7 +1722,17 @@ verdict(Artifact, Instance) ->
     Valid.
 
 coverage_of(Artifact, Instance) ->
-    {ok, #eval_result{evaluated = Evaluated}} = valid_json_eval:run(Artifact, Instance, flag),
+    #{root := Root} = Artifact,
+    Context = #eval_context{schema            = Artifact,
+                            node              = {Root, <<>>},
+                            keyword_location  = [],
+                            instance_location = {0, []},
+                            dynamic_scope     = [Root],
+                            guard             = sets:new(),
+                            format            = flag,
+                            need_coverage     = true},
+    #eval_result{evaluated = Evaluated} =
+        valid_json_eval:eval({Root, <<>>}, Instance, Context),
     expand(Evaluated).
 
 %% Обе локации сразу: keyword следует схеме, инстанс — значению.
@@ -1736,8 +1796,7 @@ errors(Artifact, Instance) ->
     Errors.
 
 coverage(Constraints, Instance) ->
-    {ok, #eval_result{evaluated = Evaluated}} = run(schema_node(Constraints), Instance),
-    expand(Evaluated).
+    coverage_of(artifact(schema_node(Constraints)), Instance).
 
 run(Node, Instance) ->
     valid_json_eval:run(artifact(Node), Instance, flag).

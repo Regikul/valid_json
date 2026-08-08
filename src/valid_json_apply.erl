@@ -222,7 +222,7 @@ finish({Matched, Seen, Error, Evaluated, Units}) ->
 %% понадобиться `unevaluated*` выше по обходу.
 -spec stopped(stop(), tuple(), #eval_context{}) -> boolean().
 stopped(Stop, {Matched, Seen, _Error, _Evaluated, _Units},
-        #eval_context{format = flag, coverage = false}) ->
+        #eval_context{format = flag, need_coverage = false}) ->
     Stop(Matched, Seen);
 stopped(_Stop, _Acc, #eval_context{}) ->
     false.
@@ -240,7 +240,7 @@ all_of_outcome(_Matched, _Seen, undefined) ->
 all_of_outcome(_Matched, _Seen, Error) ->
     {error, Error}.
 
-any_of_outcome(Matched, _Error, #eval_context{coverage = false})
+any_of_outcome(Matched, _Error, #eval_context{need_coverage = false})
   when Matched > 0 ->
     {ok, true};
 any_of_outcome(Matched, undefined, _Context) ->
@@ -266,14 +266,14 @@ logical(_Keyword, {error, Error}, _Message, _Evaluated, _Units, _Context) ->
 -spec branch(addr(), binary(), [binary()], json(), #eval_context{}) -> #eval_result{}.
 branch(Addr, _Keyword, _Tail, Instance,
        #eval_context{format = flag, instance_location = InstanceLocation,
-                     coverage = Coverage} = Context) ->
+                     need_coverage = NeedCoverage} = Context) ->
     valid_json_eval:eval_at(Addr, Instance, [], InstanceLocation,
-                            Coverage, Context);
+                            NeedCoverage, Context);
 branch(Addr, Keyword, Tail, Instance, #eval_context{keyword_location = Location} = Context) ->
     #eval_context{instance_location = InstanceLocation,
-                  coverage = Coverage} = Context,
+                  need_coverage = NeedCoverage} = Context,
     valid_json_eval:eval_at(Addr, Instance, Tail ++ [Keyword | Location],
-                            InstanceLocation, Coverage, Context).
+                            InstanceLocation, NeedCoverage, Context).
 
 %% Applicator выпускает собственный unit написанного keyword, а units ветвей
 %% лежат внутри него. В режиме flag units не собираются вовсе. Сообщение `none`

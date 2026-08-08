@@ -89,11 +89,16 @@ missing_dependents(Dependencies, Object) ->
     Triggered = maps:filter(fun(Name, _) -> maps:is_key(Name, Object) end, Dependencies),
     lists:usort(missing(lists:append(maps:values(Triggered)), Object)).
 
-%% Чистые assertions не вносят покрытия. В режиме flag units не собираются:
-%% там ответ исчерпывается вердиктом.
+%% Чистые assertions не вносят покрытия. Flag не собирает units вовсе, а
+%% successful assertion не виден ни в Basic, ни в Detailed: у него нет detail
+%% или descendants. Verbose сохраняет такой silent result.
 -spec report(constraint(), boolean(), json(), #eval_context{}) -> #eval_result{}.
 report(_Constraint, Valid, _Instance, #eval_context{format = flag}) ->
     valid_json_eval:empty_result(Valid);
+report(_Constraint, true, _Instance, #eval_context{format = basic}) ->
+    valid_json_eval:empty_result(true);
+report(_Constraint, true, _Instance, #eval_context{format = detailed}) ->
+    valid_json_eval:empty_result(true);
 report(Constraint, Valid, Instance, Context) ->
     Units = valid_json_unit:keyword_units(
               keyword(Constraint), Valid,

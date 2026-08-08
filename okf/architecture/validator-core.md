@@ -287,16 +287,19 @@ Evaluator выполняет node в одном порядке, независи
 
 1. проверяет active-frame guard;
 2. добавляет resource в dynamic scope при входе через resource boundary;
-3. выполняет `constraints`, накапливая validity, coverage и diagnostic units;
-4. при необходимости выполняет `unevaluated` над оставшимися properties/items;
-5. очищает effective coverage, если весь schema object провалился;
+3. выполняет `constraints`, накапливая validity и diagnostic units, а coverage
+   — только когда его запросил предок либо собственный `unevaluated`;
+4. при наличии собственного `unevaluated` временно поднимает demand, выполняет
+   constraints над оставшимися properties/items и потребляет собранную маску;
+5. очищает effective coverage, если schema object провалился либо его не
+   запросил предок;
 6. передаёт плоские значимые units наверх для `basic` либо выпускает
    собственный tree unit с units выполненных constraints;
 7. снимает frame и resource scope, возвращает `#eval_result{}`.
 
 Порядок обычных constraints семантически свободен. Compiler может ставить дешёвые assertions раньше applicators ради `flag`; evaluator может обходить maps и накапливать sibling units в удобном ему порядке. Порядок элементов в `errors` и `annotations` не является API-контрактом. Потребитель различает результаты по `keywordLocation`, `absoluteKeywordLocation` и `instanceLocation`, а тесты ищут нужные units или сравнивают их как множества.
 
-Boolean `true` возвращает success с пустым coverage, boolean `false` — failure. Annotations boolean schemas не производят, но остаются обычными адресуемыми nodes: собственный unit выпускают и они, а поскольку keywords у них нет, сообщение о провале несёт этот unit сам.
+Boolean `true` возвращает success с нейтральным `evaluated`, boolean `false` — failure. Annotations boolean schemas не производят, но остаются обычными адресуемыми nodes: собственный unit выпускают и они, а поскольку keywords у них нет, сообщение о провале несёт этот unit сам.
 
 Resource boundary определяется target `rid`, а не синтаксическим видом перехода: child applicator тоже может войти во встроенный resource с `$id`. Поэтому dynamic scope обновляет общий evaluator вход после `resolve/2`, а не только обработчики ссылок.
 
@@ -311,18 +314,28 @@ Resource boundary определяется target `rid`, а не синтакс�
     units     :: [#output_unit{}]
 }).
 
--type evaluated() :: #{properties := sets:set(binary()),
+-type evaluated() :: neutral
+                   | #{properties := sets:set(binary()),
                        items      := items_mask()}.
 
 -type items_mask() :: all
                     | {Prefix :: non_neg_integer(), Sparse :: sets:set(non_neg_integer())}.
 ```
 
-Маска массива канонична: `Sparse` не содержит индексов меньше `Prefix` и не содержит сам `Prefix`. Нейтральный элемент — `{0, sets:new()}`.
+Нейтральный `evaluated` — атом `neutral`. Маска массива внутри развёрнутого
+результата канонична: `Sparse` не содержит индексов меньше `Prefix` и не
+содержит сам `Prefix`; её нейтральный элемент — `{0, sets:new()}`.
 
 Разделение на префикс и разреженную часть обязательно, потому что «максимальный покрытый индекс» неверен. `prefixItems`, `items` и `additionalItems` покрывают непрерывный префикс либо весь массив, но успешный `contains` отмечает произвольные indexes: на схеме `{"allOf": [{"contains": {"multipleOf": 2}}, {"contains": {"multipleOf": 3}}], "unevaluatedItems": {"multipleOf": 5}}` и инстансе `[2, 3, 4, 7, 8]` покрыты индексы 0, 1, 2 и 4, а индекс 3 обязан дойти до `unevaluatedItems`. Максимум дал бы 4 и признал массив покрытым целиком. При этом хранить одно множество всех индексов нельзя: `items` на массиве в сто тысяч элементов материализовал бы сто тысяч целых. Разреженную часть порождает только `contains`, и по спецификации при совпадении со всеми элементами его аннотация равна `true`, поэтому `Sparse` всегда меньше длины массива.
 
-`evaluated` собирается во всех форматах; `units` — во всех, кроме `flag`. Для `basic` это плоский collector, для `detailed` и `verbose` — дерево. При провале schema object его `evaluated` очищается; diagnostics сохраняются, но effective annotations такого node отбрасываются.
+`evaluated` — demand-driven служебный результат, а не часть output strategy.
+Публичный корень начинает с `need_coverage = false`; node поднимает demand,
+только если его маску ждёт `unevaluated*` в нём самом либо выше по цепочке
+in-place applicators. При `need_coverage = false` handlers не создают sets и
+возвращают `neutral`. Diagnostic units от этого независимы: `flag` не собирает
+их, `basic` использует плоский collector, `detailed` и `verbose` — дерево. При
+провале schema object его `evaluated` очищается даже по запросу; diagnostics
+сохраняются, но effective annotations такого node отбрасываются.
 
 | Конструкция | Покрытие при успехе |
 | --- | --- |
@@ -332,7 +345,10 @@ Resource boundary определяется target `rid`, а не синтакс�
 | `if`/`then`/`else` | вклад `if` плюс выбранная ветвь |
 | `$ref` | покрытие цели |
 
-Annotations, нужные `unevaluated*`, не смешиваются с output details. `evaluated()` — специализированная маска: property names и покрытые array indexes. Единственное правило отбрасывания — пустая маска провалившегося schema object.
+Annotations, нужные `unevaluated*`, не смешиваются с output details.
+`evaluated()` — специализированная маска: property names и покрытые array
+indexes. Она покидает успешный node только по явному demand предка; у
+провалившегося node маска всегда `neutral`.
 
 Вклад в маску массива дают только эти constraints, каждый при собственном успехе:
 
@@ -409,7 +425,7 @@ output fixtures и output schema требуют JSON Pointer; compatibility poli
 
 В tree-стратегии `detailed`/`verbose` каждый constraint порождает unit. Поэтому присутствие `properties: {}`, no-op assertions и полная иерархия `verbose` восстанавливаются без исходной схемы или presence mask; `detailed` фильтрует и сжимает это дерево при проекции. `basic` не материализует silent results, которые его проекция всё равно отбросила бы; `flag` не создаёт units вовсе.
 
-`flag` — единственный режим с short-circuit, что соответствует рекомендации спецификации ([core.txt:3048](../references/json-schema/draft-2020-12/core.txt)). Даже в нём обрыв запрещён внутри node с непустым `unevaluated`, пока не рассчитано нужное покрытие, и запрет этот действует не только на сам node: успех первой ветви `anyOf`, стоящего сколь угодно глубоко под цепочкой in-place applicators, не отменяет аннотаций остальных ветвей. Переносит запрет поле `coverage` в контексте.
+`flag` — единственный режим с short-circuit, что соответствует рекомендации спецификации ([core.txt:3048](../references/json-schema/draft-2020-12/core.txt)). Даже в нём обрыв запрещён внутри node с непустым `unevaluated`, пока не рассчитано нужное покрытие, и запрет этот действует не только на сам node: успех первой ветви `anyOf`, стоящего сколь угодно глубоко под цепочкой in-place applicators, не отменяет аннотаций остальных ветвей. Demand и запрет обрыва переносит поле `need_coverage` в контексте.
 
 ## Проекции output
 
@@ -444,8 +460,8 @@ Evaluator выбирает стратегию по `#eval_context.format`: `basi
     instance_location :: [binary()],
     dynamic_scope     :: [rid()],
     guard             :: sets:set(frame()),
-    mode              :: format(),
-    coverage          :: boolean()
+    format            :: format(),
+    need_coverage     :: boolean()
 }).
 
 -type frame() :: {addr(), [binary()]}.
@@ -453,7 +469,21 @@ Evaluator выбирает стратегию по `#eval_context.format`: `basi
 
 `node` — адрес вычисляемого сейчас node. Отдельного поля под текущий resource нет: это первая половина адреса, и граница определяется её сравнением. Вторая половина, pointer, задаёт путь от корня resource и потому полностью определяет абсолютную локацию всех units этого node. Обработчик сохраняет этот адрес в unit, а проекция позднее материализует публичную локацию; от родителя она не наследуется.
 
-`coverage` говорит, ждёт ли покрытие этого поддерева какой-нибудь `unevaluated*` выше по обходу. Одного взгляда на собственный `#node.unevaluated` для этого мало: покрытие поднимается по цепочке in-place applicators, поэтому запрет обрыва обязан идти вниз по ней же. Флаг поднимается на входе в node с непустым `unevaluated` и гаснет при спуске в дочернюю schema через `properties`, `items`, `contains`, `propertyNames` и сами `unevaluated*`: покрытие такой schema принадлежит ей самой и наверх не идёт, а значит под ней обрыв снова разрешён.
+`need_coverage` говорит не о наличии уже построенной маски, а о demand: ждёт ли
+её от этого поддерева какой-нибудь `unevaluated*` выше по обходу. При `true`
+handlers материализуют `evaluated`, а логические applicators не обрывают
+перебор успешных ветвей. При `false` маска остаётся `neutral`, независимо от
+output format.
+
+Одного взгляда на собственный `#node.unevaluated` для inherited demand мало:
+покрытие поднимается по цепочке in-place applicators, поэтому demand обязан
+идти вниз по ней же. Node с собственным непустым `unevaluated` выполняет
+обычные constraints с временным `need_coverage = true`, передаёт полученную
+маску своим `unevaluated*`, а перед возвратом очищает её, если входящий demand
+был false. Флаг гаснет при спуске в дочернюю schema через `properties`,
+`items`, `contains`, `propertyNames` и сами `unevaluated*`: покрытие такой
+schema принадлежит ей самой и наверх не идёт, а значит под ней обрыв снова
+разрешён.
 
 Guard — множество активных кадров, не глобальный visited set. Кадр добавляется на входе в node и удаляется на выходе: повтор пары schema/instance внутри собственного поддерева означает цикл, тот же повтор в соседней ветви допустим. Dynamic scope в кадр не входит, и `$dynamicRef` этого не изменил: новый resource попадает в scope только с внутреннего конца, а лексический fallback сам вносит resource своей цели, поэтому у повторно встреченной пары динамическая цель та же, что и в прошлый раз. Обратный вариант — положить в кадр сам стек — сломал бы детекцию: стек растёт неограниченно, и кадр не повторился бы никогда.
 
