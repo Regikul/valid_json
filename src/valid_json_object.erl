@@ -174,15 +174,19 @@ apply_all([{Tail, Name, Addr} | Rest], Instance, Context, Result, Names) ->
 %% Локация keyword следует схеме, локация инстанса — значению: имя свойства
 %% двигает второй стек, а сегменты первого зависят от применившегося keyword.
 %% Флаг `coverage` при спуске гаснет: покрытие дочерней schema принадлежит ей
-%% самой (validator-core.md, «Контекст и cycle guard»).
+%% самой. В формате flag сохраняется только глубина инстанса для cycle guard:
+%% сами стеки локаций не войдут в output и потому не строятся
+%% (validator-core.md, «Контекст и cycle guard»).
 -spec branch(addr(), [binary()], binary(), json(), #eval_context{}) -> #eval_result{}.
+branch(Addr, _Tail, _Name, Value,
+       #eval_context{format = flag,
+                     instance_location = {Depth, _Instance}} = Context) ->
+    valid_json_eval:eval_at(Addr, Value, [], {Depth + 1, []}, false, Context);
 branch(Addr, Tail, Name, Value, Context) ->
     #eval_context{keyword_location = Keywords,
                   instance_location = {Depth, Instance}} = Context,
-    Nested = Context#eval_context{keyword_location  = Tail ++ Keywords,
-                                  instance_location = {Depth + 1, [Name | Instance]},
-                                  coverage          = false},
-    valid_json_eval:eval(Addr, Value, Nested).
+    valid_json_eval:eval_at(Addr, Value, Tail ++ Keywords,
+                            {Depth + 1, [Name | Instance]}, false, Context).
 
 -spec detail(binary(), boolean(), [binary()]) -> detail().
 detail(_Keyword, true, Applied) -> {annotation, Applied};

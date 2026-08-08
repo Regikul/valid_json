@@ -263,9 +263,16 @@ logical(_Keyword, {error, Error}, _Message, _Evaluated, _Units, _Context) ->
 %% инстанса не меняется: логические applicators применяют дочернюю schema к тому
 %% же значению.
 -spec branch(addr(), binary(), [binary()], json(), #eval_context{}) -> #eval_result{}.
+branch(Addr, _Keyword, _Tail, Instance,
+       #eval_context{format = flag, instance_location = InstanceLocation,
+                     coverage = Coverage} = Context) ->
+    valid_json_eval:eval_at(Addr, Instance, [], InstanceLocation,
+                            Coverage, Context);
 branch(Addr, Keyword, Tail, Instance, #eval_context{keyword_location = Location} = Context) ->
-    Nested = Context#eval_context{keyword_location = Tail ++ [Keyword | Location]},
-    valid_json_eval:eval(Addr, Instance, Nested).
+    #eval_context{instance_location = InstanceLocation,
+                  coverage = Coverage} = Context,
+    valid_json_eval:eval_at(Addr, Instance, Tail ++ [Keyword | Location],
+                            InstanceLocation, Coverage, Context).
 
 %% Applicator выпускает собственный unit написанного keyword, а units ветвей
 %% лежат внутри него. В режиме flag units не собираются вовсе. Сообщение `none`

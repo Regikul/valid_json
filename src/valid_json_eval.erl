@@ -4,7 +4,7 @@
 
 -include("valid_json_core.hrl").
 
--export([run/3, eval/3, resolve/2, conjoin/2, conjoin_acc/2,
+-export([run/3, eval/3, eval_at/6, resolve/2, conjoin/2, conjoin_acc/2,
          conjoin_acc_discard_coverage/2, finish_acc/1, empty_result/1,
          error_result/1]).
 
@@ -41,15 +41,38 @@ resolve({Rid, Pointer}, #{resources := Resources}) ->
 %% пришлось бы хешировать целиком на каждом уровне, и стоимость вычисления
 %% росла бы квадратом глубины инстанса.
 -spec eval(addr(), json(), #eval_context{}) -> #eval_result{}.
-eval(Addr, Instance, #eval_context{guard = Guard} = Context) ->
-    {Depth, _Segments} = Context#eval_context.instance_location,
+eval(Addr, Instance,
+     #eval_context{keyword_location = Keywords,
+                   instance_location = InstanceLocation,
+                   coverage = Coverage} = Context) ->
+    eval_at(Addr, Instance, Keywords, InstanceLocation, Coverage, Context).
+
+%% Branch передаёт изменившиеся координаты отдельно и не копирует весь context
+%% перед входом. После проверки guard здесь одним record update фиксируются и
+%% координаты ветви, и node/resource scope нового кадра.
+-spec eval_at(addr(), json(), [binary()], instance_location(), boolean(),
+              #eval_context{}) -> #eval_result{}.
+eval_at({Rid, _} = Addr, Instance, Keywords,
+        {Depth, _Segments} = InstanceLocation, Coverage,
+        #eval_context{guard = Guard, schema = Schema,
+                      node = {CurrentRid, _}, dynamic_scope = Scope} = Context) ->
     Frame = {Addr, Depth},
     case sets:is_element(Frame, Guard) of
         true ->
             error_result({no_progress, Addr});
         false ->
-            Entered = enter_node(Addr, sets:add_element(Frame, Guard), Context),
-            eval_node(resolve(Addr, Context#eval_context.schema), Instance, Entered)
+            DynamicScope = case Rid =:= CurrentRid of
+                               true  -> Scope;
+                               false -> [Rid | Scope]
+                           end,
+            Entered = Context#eval_context{
+                        node = Addr,
+                        keyword_location = Keywords,
+                        instance_location = InstanceLocation,
+                        dynamic_scope = DynamicScope,
+                        guard = sets:add_element(Frame, Guard),
+                        coverage = Coverage},
+            eval_node(resolve(Addr, Schema), Instance, Entered)
     end.
 
 %% Ошибка ветви остаётся обычным значением до ближайшей boolean-операции.
@@ -151,17 +174,6 @@ conjunction(true, true) -> true.
 
 first_error(undefined, Error) -> Error;
 first_error(Error, _Later) -> Error.
-
-%% Граница ресурса определяется целевым rid, а не видом перехода: это первая
-%% половина адреса, и сравнивается именно она.
--spec enter_node(addr(), sets:set(frame()), #eval_context{}) -> #eval_context{}.
-enter_node({Rid, _} = Addr, Guard,
-           #eval_context{node = {Rid, _}} = Context) ->
-    Context#eval_context{node = Addr, guard = Guard};
-enter_node({Rid, _} = Addr, Guard,
-           #eval_context{dynamic_scope = Scope} = Context) ->
-    Context#eval_context{node = Addr, guard = Guard,
-                         dynamic_scope = [Rid | Scope]}.
 
 %% Boolean true даёт успех с пустым покрытием, false — отказ. Аннотаций boolean
 %% не производит, но остаётся обычным адресуемым node и потому выпускает
@@ -310,12 +322,19 @@ marker(Keyword, Context) ->
 %% Reference применяет target к тому же instance через общий вход evaluator'а:
 %% только так сохраняются resource scope и cycle guard. Keyword location
 %% продолжает путь через сегмент самого keyword, а его absolute location
-%% указывает на каноническую target schema, как требует output contract.
+%% указывает на каноническую target schema, как требует output contract. В
+%% режиме flag location не наблюдаема и её стек не материализуется.
 -spec reference(binary(), addr(), json(), #eval_context{}) -> #eval_result{}.
 reference(Keyword, Addr, Instance,
-          #eval_context{keyword_location = Location, format = Format} = Context) ->
-    Target = Context#eval_context{keyword_location = [Keyword | Location]},
-    case eval(Addr, Instance, Target) of
+          #eval_context{keyword_location = Location,
+                        instance_location = InstanceLocation,
+                        format = Format, coverage = Coverage} = Context) ->
+    Keywords = case Format of
+                   flag -> [];
+                   _    -> [Keyword | Location]
+               end,
+    case eval_at(Addr, Instance, Keywords, InstanceLocation,
+                 Coverage, Context) of
         #eval_result{valid = undefined} = Error ->
             Error;
         #eval_result{valid = Valid, units = Units} = Result ->

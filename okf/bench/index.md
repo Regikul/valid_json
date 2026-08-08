@@ -4,3 +4,4 @@
 * [Влияние trust_schema на холодную компиляцию](01-trust-schema.md) - Стоимость meta-schema validation и производительность trusted cold-path valid_json на Draft 6 и Draft 2020-12.
 * [Профиль горячей валидации](02-validate-profile.md) - Распределение вызовов, heap allocations и времени внутри valid_json:validate/3 на Draft 2020-12.
 * [Результаты оптимизации output locations](03-location-output-optimization.md) - Повторный benchmark после ленивого построения absoluteKeywordLocation и fast paths сериализации locations.
+* [Прогресс оптимизации горячей валидации](04-validation-optimization-progress.md) - Кумулятивный эффект оптимизаций evaluator и новый профиль большого массива для всех output formats.

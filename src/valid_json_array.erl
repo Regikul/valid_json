@@ -297,17 +297,21 @@ marks(true, true, Matched, _Count, _Length) ->
 %% Локация keyword следует схеме, локация инстанса — значению: индекс элемента
 %% двигает второй стек, а сегменты первого зависят от применившегося keyword.
 %% Флаг `coverage` при спуске гаснет: покрытие дочерней schema принадлежит ей
-%% самой (validator-core.md, «Контекст и cycle guard»).
+%% самой. В формате flag сохраняется только глубина инстанса для cycle guard,
+%% поэтому не строятся ни стеки локаций, ни binary-представление индекса
+%% (validator-core.md, «Контекст и cycle guard»).
 -spec branch(addr(), [binary()], non_neg_integer(), json(), #eval_context{}) ->
           #eval_result{}.
+branch(Addr, _Tail, _Index, Element,
+       #eval_context{format = flag,
+                     instance_location = {Depth, _Instance}} = Context) ->
+    valid_json_eval:eval_at(Addr, Element, [], {Depth + 1, []}, false, Context);
 branch(Addr, Tail, Index, Element, Context) ->
     #eval_context{keyword_location = Keywords,
                   instance_location = {Depth, Instance}} = Context,
-    Nested = Context#eval_context{keyword_location  = Tail ++ Keywords,
-                                  instance_location = {Depth + 1,
-                                                       [integer_to_binary(Index) | Instance]},
-                                  coverage          = false},
-    valid_json_eval:eval(Addr, Element, Nested).
+    valid_json_eval:eval_at(
+      Addr, Element, Tail ++ Keywords,
+      {Depth + 1, [integer_to_binary(Index) | Instance]}, false, Context).
 
 %% Keyword префикса раздаёт по схеме на индекс, keyword остатка — одну схему на
 %% всё, что осталось; отсюда и разное число в тексте.
