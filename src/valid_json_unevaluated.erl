@@ -117,17 +117,14 @@ apply_all([{Segment, Value} | Rest], Addr, Keyword, Context, Result, Applied) ->
 %% и cycle guard»). В формате flag consuming-переход задаётся отдельным входом,
 %% а ненаблюдаемые стеки локаций не строятся.
 -spec branch(addr(), binary(), binary(), json(), #eval_context{}) -> #eval_result{}.
-branch(Addr, _Keyword, _Segment, Value,
-       #eval_context{format = flag,
-                     instance_location = {Depth, _Instance}} = Context) ->
-    valid_json_eval:eval_child_at(
-      Addr, Value, [], {Depth + 1, []}, false, Context);
+branch(Addr, _Keyword, _Segment, Value, #eval_context{format = flag} = Context) ->
+    valid_json_eval:eval_child_at(Addr, Value, [], [], false, Context);
 branch(Addr, Keyword, Segment, Value, Context) ->
     #eval_context{keyword_location = Keywords,
-                  instance_location = {Depth, Instance}} = Context,
+                  instance_location = Instance} = Context,
     valid_json_eval:eval_child_at(
       Addr, Value, [Keyword | Keywords],
-      {Depth + 1, [Segment | Instance]}, false, Context).
+      [Segment | Instance], false, Context).
 
 -spec message(binary()) -> binary().
 message(<<"unevaluatedProperties">>) ->

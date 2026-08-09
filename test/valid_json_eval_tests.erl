@@ -1739,7 +1739,7 @@ coverage_of(Artifact, Instance) ->
     Context = #eval_context{schema            = Artifact,
                             node              = {Root, <<>>},
                             keyword_location  = [],
-                            instance_location = {0, []},
+                            instance_location = [],
                             dynamic_scope     = [Root],
                             guard             = #{},
                             format            = flag,

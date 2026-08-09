@@ -310,17 +310,14 @@ marks(true, true, Matched, _Count, _Length, #eval_context{}) ->
 %% (validator-core.md, «Контекст и cycle guard»).
 -spec branch(addr(), [binary()], non_neg_integer(), json(), #eval_context{}) ->
           #eval_result{}.
-branch(Addr, _Tail, _Index, Element,
-       #eval_context{format = flag,
-                     instance_location = {Depth, _Instance}} = Context) ->
-    valid_json_eval:eval_child_at(
-      Addr, Element, [], {Depth + 1, []}, false, Context);
+branch(Addr, _Tail, _Index, Element, #eval_context{format = flag} = Context) ->
+    valid_json_eval:eval_child_at(Addr, Element, [], [], false, Context);
 branch(Addr, Tail, Index, Element, Context) ->
     #eval_context{keyword_location = Keywords,
-                  instance_location = {Depth, Instance}} = Context,
+                  instance_location = Instance} = Context,
     valid_json_eval:eval_child_at(
       Addr, Element, Tail ++ Keywords,
-      {Depth + 1, [integer_to_binary(Index) | Instance]}, false, Context).
+      [integer_to_binary(Index) | Instance], false, Context).
 
 %% Keyword префикса раздаёт по схеме на индекс, keyword остатка — одну схему на
 %% всё, что осталось; отсюда и разное число в тексте.

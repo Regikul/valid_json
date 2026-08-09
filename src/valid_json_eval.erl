@@ -15,7 +15,7 @@ run(#{root := Root} = Compiled, Instance, Format) ->
     Context = #eval_context{schema            = Compiled,
                             node              = {Root, <<>>},
                             keyword_location  = [],
-                            instance_location = {0, []},
+                            instance_location = [],
                             dynamic_scope     = [Root],
                             guard             = #{},
                             format            = Format,

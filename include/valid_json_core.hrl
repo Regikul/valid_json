@@ -117,10 +117,9 @@
     error = undefined :: eval_error() | undefined
 }).
 
-%% Локация инстанса несёт глубину рядом с сегментами. Структурные форматы
-%% используют оба значения, а flag сохраняет только дешёвую глубину на границах
-%% consuming applicators.
--type instance_location() :: {Depth :: non_neg_integer(), [binary()]}.
+%% Локация инстанса нужна структурным форматам; flag её не строит и передаёт
+%% пустой стек.
+-type instance_location() :: [binary()].
 -type eval_guard() :: #{addr() => true}.
 
 %% node — адрес вычисляемого сейчас node. Отдельного поля под текущий resource

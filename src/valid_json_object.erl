@@ -387,17 +387,14 @@ coverage(false, _Applied, #eval_context{}) ->
 %% ей самой. В формате flag не строятся ненаблюдаемые стеки локаций.
 -spec branch(addr(), branch_location(), binary(), json(), #eval_context{}) ->
           #eval_result{}.
-branch(Addr, _Location, _Name, Value,
-       #eval_context{format = flag,
-                     instance_location = {Depth, _Instance}} = Context) ->
-    valid_json_eval:eval_child_at(
-      Addr, Value, [], {Depth + 1, []}, false, Context);
+branch(Addr, _Location, _Name, Value, #eval_context{format = flag} = Context) ->
+    valid_json_eval:eval_child_at(Addr, Value, [], [], false, Context);
 branch(Addr, Location, Name, Value, Context) ->
     #eval_context{keyword_location = Keywords,
-                  instance_location = {Depth, Instance}} = Context,
+                  instance_location = Instance} = Context,
     valid_json_eval:eval_child_at(
       Addr, Value, branch_keywords(Location, Name, Keywords),
-      {Depth + 1, [Name | Instance]}, false, Context).
+      [Name | Instance], false, Context).
 
 -spec branch_keywords(branch_location(), binary(), [binary()]) -> [binary()].
 branch_keywords(properties, Name, Keywords) ->

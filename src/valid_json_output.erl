@@ -150,23 +150,56 @@ reference(#output_unit{}) ->
 -spec unit(#output_unit{}) -> output().
 unit(#output_unit{valid = Valid, keyword_location = Keywords,
                   instance_location = Instance, detail = Detail} = OutputUnit) ->
-    Unit = #{<<"valid">>            => Valid,
-             <<"keywordLocation">>  => valid_json_location:pointer(Keywords),
-             <<"instanceLocation">> => valid_json_location:pointer(Instance)},
-    detail(Detail, absolute(OutputUnit, Unit)).
+    assemble(Valid,
+             valid_json_location:pointer(Keywords),
+             valid_json_location:pointer(Instance),
+             absolute(OutputUnit),
+             Detail).
 
-%% Анонимный resource URI не синтезирует, поэтому ключ просто отсутствует.
--spec absolute(#output_unit{}, output()) -> output().
-absolute(#output_unit{schema_location = {anonymous, _Pointer}}, Unit) ->
-    Unit;
-absolute(#output_unit{kind = schema, schema_location = Location}, Unit) ->
-    Unit#{<<"absoluteKeywordLocation">> => valid_json_location:fragment(Location, none)};
+%% Анонимный resource URI не синтезирует, поэтому абсолютной локации у него нет.
+-spec absolute(#output_unit{}) -> none | uri().
+absolute(#output_unit{schema_location = {anonymous, _Pointer}}) ->
+    none;
+absolute(#output_unit{kind = schema, schema_location = Location}) ->
+    valid_json_location:fragment(Location, none);
 absolute(#output_unit{kind = keyword, schema_location = Location,
-                      keyword_location = [Keyword | _]}, Unit) ->
-    Unit#{<<"absoluteKeywordLocation">> =>
-              valid_json_location:fragment(Location, Keyword)}.
+                      keyword_location = [Keyword | _]}) ->
+    valid_json_location:fragment(Location, Keyword).
 
--spec detail(detail(), output()) -> output().
-detail({error, Message}, Unit)    -> Unit#{<<"error">> => Message};
-detail({annotation, Value}, Unit) -> Unit#{<<"annotation">> => Value};
-detail(none, Unit)                -> Unit.
+%% Добавление ключа к готовому map копирует и его, и tuple ключей, поэтому
+%% сборка в три приёма стоила дороже самих значений. Набор ключей известен
+%% заранее, и каждое его сочетание собирается одним литералом: tuple ключей
+%% уходит в литеральный пул, а map выделяется однажды. Порядок пар значения не
+%% имеет — flatmap хранит ключи в термовом порядке.
+-spec assemble(boolean(), pointer(), pointer(), none | uri(), detail()) -> output().
+assemble(Valid, Keyword, Instance, none, none) ->
+    #{<<"valid">>            => Valid,
+      <<"keywordLocation">>  => Keyword,
+      <<"instanceLocation">> => Instance};
+assemble(Valid, Keyword, Instance, none, {error, Message}) ->
+    #{<<"valid">>            => Valid,
+      <<"keywordLocation">>  => Keyword,
+      <<"instanceLocation">> => Instance,
+      <<"error">>            => Message};
+assemble(Valid, Keyword, Instance, none, {annotation, Value}) ->
+    #{<<"valid">>            => Valid,
+      <<"keywordLocation">>  => Keyword,
+      <<"instanceLocation">> => Instance,
+      <<"annotation">>       => Value};
+assemble(Valid, Keyword, Instance, Absolute, none) ->
+    #{<<"valid">>                   => Valid,
+      <<"keywordLocation">>         => Keyword,
+      <<"instanceLocation">>        => Instance,
+      <<"absoluteKeywordLocation">> => Absolute};
+assemble(Valid, Keyword, Instance, Absolute, {error, Message}) ->
+    #{<<"valid">>                   => Valid,
+      <<"keywordLocation">>         => Keyword,
+      <<"instanceLocation">>        => Instance,
+      <<"absoluteKeywordLocation">> => Absolute,
+      <<"error">>                   => Message};
+assemble(Valid, Keyword, Instance, Absolute, {annotation, Value}) ->
+    #{<<"valid">>                   => Valid,
+      <<"keywordLocation">>         => Keyword,
+      <<"instanceLocation">>        => Instance,
+      <<"absoluteKeywordLocation">> => Absolute,
+      <<"annotation">>              => Value}.

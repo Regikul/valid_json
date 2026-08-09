@@ -57,7 +57,7 @@ schema(Valid, Detail, Nested, #eval_context{keyword_location = Location} = Conte
 -spec build(unit_kind(), boolean(), [binary()], detail(), [#output_unit{}],
             #eval_context{}) -> #output_unit{}.
 build(Kind, Valid, Location, Detail, Nested,
-      #eval_context{node = Node, instance_location = {_Depth, Instance}}) ->
+      #eval_context{node = Node, instance_location = Instance}) ->
     #output_unit{kind              = Kind,
                  valid             = Valid,
                  schema_location   = Node,
