@@ -381,8 +381,9 @@
 
 ## P8 — format, content и optional profiles
 
-Оставшийся выбор optional profiles отложен. Незавершённая P8 не блокирует
-независимый Runtime-чеклист ниже.
+Выбор optional profiles завершён. P8 остаётся незавершённой из-за отсутствия
+полной Format-Assertion vocabulary; это не блокирует независимый
+Runtime-чеклист ниже.
 
 - [ ] **Фаза P8 завершена**
 - [x] Выбрать алгоритмы и состав поддерживаемых Format-Assertion attributes:
@@ -393,9 +394,10 @@
   поддержана, потому что требует полной проверки всех имён.
 - [x] Зафиксировать таблицу: format name, dialect, annotation/assertion,
   алгоритм и ограничения. Таблица лежит в
-  `okf/architecture/format-attributes.md`. Столбца dialect в ней нет: набор
-  имён в обоих диалектах один и тот же, и это сказано словами вместе с тем,
-  чем диалекты действительно расходятся — способом включения вердикта.
+  `okf/architecture/format-attributes.md`. Столбца dialect в ней нет: один и
+  тот же набор реализованных алгоритмов используется во всех поддерживаемых
+  dialects, а различия закреплены составом suite-профиля и способом включения
+  вердикта.
 - [~] Реализовать выбор между annotation и assertion для `format` по активным
   vocabularies и compile options: сама annotation сделана в P6. По compile
   options `assert_format` доходит до IR и включает проверку строки по таблице
@@ -420,24 +422,26 @@
   внутрь не спускается, потому что подсхему спецификация не вычисляет вовсе и
   отвергать из-за неё всю схему не за что. Форму этого значения проверяет
   метасхема, а аннотацией становится сама подсхема.
-- [ ] Явно выбрать остальные optional profiles, поддерживаемые библиотекой.
-- [x] Подключить к runner обязательный `content.json` обоих dialects: он
+- [x] Явно выбрать остальные optional profiles, поддерживаемые библиотекой:
+  `bignum`, `id`, `non-bmp-regex` и `unknownKeyword` выбраны во всех четырёх
+  dialects; `anchor` и `no-schema` — в Draft 2019-09/2020-12; cross-draft — во
+  всех трёх dialects, где файл есть; `dynamicRef` — в Draft 2020-12. За
+  пределами профиля оставлены ECMA-262-only regex, `float-overflow`, legacy
+  `dependencies` в новых dialects, ссылки на schema внутри unknown keyword,
+  content assertions Draft 7 и полная Format-Assertion vocabulary.
+- [x] Подключить к runner обязательный `content.json` Draft 2019-09/2020-12: он
   целиком написан через content keywords этой фазы. Оба файла подключены
   целиком и проходят, а отложенных компилятором keywords не осталось вовсе.
-- [~] Подключить выбранные `optional/format`, content и прочие optional files к
-  runner. Из профиля format подключены шестнадцать файлов обоих диалектов —
-  `date.json`, `time.json`, `date-time.json`, `duration.json`, `email.json`,
-  `hostname.json`, `ipv4.json`, `ipv6.json`, `uri.json`,
-  `uri-reference.json`, `uri-template.json`, `json-pointer.json` и
-  `relative-json-pointer.json`, `uuid.json`, `regex.json` и `unknown.json`;
-  схемы файлов директории `optional/format/`
-  компилируются с `{assert_format, true}`, а обязательный `format.json` остаётся
-  с умолчанием. Четыре IDN/IRI-файла исключены намеренно. Прочие optional
-  profiles ещё не выбраны пунктом выше.
-- [ ] Задокументировать результаты дополнительных capability profiles и все
-  намеренные исключения.
-- [ ] Приёмка P8: выбранные optional profiles проходят без необъявленных
-  исключений.
+- [x] Подключить выбранные `optional/format`, content и прочие optional files к
+  runner. Format-профиль содержит 10 файлов Draft 6, 14 Draft 7 и по 16 Draft
+  2019-09/2020-12; их схемы компилируются с `{assert_format, true}`, а
+  обязательный `format.json` остаётся с умолчанием. Вместе с non-format
+  profiles добавлены 72 группы и 809 cases, итоговая перепись — `{1355, 6125}`.
+- [x] Задокументировать результаты дополнительных capability profiles и все
+  намеренные исключения в README и conformance policy.
+- [x] Приёмка P8: выбранные optional profiles проходят без необъявленных
+  исключений; `./silent_rebar3 as ci conformance` выполняет 6136 тестов без
+  провалов.
 
 ## P9 — Draft 6, Draft 7 и legacy cross-dialect ссылки
 
@@ -672,6 +676,22 @@ Runtime не входит в conformance-фазы и развивается от
   evaluator и output builder.
 - [ ] После закрытия каждой фазы обновлять README с фактически подтверждённым
   уровнем поддержки.
-- [ ] Не включать в профиль `optional/refOfUnknownKeyword`, два
-  high-precision float cases и задокументированные ECMA-262/PCRE расхождения,
+- [ ] Не включать в профиль `optional/refOfUnknownKeyword`, четыре
+  `float-overflow` cases и задокументированные ECMA-262/PCRE расхождения,
   пока для них не принято отдельное решение.
+- [ ] Решить, опускать ли `absoluteKeywordLocation` там, где спецификация это
+  разрешает. Core 2020-12 (12.3.2) позволяет не выводить поле, когда
+  динамическая область не проходила через ссылку. На схеме без `$ref` его
+  значение есть URI ресурса плюс тот же указатель, что уже лежит в
+  `keywordLocation`, то есть потребителю оно ничего не сообщает; смысл поле
+  приобретает только после перехода по ссылке, где написанный путь и физическое
+  место keyword расходятся. Построение стоит около 15% вызова в `basic`:
+  конкатенация с URI и percent-encoding указателя выполняются для каждого
+  выпускаемого unit. Отсутствие поля само означает, что ссылок не было, поэтому
+  потребитель может собрать значение сам и информация не теряется. Против
+  говорит записанное в
+  [validator-core](okf/architecture/validator-core.md) обещание выводить поле
+  всегда, кроме анонимного ресурса, и изменение golden fixtures. Условие
+  пропуска шире, чем «в схеме нет `$ref`»: у подсхемы может быть собственный
+  `$id`, и тогда абсолютная локация не выводится из корневого URI, поэтому
+  опускать можно только units корневого ресурса, чей путь ссылок не пересекал.

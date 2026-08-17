@@ -189,20 +189,23 @@ reporting `not_found`.
 
 `valid_json` runs the declared validation profile from the official
 [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite)
-for all four dialects. The pinned conformance run executes **1282 test groups
-and 5315 test cases**, plus the **8 official output test cases** (standardized
+for all four dialects. The pinned conformance run executes **1355 test groups
+and 6125 test cases**, plus the **8 official output test cases** (standardized
 only for Draft 2019-09 and Draft 2020-12) and 58 remote documents used by
 `refRemote` tests. Remote documents are compiled under their own `$schema`, so
 the run also verifies cross-draft resolution; they are registered in advance,
 and validation makes no network requests.
 
-The declared capability profiles are:
+The declared capability profiles include:
 
-- `optional/` files whose schemas compile within the supported dialects,
-  including `optional/id`, `optional/unknownKeyword`, and `optional/cross-draft`;
-- a `format` profile — the `optional/format/` files, compiled with
-  `{assert_format, true}` — covering 16 files per dialect (the four IDN/IRI
-  files are declared exclusions);
+- `optional/bignum`, `optional/id`, `optional/non-bmp-regex`, and
+  `optional/unknownKeyword` in all four dialects;
+- `optional/anchor` and `optional/no-schema` in Draft 2019-09 and Draft
+  2020-12, `optional/cross-draft` where the suite supplies it, and the Draft
+  2020-12 `optional/dynamicRef` profile;
+- a `format` profile compiled with `{assert_format, true}`: 10 files in Draft
+  6, 14 in Draft 7, and 16 each in Draft 2019-09 and Draft 2020-12. The four
+  IDN/IRI files and the A-label group are declared exclusions where present;
 - the official output tests, which pin the `basic` format; `flag`, `detailed`,
   and `verbose` are covered by the project's own golden tests, because the
   official suite does not exercise them.

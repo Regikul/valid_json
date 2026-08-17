@@ -120,8 +120,12 @@ that optional dependency is present.
 
 `valid_json` runs the declared validation profile of the official JSON Schema
 Test Suite for Draft 6, Draft 7, Draft 2019-09, and Draft 2020-12, plus the
-official output tests where the drafts define them. The deviations it knows
-about are listed in the "Not supported" section of the [README](../../README.md).
+official output tests where the drafts define them. Supported optional profiles
+are exercised in every dialect that supplies them: the format profile covers
+10 files in Draft 6, 14 in Draft 7, and 16 each in Draft 2019-09 and Draft
+2020-12. The exact profile and its intentional exclusions are listed in the
+[README](../../README.md) and the
+[conformance policy](../../okf/testing/conformance-policy.md).
 
 jsonschex reports passing 100% of the Draft 2020-12 suite with
 `optional/cross-draft` excluded, and ships the suite as a submodule.

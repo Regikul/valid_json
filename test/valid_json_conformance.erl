@@ -30,8 +30,10 @@
                 "ref.json", "defs.json",
                 "anchor.json", "refRemote.json", "infinite-loop-detection.json",
                 "unevaluatedProperties.json", "unevaluatedItems.json",
-                "optional/id.json", "optional/unknownKeyword.json",
-                "optional/cross-draft.json",
+                "optional/anchor.json", "optional/bignum.json",
+                "optional/id.json", "optional/no-schema.json",
+                "optional/non-bmp-regex.json",
+                "optional/unknownKeyword.json", "optional/cross-draft.json",
                 "optional/format/date.json", "optional/format/time.json",
                 "optional/format/date-time.json",
                 "optional/format/duration.json",
@@ -60,8 +62,9 @@
                          ["additionalItems.json", "recursiveRef.json"]}]).
 
 %% Draft 6 и 7 не имеют vocabulary/unevaluated/dynamic/recursive files нового
-%% профиля. Их обязательные files образуют отдельный список вместо вычитания из
-%% ?FILES: так отсутствие позднего файла не маскируется пустым прогоном.
+%% профиля, а набор их optional files отличается от новых dialects. Поэтому их
+%% полный профиль образует отдельный список вместо вычитания из ?FILES: так
+%% отсутствие позднего файла не маскируется пустым прогоном.
 -define(HISTORIC_FILES,
         [{"draft6",
           ["boolean_schema.json", "type.json", "const.json", "enum.json",
@@ -74,7 +77,14 @@
            "uniqueItems.json", "contains.json", "allOf.json", "anyOf.json",
            "oneOf.json", "not.json", "default.json", "format.json",
            "definitions.json", "dependencies.json", "ref.json", "refRemote.json",
-           "infinite-loop-detection.json"]},
+           "infinite-loop-detection.json", "optional/bignum.json",
+           "optional/id.json", "optional/non-bmp-regex.json",
+           "optional/unknownKeyword.json", "optional/format/date-time.json",
+           "optional/format/email.json", "optional/format/hostname.json",
+           "optional/format/ipv4.json", "optional/format/ipv6.json",
+           "optional/format/json-pointer.json", "optional/format/unknown.json",
+           "optional/format/uri-reference.json",
+           "optional/format/uri-template.json", "optional/format/uri.json"]},
          {"draft7",
           ["boolean_schema.json", "type.json", "const.json", "enum.json",
            "multipleOf.json", "maximum.json", "exclusiveMaximum.json",
@@ -87,7 +97,17 @@
            "oneOf.json", "not.json", "if-then-else.json", "default.json",
            "format.json", "definitions.json", "dependencies.json", "ref.json",
            "refRemote.json", "infinite-loop-detection.json",
-           "optional/cross-draft.json"]}]).
+           "optional/bignum.json", "optional/cross-draft.json",
+           "optional/id.json", "optional/non-bmp-regex.json",
+           "optional/unknownKeyword.json", "optional/format/date.json",
+           "optional/format/time.json", "optional/format/date-time.json",
+           "optional/format/email.json", "optional/format/hostname.json",
+           "optional/format/ipv4.json", "optional/format/ipv6.json",
+           "optional/format/uri.json", "optional/format/uri-reference.json",
+           "optional/format/uri-template.json",
+           "optional/format/json-pointer.json",
+           "optional/format/relative-json-pointer.json",
+           "optional/format/regex.json", "optional/format/unknown.json"]}]).
 
 %% Группы подключённых files, которые ждут keywords следующих фаз: их схемы пока
 %% не компилируются вовсе. Фаза, снимающая группу, вычёркивает свою строку
@@ -117,7 +137,7 @@
 %% котором сьют не нашёлся или файл перестал читаться, не мог оказаться зелёным
 %% из-за того, что тестов просто не осталось. Оно меняется вместе с ?FILES,
 %% ?EXCLUDED и ?OUT_OF_PROFILE, и менять его иначе нельзя.
--define(CENSUS, {1283, 5316}).
+-define(CENSUS, {1355, 6125}).
 
 %% Сьют адресует свои remote documents относительно этого base, повторяя в URI
 %% раскладку директории `remotes`. Число документов закреплено по той же

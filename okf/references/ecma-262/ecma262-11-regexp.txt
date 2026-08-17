@@ -555,7 +555,7 @@ RegExpIdentifierName[?U] RegExpIdentifierPart[?U]
 
   * Let idText be the source text matched by RegExpIdentifierName.
   * Let idTextUnescaped be the result of replacing any occurrences of \ RegExpUnicodeEscapeSequence in idText with the code point represented by the RegExpUnicodeEscapeSequence.
-  * Return ! UTF16Encode(idTextUnescaped).
+  * Return ! UTF16Encode(idTextUnescaped).
 
 ------------------------------------------------------------------------
 
@@ -618,8 +618,8 @@ evaluates as follows:
   * Evaluate Disjunction with +1 as its direction argument to obtain a Matcher m.
   * Return a new abstract closure with parameters (str, index) that captures m and performs the following steps when called:
     * Assert: Type(str) is String.
-    * Assert: ! IsNonNegativeInteger(index) is true and index ≤ the length of str.
-    * If Unicode is true, let Input be a List consisting of the sequence of code points of ! UTF16DecodeString(str). Otherwise, let Input be a List consisting of the sequence of code units that are the elements of str. Input will be used throughout the algorithms in 21.2.2. Each element of Input is considered to be a character.
+    * Assert: ! IsNonNegativeInteger(index) is true and index ≤ the length of str.
+    * If Unicode is true, let Input be a List consisting of the sequence of code points of ! UTF16DecodeString(str). Otherwise, let Input be a List consisting of the sequence of code units that are the elements of str. Input will be used throughout the algorithms in 21.2.2. Each element of Input is considered to be a character.
     * Let InputLength be the number of characters contained in Input. This variable will be used throughout the algorithms in 21.2.2.
     * Let listIndex be the index into Input of the character that was obtained from element index of str.
     * Let c be a new Continuation with parameters (y) that captures nothing and performs the following steps when called:
@@ -1025,7 +1025,7 @@ The abstract operation IsWordChar takes an integer parameter e and performs the 
 
   * If e is -1 or e is InputLength, return false.
   * Let c be the character Input[e].
-  * Let wordChars be the result of ! WordCharacters().
+  * Let wordChars be the result of ! WordCharacters().
   * If c is in wordChars, return true.
   * Return false.
 
@@ -2231,10 +2231,10 @@ UnicodePropertyName = UnicodePropertyValue
 evaluates as follows:
 
   * Let ps be SourceText of UnicodePropertyName.
-  * Let p be ! UnicodeMatchProperty(ps).
+  * Let p be ! UnicodeMatchProperty(ps).
   * Assert: p is a Unicode property name or property alias listed in the “Property name and aliases” column of Table 55.
   * Let vs be SourceText of UnicodePropertyValue.
-  * Let v be ! UnicodeMatchPropertyValue(p, vs).
+  * Let v be ! UnicodeMatchPropertyValue(p, vs).
   * Return the CharSet containing all Unicode code points whose character database definition includes the property p with value v.
 
 The production
@@ -2244,9 +2244,9 @@ LoneUnicodePropertyNameOrValue
 evaluates as follows:
 
   * Let s be SourceText of LoneUnicodePropertyNameOrValue.
-  * If ! UnicodeMatchPropertyValue(General_Category, s) is identical to a List of Unicode code points that is the name of a Unicode general category or general category alias listed in the “Property value and aliases” column of Table 57, then
+  * If ! UnicodeMatchPropertyValue(General_Category, s) is identical to a List of Unicode code points that is the name of a Unicode general category or general category alias listed in the “Property value and aliases” column of Table 57, then
     * Return the CharSet containing all Unicode code points whose character database definition includes the property “General_Category” with value s.
-  * Let p be ! UnicodeMatchProperty(s).
+  * Let p be ! UnicodeMatchProperty(s).
   * Assert: p is a binary Unicode property or binary property alias listed in the “Property name and aliases” column of Table 56.
   * Return the CharSet containing all Unicode code points whose character database definition includes the property p with value “True”.
 
@@ -2471,11 +2471,11 @@ The RegExp constructor:
 
 The following steps are taken:
 
-  * Let patternIsRegExp be ? IsRegExp(pattern).
+  * Let patternIsRegExp be ? IsRegExp(pattern).
   * If NewTarget is undefined, then
     * Let newTarget be the active function object.
     * If patternIsRegExp is true and flags is undefined, then
-      * Let patternConstructor be ? Get(pattern, "constructor").
+      * Let patternConstructor be ? Get(pattern, "constructor").
       * If SameValue(newTarget, patternConstructor) is true, return pattern.
   * Else, let newTarget be NewTarget.
   * If Type(pattern) is Object and pattern has a [[RegExpMatcher]] internal slot, then
@@ -2483,15 +2483,15 @@ The following steps are taken:
     * If flags is undefined, let F be pattern.[[OriginalFlags]].
     * Else, let F be flags.
   * Else if patternIsRegExp is true, then
-    * Let P be ? Get(pattern, "source").
+    * Let P be ? Get(pattern, "source").
     * If flags is undefined, then
-      * Let F be ? Get(pattern, "flags").
+      * Let F be ? Get(pattern, "flags").
     * Else, let F be flags.
   * Else,
     * Let P be pattern.
     * Let F be flags.
-  * Let O be ? RegExpAlloc(newTarget).
-  * Return ? RegExpInitialize(O, P, F).
+  * Let O be ? RegExpAlloc(newTarget).
+  * Return ? RegExpInitialize(O, P, F).
 
 Note
 
@@ -2507,8 +2507,8 @@ If pattern is supplied using a StringLiteral, the usual escape sequence substitu
 
 When the abstract operation RegExpAlloc with argument newTarget is called, the following steps are taken:
 
-  * Let obj be ? OrdinaryCreateFromConstructor(newTarget, "%RegExp.prototype%", « [[RegExpMatcher]], [[OriginalSource]], [[OriginalFlags]] »).
-  * Perform ! DefinePropertyOrThrow(obj, "lastIndex", PropertyDescriptor { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: false }).
+  * Let obj be ? OrdinaryCreateFromConstructor(newTarget, "%RegExp.prototype%", « [[RegExpMatcher]], [[OriginalSource]], [[OriginalFlags]] »).
+  * Perform ! DefinePropertyOrThrow(obj, "lastIndex", PropertyDescriptor { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: false }).
   * Return obj.
 
 ------------------------------------------------------------------------
@@ -2518,9 +2518,9 @@ When the abstract operation RegExpAlloc with argument newTarget is called, the f
 When the abstract operation RegExpInitialize with arguments obj, pattern, and flags is called, the following steps are taken:
 
   * If pattern is undefined, let P be the empty String.
-  * Else, let P be ? ToString(pattern).
+  * Else, let P be ? ToString(pattern).
   * If flags is undefined, let F be the empty String.
-  * Else, let F be ? ToString(flags).
+  * Else, let F be ? ToString(flags).
   * If F contains any code unit other than "g", "i", "m", "s", "u", or "y" or if it contains the same code unit more than once, throw a SyntaxError exception.
   * If F contains "u", let BMP be false; else let BMP be true.
   * If BMP is true, then
@@ -2528,13 +2528,13 @@ When the abstract operation RegExpInitialize with arguments obj, pattern, and fl
     * Parse pText using the grammars in 21.2.1. The goal symbol for the parse is Pattern[~U, ~N]. If the result of parsing contains a GroupName, reparse with the goal symbol Pattern[~U, +N] and use this result instead. Throw a SyntaxError exception if pText did not conform to the grammar, if any elements of pText were not matched by the parse, or if any Early Error conditions exist.
     * Let patternCharacters be a List whose elements are the code unit elements of P.
   * Else,
-    * Let pText be ! UTF16DecodeString(P).
+    * Let pText be ! UTF16DecodeString(P).
     * Parse pText using the grammars in 21.2.1. The goal symbol for the parse is Pattern[+U, +N]. Throw a SyntaxError exception if pText did not conform to the grammar, if any elements of pText were not matched by the parse, or if any Early Error conditions exist.
     * Let patternCharacters be a List whose elements are the code points of pText.
   * Set obj.[[OriginalSource]] to P.
   * Set obj.[[OriginalFlags]] to F.
   * Set obj.[[RegExpMatcher]] to the abstract closure that evaluates the above parse by applying the semantics provided in 21.2.2 using patternCharacters as the pattern's List of SourceCharacter values and F as the flag parameters.
-  * Perform ? Set(obj, "lastIndex", 0, true).
+  * Perform ? Set(obj, "lastIndex", 0, true).
   * Return obj.
 
 ------------------------------------------------------------------------
@@ -2543,8 +2543,8 @@ When the abstract operation RegExpInitialize with arguments obj, pattern, and fl
 
 When the abstract operation RegExpCreate with arguments P and F is called, the following steps are taken:
 
-  * Let obj be ? RegExpAlloc(%RegExp%).
-  * Return ? RegExpInitialize(obj, P, F).
+  * Let obj be ? RegExpAlloc(%RegExp%).
+  * Return ? RegExpInitialize(obj, P, F).
 
 ------------------------------------------------------------------------
 
@@ -2617,9 +2617,9 @@ Performs a regular expression match of string against the regular expression and
 The String ToString(string) is searched for an occurrence of the regular expression pattern as follows:
 
   * Let R be the this value.
-  * Perform ? RequireInternalSlot(R, [[RegExpMatcher]]).
-  * Let S be ? ToString(string).
-  * Return ? RegExpBuiltinExec(R, S).
+  * Perform ? RequireInternalSlot(R, [[RegExpMatcher]]).
+  * Let S be ? ToString(string).
+  * Return ? RegExpBuiltinExec(R, S).
 
 ------------------------------------------------------------------------
 
@@ -2629,13 +2629,13 @@ The abstract operation RegExpExec with arguments R and S performs the following 
 
   * Assert: Type(R) is Object.
   * Assert: Type(S) is String.
-  * Let exec be ? Get(R, "exec").
+  * Let exec be ? Get(R, "exec").
   * If IsCallable(exec) is true, then
-    * Let result be ? Call(exec, R, « S »).
+    * Let result be ? Call(exec, R, « S »).
     * If Type(result) is neither Object nor Null, throw a TypeError exception.
     * Return result.
-  * Perform ? RequireInternalSlot(R, [[RegExpMatcher]]).
-  * Return ? RegExpBuiltinExec(R, S).
+  * Perform ? RequireInternalSlot(R, [[RegExpMatcher]]).
+  * Return ? RegExpBuiltinExec(R, S).
 
 Note
 
@@ -2650,7 +2650,7 @@ The abstract operation RegExpBuiltinExec with arguments R and S performs the fol
   * Assert: R is an initialized RegExp instance.
   * Assert: Type(S) is String.
   * Let length be the number of code units in S.
-  * Let lastIndex be ? ToLength(? Get(R, "lastIndex")).
+  * Let lastIndex be ? ToLength(? Get(R, "lastIndex")).
   * Let flags be R.[[OriginalFlags]].
   * If flags contains "g", let global be true; else let global be false.
   * If flags contains "y", let sticky be true; else let sticky be false.
@@ -2661,12 +2661,12 @@ The abstract operation RegExpBuiltinExec with arguments R and S performs the fol
   * Repeat, while matchSucceeded is false
     * If lastIndex > length, then
       * If global is true or sticky is true, then
-        * Perform ? Set(R, "lastIndex", 0, true).
+        * Perform ? Set(R, "lastIndex", 0, true).
       * Return null.
     * Let r be matcher(S, lastIndex).
     * If r is failure, then
       * If sticky is true, then
-        * Perform ? Set(R, "lastIndex", 0, true).
+        * Perform ? Set(R, "lastIndex", 0, true).
         * Return null.
       * Set lastIndex to AdvanceStringIndex(S, lastIndex, fullUnicode).
     * Else,
@@ -2677,34 +2677,34 @@ The abstract operation RegExpBuiltinExec with arguments R and S performs the fol
     * e is an index into the Input character list, derived from S, matched by matcher. Let eUTF be the smallest index into S that corresponds to the character at element e of Input. If e is greater than or equal to the number of elements in Input, then eUTF is the number of code units in S.
     * Set e to eUTF.
   * If global is true or sticky is true, then
-    * Perform ? Set(R, "lastIndex", e, true).
+    * Perform ? Set(R, "lastIndex", e, true).
   * Let n be the number of elements in r's captures List. (This is the same value as 21.2.2.1's NcapturingParens.)
   * Assert: n < 232 - 1.
-  * Let A be ! ArrayCreate(n + 1).
+  * Let A be ! ArrayCreate(n + 1).
   * Assert: The value of A's "length" property is n + 1.
-  * Perform ! CreateDataPropertyOrThrow(A, "index", lastIndex).
-  * Perform ! CreateDataPropertyOrThrow(A, "input", S).
+  * Perform ! CreateDataPropertyOrThrow(A, "index", lastIndex).
+  * Perform ! CreateDataPropertyOrThrow(A, "input", S).
   * Let matchedSubstr be the matched substring (i.e. the portion of S between offset lastIndex inclusive and offset e exclusive).
-  * Perform ! CreateDataPropertyOrThrow(A, "0", matchedSubstr).
+  * Perform ! CreateDataPropertyOrThrow(A, "0", matchedSubstr).
   * If R contains any GroupName, then
     * Let groups be OrdinaryObjectCreate(null).
   * Else,
     * Let groups be undefined.
-  * Perform ! CreateDataPropertyOrThrow(A, "groups", groups).
+  * Perform ! CreateDataPropertyOrThrow(A, "groups", groups).
   * For each integer i such that i > 0 and i ≤ n, do
     * Let captureI be ith element of r's captures List.
     * If captureI is undefined, let capturedValue be undefined.
     * Else if fullUnicode is true, then
       * Assert: captureI is a List of code points.
-      * Let capturedValue be ! UTF16Encode(captureI).
+      * Let capturedValue be ! UTF16Encode(captureI).
     * Else,
       * Assert: fullUnicode is false.
       * Assert: captureI is a List of code units.
       * Let capturedValue be the String value consisting of the code units of captureI.
-    * Perform ! CreateDataPropertyOrThrow(A, ! ToString(i), capturedValue).
+    * Perform ! CreateDataPropertyOrThrow(A, ! ToString(i), capturedValue).
     * If the ith capture of R was defined with a GroupName, then
       * Let s be the StringValue of the corresponding RegExpIdentifierName.
-      * Perform ! CreateDataPropertyOrThrow(groups, s, capturedValue).
+      * Perform ! CreateDataPropertyOrThrow(groups, s, capturedValue).
   * Return A.
 
 ------------------------------------------------------------------------
@@ -2714,12 +2714,12 @@ The abstract operation RegExpBuiltinExec with arguments R and S performs the fol
 The abstract operation AdvanceStringIndex with arguments S, index, and unicode performs the following steps:
 
   * Assert: Type(S) is String.
-  * Assert: 0 ≤ index ≤ 253 - 1 and ! IsInteger(index) is true.
+  * Assert: 0 ≤ index ≤ 253 - 1 and ! IsInteger(index) is true.
   * Assert: Type(unicode) is Boolean.
   * If unicode is false, return index + 1.
   * Let length be the number of code units in S.
   * If index + 1 ≥ length, return index + 1.
-  * Let cp be ! CodePointAt(S, index).
+  * Let cp be ! CodePointAt(S, index).
   * Return index + cp.[[CodeUnitCount]].
 
 ------------------------------------------------------------------------
@@ -2746,17 +2746,17 @@ RegExp.prototype.flags is an accessor property whose set accessor function is un
   * Let R be the this value.
   * If Type(R) is not Object, throw a TypeError exception.
   * Let result be the empty String.
-  * Let global be ! ToBoolean(? Get(R, "global")).
+  * Let global be ! ToBoolean(? Get(R, "global")).
   * If global is true, append the code unit 0x0067 (LATIN SMALL LETTER G) as the last code unit of result.
-  * Let ignoreCase be ! ToBoolean(? Get(R, "ignoreCase")).
+  * Let ignoreCase be ! ToBoolean(? Get(R, "ignoreCase")).
   * If ignoreCase is true, append the code unit 0x0069 (LATIN SMALL LETTER I) as the last code unit of result.
-  * Let multiline be ! ToBoolean(? Get(R, "multiline")).
+  * Let multiline be ! ToBoolean(? Get(R, "multiline")).
   * If multiline is true, append the code unit 0x006D (LATIN SMALL LETTER M) as the last code unit of result.
-  * Let dotAll be ! ToBoolean(? Get(R, "dotAll")).
+  * Let dotAll be ! ToBoolean(? Get(R, "dotAll")).
   * If dotAll is true, append the code unit 0x0073 (LATIN SMALL LETTER S) as the last code unit of result.
-  * Let unicode be ! ToBoolean(? Get(R, "unicode")).
+  * Let unicode be ! ToBoolean(? Get(R, "unicode")).
   * If unicode is true, append the code unit 0x0075 (LATIN SMALL LETTER U) as the last code unit of result.
-  * Let sticky be ! ToBoolean(? Get(R, "sticky")).
+  * Let sticky be ! ToBoolean(? Get(R, "sticky")).
   * If sticky is true, append the code unit 0x0079 (LATIN SMALL LETTER Y) as the last code unit of result.
   * Return result.
 
@@ -2798,28 +2798,28 @@ When the @@match method is called with argument string, the following steps are 
 
   * Let rx be the this value.
   * If Type(rx) is not Object, throw a TypeError exception.
-  * Let S be ? ToString(string).
-  * Let global be ! ToBoolean(? Get(rx, "global")).
+  * Let S be ? ToString(string).
+  * Let global be ! ToBoolean(? Get(rx, "global")).
   * If global is false, then
-    * Return ? RegExpExec(rx, S).
+    * Return ? RegExpExec(rx, S).
   * Else,
     * Assert: global is true.
-    * Let fullUnicode be ! ToBoolean(? Get(rx, "unicode")).
-    * Perform ? Set(rx, "lastIndex", 0, true).
-    * Let A be ! ArrayCreate(0).
+    * Let fullUnicode be ! ToBoolean(? Get(rx, "unicode")).
+    * Perform ? Set(rx, "lastIndex", 0, true).
+    * Let A be ! ArrayCreate(0).
     * Let n be 0.
     * Repeat,
-      * Let result be ? RegExpExec(rx, S).
+      * Let result be ? RegExpExec(rx, S).
       * If result is null, then
         * If n = 0, return null.
         * Return A.
       * Else,
-        * Let matchStr be ? ToString(? Get(result, "0")).
-        * Perform ! CreateDataPropertyOrThrow(A, ! ToString(n), matchStr).
+        * Let matchStr be ? ToString(? Get(result, "0")).
+        * Perform ! CreateDataPropertyOrThrow(A, ! ToString(n), matchStr).
         * If matchStr is the empty String, then
-          * Let thisIndex be ? ToLength(? Get(rx, "lastIndex")).
+          * Let thisIndex be ? ToLength(? Get(rx, "lastIndex")).
           * Let nextIndex be AdvanceStringIndex(S, thisIndex, fullUnicode).
-          * Perform ? Set(rx, "lastIndex", nextIndex, true).
+          * Perform ? Set(rx, "lastIndex", nextIndex, true).
         * Set n to n + 1.
 
 The value of the "name" property of this function is "[Symbol.match]".
@@ -2836,17 +2836,17 @@ When the @@matchAll method is called with argument string, the following steps a
 
   * Let R be the this value.
   * If Type(R) is not Object, throw a TypeError exception.
-  * Let S be ? ToString(string).
-  * Let C be ? SpeciesConstructor(R, %RegExp%).
-  * Let flags be ? ToString(? Get(R, "flags")).
-  * Let matcher be ? Construct(C, « R, flags »).
-  * Let lastIndex be ? ToLength(? Get(R, "lastIndex")).
-  * Perform ? Set(matcher, "lastIndex", lastIndex, true).
+  * Let S be ? ToString(string).
+  * Let C be ? SpeciesConstructor(R, %RegExp%).
+  * Let flags be ? ToString(? Get(R, "flags")).
+  * Let matcher be ? Construct(C, « R, flags »).
+  * Let lastIndex be ? ToLength(? Get(R, "lastIndex")).
+  * Perform ? Set(matcher, "lastIndex", lastIndex, true).
   * If flags contains "g", let global be true.
   * Else, let global be false.
   * If flags contains "u", let fullUnicode be true.
   * Else, let fullUnicode be false.
-  * Return ! CreateRegExpStringIterator(matcher, S, global, fullUnicode).
+  * Return ! CreateRegExpStringIterator(matcher, S, global, fullUnicode).
 
 The value of the "name" property of this function is "[Symbol.matchAll]".
 
@@ -2890,59 +2890,59 @@ When the @@replace method is called with arguments string and replaceValue, the 
 
   * Let rx be the this value.
   * If Type(rx) is not Object, throw a TypeError exception.
-  * Let S be ? ToString(string).
+  * Let S be ? ToString(string).
   * Let lengthS be the number of code unit elements in S.
   * Let functionalReplace be IsCallable(replaceValue).
   * If functionalReplace is false, then
-    * Set replaceValue to ? ToString(replaceValue).
-  * Let global be ! ToBoolean(? Get(rx, "global")).
+    * Set replaceValue to ? ToString(replaceValue).
+  * Let global be ! ToBoolean(? Get(rx, "global")).
   * If global is true, then
-    * Let fullUnicode be ! ToBoolean(? Get(rx, "unicode")).
-    * Perform ? Set(rx, "lastIndex", 0, true).
+    * Let fullUnicode be ! ToBoolean(? Get(rx, "unicode")).
+    * Perform ? Set(rx, "lastIndex", 0, true).
   * Let results be a new empty List.
   * Let done be false.
   * Repeat, while done is false
-    * Let result be ? RegExpExec(rx, S).
+    * Let result be ? RegExpExec(rx, S).
     * If result is null, set done to true.
     * Else,
       * Append result to the end of results.
       * If global is false, set done to true.
       * Else,
-        * Let matchStr be ? ToString(? Get(result, "0")).
+        * Let matchStr be ? ToString(? Get(result, "0")).
         * If matchStr is the empty String, then
-          * Let thisIndex be ? ToLength(? Get(rx, "lastIndex")).
+          * Let thisIndex be ? ToLength(? Get(rx, "lastIndex")).
           * Let nextIndex be AdvanceStringIndex(S, thisIndex, fullUnicode).
-          * Perform ? Set(rx, "lastIndex", nextIndex, true).
+          * Perform ? Set(rx, "lastIndex", nextIndex, true).
   * Let accumulatedResult be the empty String value.
   * Let nextSourcePosition be 0.
   * For each result in results, do
-    * Let nCaptures be ? LengthOfArrayLike(result).
+    * Let nCaptures be ? LengthOfArrayLike(result).
     * Set nCaptures to max(nCaptures - 1, 0).
-    * Let matched be ? ToString(? Get(result, "0")).
+    * Let matched be ? ToString(? Get(result, "0")).
     * Let matchLength be the number of code units in matched.
-    * Let position be ? ToInteger(? Get(result, "index")).
+    * Let position be ? ToInteger(? Get(result, "index")).
     * Set position to max(min(position, lengthS), 0).
     * Let n be 1.
     * Let captures be a new empty List.
     * Repeat, while n ≤ nCaptures
-      * Let capN be ? Get(result, ! ToString(n)).
+      * Let capN be ? Get(result, ! ToString(n)).
       * If capN is not undefined, then
-        * Set capN to ? ToString(capN).
+        * Set capN to ? ToString(capN).
       * Append capN as the last element of captures.
       * Set n to n + 1.
-    * Let namedCaptures be ? Get(result, "groups").
+    * Let namedCaptures be ? Get(result, "groups").
     * If functionalReplace is true, then
       * Let replacerArgs be « matched ».
       * Append in list order the elements of captures to the end of the List replacerArgs.
       * Append position and S to replacerArgs.
       * If namedCaptures is not undefined, then
         * Append namedCaptures as the last element of replacerArgs.
-      * Let replValue be ? Call(replaceValue, undefined, replacerArgs).
-      * Let replacement be ? ToString(replValue).
+      * Let replValue be ? Call(replaceValue, undefined, replacerArgs).
+      * Let replacement be ? ToString(replValue).
     * Else,
       * If namedCaptures is not undefined, then
-        * Set namedCaptures to ? ToObject(namedCaptures).
-      * Let replacement be ? GetSubstitution(matched, S, position, captures, namedCaptures, replaceValue).
+        * Set namedCaptures to ? ToObject(namedCaptures).
+      * Let replacement be ? GetSubstitution(matched, S, position, captures, namedCaptures, replaceValue).
     * If position ≥ nextSourcePosition, then
       * NOTE: position should not normally move backwards. If it does, it is an indication of an ill-behaving RegExp subclass or use of an access triggered side-effect to change the global flag or other characteristics of rx. In such cases, the corresponding substitution is ignored.
       * Set accumulatedResult to the string-concatenation of the current value of accumulatedResult, the substring of S consisting of the code units from nextSourcePosition (inclusive) up to position (exclusive), and replacement.
@@ -2960,16 +2960,16 @@ When the @@search method is called with argument string, the following steps are
 
   * Let rx be the this value.
   * If Type(rx) is not Object, throw a TypeError exception.
-  * Let S be ? ToString(string).
-  * Let previousLastIndex be ? Get(rx, "lastIndex").
+  * Let S be ? ToString(string).
+  * Let previousLastIndex be ? Get(rx, "lastIndex").
   * If SameValue(previousLastIndex, 0) is false, then
-    * Perform ? Set(rx, "lastIndex", 0, true).
-  * Let result be ? RegExpExec(rx, S).
-  * Let currentLastIndex be ? Get(rx, "lastIndex").
+    * Perform ? Set(rx, "lastIndex", 0, true).
+  * Let result be ? RegExpExec(rx, S).
+  * Let currentLastIndex be ? Get(rx, "lastIndex").
   * If SameValue(currentLastIndex, previousLastIndex) is false, then
-    * Perform ? Set(rx, "lastIndex", previousLastIndex, true).
+    * Perform ? Set(rx, "lastIndex", previousLastIndex, true).
   * If result is null, return -1.
-  * Return ? Get(result, "index").
+  * Return ? Get(result, "index").
 
 The value of the "name" property of this function is "[Symbol.search]".
 
@@ -3017,52 +3017,52 @@ When the @@split method is called, the following steps are taken:
 
   * Let rx be the this value.
   * If Type(rx) is not Object, throw a TypeError exception.
-  * Let S be ? ToString(string).
-  * Let C be ? SpeciesConstructor(rx, %RegExp%).
-  * Let flags be ? ToString(? Get(rx, "flags")).
+  * Let S be ? ToString(string).
+  * Let C be ? SpeciesConstructor(rx, %RegExp%).
+  * Let flags be ? ToString(? Get(rx, "flags")).
   * If flags contains "u", let unicodeMatching be true.
   * Else, let unicodeMatching be false.
   * If flags contains "y", let newFlags be flags.
   * Else, let newFlags be the string-concatenation of flags and "y".
-  * Let splitter be ? Construct(C, « rx, newFlags »).
-  * Let A be ! ArrayCreate(0).
+  * Let splitter be ? Construct(C, « rx, newFlags »).
+  * Let A be ! ArrayCreate(0).
   * Let lengthA be 0.
-  * If limit is undefined, let lim be 232 - 1; else let lim be ? ToUint32(limit).
+  * If limit is undefined, let lim be 232 - 1; else let lim be ? ToUint32(limit).
   * Let size be the length of S.
   * Let p be 0.
   * If lim = 0, return A.
   * If size = 0, then
-    * Let z be ? RegExpExec(splitter, S).
+    * Let z be ? RegExpExec(splitter, S).
     * If z is not null, return A.
-    * Perform ! CreateDataPropertyOrThrow(A, "0", S).
+    * Perform ! CreateDataPropertyOrThrow(A, "0", S).
     * Return A.
   * Let q be p.
   * Repeat, while q < size
-    * Perform ? Set(splitter, "lastIndex", q, true).
-    * Let z be ? RegExpExec(splitter, S).
+    * Perform ? Set(splitter, "lastIndex", q, true).
+    * Let z be ? RegExpExec(splitter, S).
     * If z is null, set q to AdvanceStringIndex(S, q, unicodeMatching).
     * Else,
-      * Let e be ? ToLength(? Get(splitter, "lastIndex")).
+      * Let e be ? ToLength(? Get(splitter, "lastIndex")).
       * Set e to min(e, size).
       * If e = p, set q to AdvanceStringIndex(S, q, unicodeMatching).
       * Else,
         * Let T be the String value equal to the substring of S consisting of the code units at indices p (inclusive) through q (exclusive).
-        * Perform ! CreateDataPropertyOrThrow(A, ! ToString(lengthA), T).
+        * Perform ! CreateDataPropertyOrThrow(A, ! ToString(lengthA), T).
         * Set lengthA to lengthA + 1.
         * If lengthA = lim, return A.
         * Set p to e.
-        * Let numberOfCaptures be ? LengthOfArrayLike(z).
+        * Let numberOfCaptures be ? LengthOfArrayLike(z).
         * Set numberOfCaptures to max(numberOfCaptures - 1, 0).
         * Let i be 1.
         * Repeat, while i ≤ numberOfCaptures,
-          * Let nextCapture be ? Get(z, ! ToString(i)).
-          * Perform ! CreateDataPropertyOrThrow(A, ! ToString(lengthA), nextCapture).
+          * Let nextCapture be ? Get(z, ! ToString(i)).
+          * Perform ! CreateDataPropertyOrThrow(A, ! ToString(lengthA), nextCapture).
           * Set i to i + 1.
           * Set lengthA to lengthA + 1.
           * If lengthA = lim, return A.
         * Set q to p.
   * Let T be the String value equal to the substring of S consisting of the code units at indices p (inclusive) through size (exclusive).
-  * Perform ! CreateDataPropertyOrThrow(A, ! ToString(lengthA), T).
+  * Perform ! CreateDataPropertyOrThrow(A, ! ToString(lengthA), T).
   * Return A.
 
 The value of the "name" property of this function is "[Symbol.split]".
@@ -3094,8 +3094,8 @@ The following steps are taken:
 
   * Let R be the this value.
   * If Type(R) is not Object, throw a TypeError exception.
-  * Let string be ? ToString(S).
-  * Let match be ? RegExpExec(R, string).
+  * Let string be ? ToString(S).
+  * Let match be ? RegExpExec(R, string).
   * If match is not null, return true; else return false.
 
 ------------------------------------------------------------------------
@@ -3104,8 +3104,8 @@ The following steps are taken:
 
   * Let R be the this value.
   * If Type(R) is not Object, throw a TypeError exception.
-  * Let pattern be ? ToString(? Get(R, "source")).
-  * Let flags be ? ToString(? Get(R, "flags")).
+  * Let pattern be ? ToString(? Get(R, "source")).
+  * Let flags be ? ToString(? Get(R, "flags")).
   * Let result be the string-concatenation of "/", pattern, "/", and flags.
   * Return result.
 
@@ -3171,26 +3171,26 @@ The %RegExpStringIteratorPrototype% object:
   * If Type(O) is not Object, throw a TypeError exception.
   * If O does not have all of the internal slots of a RegExp String Iterator Object Instance (see 21.2.7.2), throw a TypeError exception.
   * If O.[[Done]] is true, then
-    * Return ! CreateIterResultObject(undefined, true).
+    * Return ! CreateIterResultObject(undefined, true).
   * Let R be O.[[IteratingRegExp]].
   * Let S be O.[[IteratedString]].
   * Let global be O.[[Global]].
   * Let fullUnicode be O.[[Unicode]].
-  * Let match be ? RegExpExec(R, S).
+  * Let match be ? RegExpExec(R, S).
   * If match is null, then
     * Set O.[[Done]] to true.
-    * Return ! CreateIterResultObject(undefined, true).
+    * Return ! CreateIterResultObject(undefined, true).
   * Else,
     * If global is true, then
-      * Let matchStr be ? ToString(? Get(match, "0")).
+      * Let matchStr be ? ToString(? Get(match, "0")).
       * If matchStr is the empty String, then
-        * Let thisIndex be ? ToLength(? Get(R, "lastIndex")).
-        * Let nextIndex be ! AdvanceStringIndex(S, thisIndex, fullUnicode).
-        * Perform ? Set(R, "lastIndex", nextIndex, true).
-      * Return ! CreateIterResultObject(match, false).
+        * Let thisIndex be ? ToLength(? Get(R, "lastIndex")).
+        * Let nextIndex be ! AdvanceStringIndex(S, thisIndex, fullUnicode).
+        * Perform ? Set(R, "lastIndex", nextIndex, true).
+      * Return ! CreateIterResultObject(match, false).
     * Else,
       * Set O.[[Done]] to true.
-      * Return ! CreateIterResultObject(match, false).
+      * Return ! CreateIterResultObject(match, false).
 
 ------------------------------------------------------------------------
 
