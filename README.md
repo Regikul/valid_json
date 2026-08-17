@@ -47,7 +47,7 @@ dependency, pinned to the latest tag:
 
 ```erlang
 {deps, [
-    {valid_json, {git, "https://github.com/Regikul/valid_json.git", {tag, "v0.2.2"}}}
+    {valid_json, {git, "https://github.com/Regikul/valid_json.git", {tag, "v0.3.0"}}}
 ]}.
 ```
 
@@ -317,11 +317,11 @@ tests. In CI, the `ci` profile turns compiler warnings into errors and runs
 
 ## Project status
 
-`valid_json` is version 0.2.2 and is under active development. Draft 6, Draft
+`valid_json` is version 0.3.0 and is under active development. Draft 6, Draft
 7, Draft 2019-09, and Draft 2020-12 are supported within the conformance
 profile declared above; the remaining work is tracked in
-[ROADMAP.md](ROADMAP.md) — the `format` profiles and optional capability
-profiles of phase P8, the HTTP loader, and the cross-cutting items.
+[ROADMAP.md](ROADMAP.md) — the Format-Assertion vocabulary of phase P8, the
+HTTP loader, and the cross-cutting items.
 
 The records' `reason` and `location` fields are the stable error contract; the
 wording produced by `format_error/1` is an implementation detail and may change.
