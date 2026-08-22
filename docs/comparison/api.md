@@ -35,6 +35,13 @@ The facade is small:
 | `store_child_spec/2` | the child specification for putting your own store into your supervision tree |
 | `format_error/1` | turn a schema error record into human-readable text |
 
+Build tools and schema linters can use the specialized
+`valid_json_schema_set:check/2` API. It checks a complete set of named documents
+and their cross-document references without starting the application, creating
+ETS tables, or retaining compiled artifacts. File discovery and decoding stay
+outside this API, so directory loaders, rebar3 plugins, and command-line tools
+can all feed it the same `{Uri, Json}` entries.
+
 A set of documents that refer to one another must be registered in a single
 call, because a document whose references cannot be resolved is rejected.
 

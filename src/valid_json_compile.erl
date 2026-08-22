@@ -6,7 +6,7 @@
 -include("valid_json_core.hrl").
 -include("valid_json_resources.hrl").
 
--export([compile/2, compile/3, compile_uri/3]).
+-export([compile/2, compile/3, compile_uri/3, check_uri/3]).
 -export_type([compile_option/0, schema_validation/0]).
 
 -ifdef(TEST).
@@ -78,46 +78,87 @@ compile_uri(#store{} = Store, Uri, Options)
   when is_binary(Uri), is_list(Options) ->
     case compile_options(Options) of
         {ok, DefaultDialect, SchemaValidation, TrustSchema, AssertFormat} ->
-            case entry_name(Uri, Store#store.base) of
-                {ok, Name} ->
-                    case valid_json_store:fetch(Name, Store) of
-                        undefined ->
-                            {error, #schema_error{reason = {unknown_document, Name},
-                                                  location = undefined}};
-                        #document{} = Document ->
-                            finish(Store, valid_json_compile_closure:document(
-                                            Store, Document, DefaultDialect),
-                                   SchemaValidation, TrustSchema, AssertFormat)
-                    end;
-                {error, _} = Error ->
-                    Error
-            end;
+            finish(Store, uri_closure(Store, Uri, DefaultDialect),
+                   SchemaValidation, TrustSchema, AssertFormat);
         {error, _} = Error ->
             Error
     end;
 compile_uri(Store, Uri, Options) ->
     erlang:error(badarg, [Store, Uri, Options]).
 
+%% Проверка зарегистрированного schema document заканчивается перед emitter:
+%% references и meta-schema проходят тот же путь, но пользовательский artifact
+%% не создаётся. `trust_schema` намеренно не действует на check-входе.
+-spec check_uri(store(), uri(), [compile_option()]) ->
+          ok | {error, #schema_error{}}.
+check_uri(#store{} = Store, Uri, Options)
+  when is_binary(Uri), is_list(Options) ->
+    case compile_options(Options) of
+        {ok, DefaultDialect, SchemaValidation, _TrustSchema, _AssertFormat} ->
+            case checked(Store, uri_closure(Store, Uri, DefaultDialect),
+                         SchemaValidation, false) of
+                {ok, _Index, _Sources} -> ok;
+                {error, _} = Error    -> Error
+            end;
+        {error, _} = Error ->
+            Error
+    end;
+check_uri(Store, Uri, Options) ->
+    erlang:error(badarg, [Store, Uri, Options]).
+
+-spec uri_closure(store(), uri(), dialect()) ->
+          {ok, valid_json_resource_index:index(), [uri()]}
+        | {error, #schema_error{}}.
+uri_closure(Store, Uri, DefaultDialect) ->
+    case entry_name(Uri, Store#store.base) of
+        {ok, Name} ->
+            case valid_json_store:fetch(Name, Store) of
+                undefined ->
+                    {error, #schema_error{reason = {unknown_document, Name},
+                                          location = undefined}};
+                #document{} = Document ->
+                    valid_json_compile_closure:document(Store, Document,
+                                                        DefaultDialect)
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
 -spec finish(store(),
              {ok, valid_json_resource_index:index(), [uri()]}
            | {error, #schema_error{}}, schema_validation(), boolean(), boolean()) ->
           {ok, compiled()} | {error, #schema_error{}}.
 finish(Store, {ok, Index, Sources0}, SchemaValidation, TrustSchema, AssertFormat) ->
+    case checked(Store, {ok, Index, Sources0}, SchemaValidation, TrustSchema) of
+        {ok, CheckedIndex, Sources} ->
+            valid_json_compile_emit:emit(CheckedIndex, Sources, AssertFormat);
+        {error, _} = Error ->
+            Error
+    end;
+finish(_Store, {error, _} = Error, _SchemaValidation, _TrustSchema,
+       _AssertFormat) ->
+    Error.
+
+-spec checked(store(),
+              {ok, valid_json_resource_index:index(), [uri()]}
+            | {error, #schema_error{}}, schema_validation(), boolean()) ->
+          {ok, valid_json_resource_index:index(), [uri()]}
+        | {error, #schema_error{}}.
+checked(Store, {ok, Index, Sources0}, SchemaValidation, TrustSchema) ->
     case valid_json_resource_index:check_references(Index) of
         ok ->
             case valid_json_schema_check:check(Index, Store, SchemaValidation,
                                                TrustSchema) of
                 {ok, MetaSources} ->
                     Sources = ordsets:union(Sources0, MetaSources),
-                    valid_json_compile_emit:emit(Index, Sources, AssertFormat);
+                    {ok, Index, Sources};
                 {error, _} = Error ->
                     Error
             end;
         {error, _} = Error ->
             Error
     end;
-finish(_Store, {error, _} = Error, _SchemaValidation, _TrustSchema,
-       _AssertFormat) ->
+checked(_Store, {error, _} = Error, _SchemaValidation, _TrustSchema) ->
     Error.
 
 -spec compile_options([term()]) ->

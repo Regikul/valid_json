@@ -133,9 +133,9 @@ remove(Store, Uris) ->
 %% Compiler передаёт сюда уже разрешённое каноническое имя. Пользовательский
 %% registry имеет приоритет; промах читается из отдельной immutable области.
 -spec fetch(uri(), store()) -> #document{} | undefined.
-fetch(Uri, #store{documents = Documents}) ->
+fetch(Uri, #store{documents = Documents} = Store) ->
     case maps:get(Uri, Documents, undefined) of
-        undefined -> fetch_builtin(Uri);
+        undefined -> fetch_builtin(Uri, Store);
         Document  -> Document
     end.
 
@@ -369,6 +369,6 @@ remove_document(#document{registered = Registered, canonical = Canonical}, Docum
 schema_error(Reason) ->
     {error, #schema_error{reason = Reason, location = undefined}}.
 
--spec fetch_builtin(uri()) -> #document{} | undefined.
-fetch_builtin(Uri) ->
-    valid_json_metaschema:fetch(Uri).
+-spec fetch_builtin(uri(), store()) -> #document{} | undefined.
+fetch_builtin(Uri, Store) ->
+    valid_json_metaschema:fetch(Uri, Store).

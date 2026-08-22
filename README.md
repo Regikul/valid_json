@@ -69,6 +69,33 @@ Schema = #{<<"type">> => <<"integer">>, <<"minimum">> => 0},
     valid_json:run_schema(Schema, 5, [{output, flag}]).
 ```
 
+### Check a set of schema documents
+
+`valid_json_schema_set:check/2` verifies a complete set of named schema
+documents without starting the `valid_json` application, creating ETS tables,
+or retaining compiled artifacts. Register the whole set in one call so that
+references between its documents can be resolved:
+
+```erlang
+Entries = [
+    {<<"root.json">>,
+     #{<<"$schema">> => <<"https://json-schema.org/draft/2020-12/schema">>,
+       <<"$ref">> => <<"definitions.json">>}},
+    {<<"definitions.json">>,
+     #{<<"$schema">> => <<"https://json-schema.org/draft/2020-12/schema">>,
+       <<"type">> => <<"object">>}}
+],
+
+{ok, Names} =
+    valid_json_schema_set:check(
+      Entries, [{base_uri, <<"https://example.com/schemas/">>}]).
+```
+
+The call accepts `base_uri`, `default_dialect`, and `schema_validation` options.
+It returns registration errors separately from schema-validation errors, each
+paired with the corresponding document URI. Reading and decoding files remains
+the caller's responsibility.
+
 ### Compile once, validate many times
 
 Register the schema under its `$id`, then validate by name. Registration

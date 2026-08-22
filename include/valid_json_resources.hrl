@@ -47,7 +47,10 @@
 
 -record(store, {
     base = anonymous :: uri() | anonymous,
-    documents = #{}  :: #{uri() => #document{}}
+    documents = #{}  :: #{uri() => #document{}},
+    %% Runtime читает опубликованную immutable область, одноразовый schema set
+    %% несёт её map рядом с документами, а bootstrap не имеет внешней области.
+    metaschemas = published :: published | none | map()
 }).
 
 -type store() :: #store{}.

@@ -1,6 +1,7 @@
 %% Проверка корней schema resources их собственными метасхемами. Канонические
-%% метасхемы берутся из защищённой ETS; пользовательские остаются обычными
-%% документами store и компилируются один раз на текущий проход.
+%% метасхемы берутся из контекста store: размещённый store читает опубликованные
+%% bundles, одноразовый держит их обычным значением. Пользовательские метасхемы
+%% остаются документами store и компилируются один раз на текущий проход.
 -module(valid_json_schema_check).
 
 -include("valid_json_resources.hrl").
@@ -90,14 +91,14 @@ replace_at(Value, [Segment | Rest], Replacement) when is_list(Value) ->
 
 -spec metaschema(profile(), store(), schema_validation(), cache()) ->
           {ok, compiled(), cache(), [uri()]} | {error, #schema_error{}}.
-metaschema(#profile{uri = ?DRAFT_2020_12}, _Store, _Mode, Cache) ->
-    {ok, valid_json_metaschema:compiled(?DRAFT_2020_12), Cache, []};
-metaschema(#profile{uri = ?DRAFT_2019_09}, _Store, _Mode, Cache) ->
-    {ok, valid_json_metaschema:compiled(?DRAFT_2019_09), Cache, []};
-metaschema(#profile{uri = ?DRAFT_07}, _Store, _Mode, Cache) ->
-    {ok, valid_json_metaschema:compiled(?DRAFT_07), Cache, []};
-metaschema(#profile{uri = ?DRAFT_06}, _Store, _Mode, Cache) ->
-    {ok, valid_json_metaschema:compiled(?DRAFT_06), Cache, []};
+metaschema(#profile{uri = ?DRAFT_2020_12}, Store, _Mode, Cache) ->
+    {ok, valid_json_metaschema:compiled(?DRAFT_2020_12, Store), Cache, []};
+metaschema(#profile{uri = ?DRAFT_2019_09}, Store, _Mode, Cache) ->
+    {ok, valid_json_metaschema:compiled(?DRAFT_2019_09, Store), Cache, []};
+metaschema(#profile{uri = ?DRAFT_07}, Store, _Mode, Cache) ->
+    {ok, valid_json_metaschema:compiled(?DRAFT_07, Store), Cache, []};
+metaschema(#profile{uri = ?DRAFT_06}, Store, _Mode, Cache) ->
+    {ok, valid_json_metaschema:compiled(?DRAFT_06, Store), Cache, []};
 metaschema(#profile{uri = Uri, draft = Draft}, Store, Mode, Cache) ->
     case maps:find(Uri, Cache) of
         {ok, Compiled} ->

@@ -56,6 +56,24 @@ normal rules.
 Once a document is registered, validation is a lookup by canonical name; the
 compiled artifact is self-contained and needs no registry access.
 
+## Checking a set without a runtime store
+
+`valid_json_schema_set:check/2` checks named schema documents as one connected
+set without starting the application or retaining artifacts:
+
+```erlang
+valid_json_schema_set:check(
+  [{<<"root.json">>, Root}, {<<"definitions.json">>, Definitions}],
+  [{base_uri, <<"https://example.com/schemas/">>},
+   {schema_validation, basic}]).
+```
+
+The function first registers every entry in a local immutable store, then
+checks each document and all references against the appropriate meta-schemas.
+Registration and validation failures are returned separately. This API does
+not discover or decode files; loaders and command-line tools provide the
+`{Uri, Json}` entries.
+
 ## Registry policy: offline, no network
 
 The registry is deliberately offline. Documents reachable through `$ref` must
