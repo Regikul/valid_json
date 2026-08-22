@@ -366,7 +366,7 @@ builtin_test() ->
                            canonical = ?BUILTIN,
                            json = #{<<"$id">> := ?BUILTIN}},
                  Document),
-    %% format-assertion входит в 16 встроенных документов, хотя корневая
+    %% format-assertion входит во встроенные документы, хотя корневая
     %% meta-schema на него по умолчанию не ссылается.
     ?assertMatch(#document{},
                  valid_json_store:fetch(

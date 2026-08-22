@@ -1,7 +1,8 @@
-%% Неизменяемая область встроенных JSON Schema meta-schemas. Все документы
-%% читаются вместе, а четыре корневые метасхемы компилируются доверенным
-%% bootstrap-путём. Размещённый runtime публикует bundles в защищённой ETS;
-%% одноразовая проверка держит тот же набор локальным значением.
+%% Неизменяемая область встроенных JSON Schema meta-schemas. Исходные JSON
+%% documents встроены в отдельный data-модуль, декодируются вместе, а четыре
+%% корневые метасхемы компилируются доверенным bootstrap-путём. Размещённый
+%% runtime публикует bundles в защищённой ETS; одноразовая проверка держит тот
+%% же набор локальным значением.
 %%
 %% Этот же модуль владеет таблицей: в `init/1` он забирает её у хранителя,
 %% публикует bundles и держит владение до конца жизни. Порядок «хранитель перед
@@ -94,10 +95,13 @@ with_local_bundles(#store{} = Store) ->
 
 -spec build() -> #{dialect() => bundle()}.
 build() ->
-    #{?DRAFT_2020_12 => bundle(?DRAFT_2020_12, modern_documents()),
-      ?DRAFT_2019_09 => bundle(?DRAFT_2019_09, legacy_documents()),
-      ?DRAFT_07 => bundle(?DRAFT_07, draft7_documents()),
-      ?DRAFT_06 => bundle(?DRAFT_06, draft6_documents())}.
+    Documents = documents(valid_json_metaschema_data:entries()),
+    #{?DRAFT_2020_12 => bundle(?DRAFT_2020_12,
+                               maps:get(?DRAFT_2020_12, Documents)),
+      ?DRAFT_2019_09 => bundle(?DRAFT_2019_09,
+                               maps:get(?DRAFT_2019_09, Documents)),
+      ?DRAFT_07 => bundle(?DRAFT_07, maps:get(?DRAFT_07, Documents)),
+      ?DRAFT_06 => bundle(?DRAFT_06, maps:get(?DRAFT_06, Documents))}.
 
 %% Канонические корневые метасхемы — единственные immutable compiled artifacts.
 -spec compiled(dialect()) -> compiled().
@@ -118,13 +122,7 @@ compiled(Draft, #store{metaschemas = Bundles}) when is_map(Bundles) ->
 
 -spec fetch(uri()) -> #document{} | undefined.
 fetch(Uri) ->
-    case builtin(Uri) of
-        {Draft, _Relative} ->
-            Bundle = published_bundle(Draft),
-            maps:get(Uri, maps:get(documents, Bundle));
-        undefined ->
-            undefined
-    end.
+    fetch_bundles(Uri, published_bundles()).
 
 -spec fetch(uri(), store()) -> #document{} | undefined.
 fetch(Uri, #store{metaschemas = published}) ->
@@ -132,17 +130,11 @@ fetch(Uri, #store{metaschemas = published}) ->
 fetch(_Uri, #store{metaschemas = none}) ->
     undefined;
 fetch(Uri, #store{metaschemas = Bundles}) when is_map(Bundles) ->
-    case builtin(Uri) of
-        {Draft, _Relative} ->
-            Bundle = maps:get(Draft, Bundles),
-            maps:get(Uri, maps:get(documents, Bundle));
-        undefined ->
-            undefined
-    end.
+    fetch_bundles(Uri, Bundles).
 
 -spec is_builtin(uri()) -> boolean().
 is_builtin(Uri) ->
-    builtin(Uri) =/= undefined.
+    valid_json_metaschema_data:entry(Uri) =/= undefined.
 
 %% Таблицы нет — приложение не запущено, и починить это за вызывающего
 %% библиотека не берётся: встроенную область поднимает дерево. Таблица есть, а
@@ -150,19 +142,31 @@ is_builtin(Uri) ->
 %% `init/1`, и молчать о ней нельзя.
 -spec published_bundle(dialect()) -> bundle().
 published_bundle(Draft) ->
+    maps:get(Draft, published_bundles()).
+
+-spec published_bundles() -> #{dialect() => bundle()}.
+published_bundles() ->
     try ets:lookup(?TABLE, ?BUNDLES) of
         [{?BUNDLES, Bundles}] ->
-            maps:get(Draft, Bundles);
+            Bundles;
         [] ->
-            erlang:error({metaschema_unpublished, Draft})
+            erlang:error(metaschema_unpublished)
     catch
         error:badarg ->
             erlang:error({application_not_started, valid_json})
     end.
 
--spec bundle(dialect(), [{uri(), file:filename()}]) -> bundle().
-bundle(Draft, Manifest) ->
-    Documents = maps:from_list([load(Entry) || Entry <- Manifest]),
+-spec fetch_bundles(uri(), #{dialect() => bundle()}) -> #document{} | undefined.
+fetch_bundles(Uri, Bundles) ->
+    Find = fun(_Draft, Bundle, undefined) ->
+                   maps:get(Uri, maps:get(documents, Bundle), undefined);
+              (_Draft, _Bundle, Document) ->
+                   Document
+           end,
+    maps:fold(Find, undefined, Bundles).
+
+-spec bundle(dialect(), #{uri() => #document{}}) -> bundle().
+bundle(Draft, Documents) ->
     Store = #store{documents = Documents, metaschemas = none},
     Root = maps:get(Draft, Documents),
     case valid_json_compile_closure:document(Store, Root, Draft) of
@@ -181,84 +185,31 @@ bundle(Draft, Manifest) ->
             erlang:error({builtin_metaschema_closure, Draft, Error})
     end.
 
--spec load({uri(), file:filename()}) -> {uri(), #document{}}.
-load({Uri, Relative}) ->
-    Path = filename:join([priv_dir(), "json_schema", Relative]),
-    case file:read_file(Path) of
-        {ok, Encoded} ->
-            Json = json:decode(Encoded),
-            {Uri, #document{registered = Uri, canonical = Uri, json = Json}};
-        {error, Reason} ->
-            erlang:error({builtin_schema, Uri, Reason})
+-spec documents([{uri(), binary()}]) ->
+          #{dialect() => #{uri() => #document{}}}.
+documents(Entries) ->
+    lists:foldl(fun add_document/2, #{}, Entries).
+
+-spec add_document({uri(), binary()},
+                   #{dialect() => #{uri() => #document{}}}) ->
+          #{dialect() => #{uri() => #document{}}}.
+add_document({Uri, Encoded}, Groups) ->
+    Json = json:decode(Encoded),
+    Uri = document_uri(maps:get(<<"$id">>, Json)),
+    Dialect = document_uri(maps:get(<<"$schema">>, Json)),
+    Document = #document{registered = Uri, canonical = Uri, json = Json},
+    Documents = maps:get(Dialect, Groups, #{}),
+    maps:put(Dialect, maps:put(Uri, Document, Documents), Groups).
+
+%% Registry names identify documents, so an explicitly written empty fragment
+%% in Draft 6/7 is not part of the key.
+-spec document_uri(uri()) -> uri().
+document_uri(Uri) ->
+    case byte_size(Uri) of
+        0 -> Uri;
+        Size ->
+            case binary:at(Uri, Size - 1) of
+                $# -> binary:part(Uri, 0, Size - 1);
+                _  -> Uri
+            end
     end.
-
--spec priv_dir() -> file:filename_all().
-priv_dir() ->
-    case code:priv_dir(valid_json) of
-        {error, bad_name} ->
-            filename:join(filename:dirname(code:which(?MODULE)), "../priv");
-        Directory ->
-            Directory
-    end.
-
--spec builtin(uri()) -> {dialect(), file:filename()} | undefined.
-builtin(Uri) ->
-    case lists:keyfind(Uri, 1, modern_documents() ++ legacy_documents() ++
-                            draft7_documents() ++ draft6_documents()) of
-        {Uri, Relative} -> {manifest_draft(Uri), Relative};
-        false           -> undefined
-    end.
-
--spec manifest_draft(uri()) -> dialect().
-manifest_draft(<<"https://json-schema.org/draft/2020-12/", _/binary>>) ->
-    ?DRAFT_2020_12;
-manifest_draft(<<"https://json-schema.org/draft/2019-09/", _/binary>>) ->
-    ?DRAFT_2019_09;
-manifest_draft(<<"http://json-schema.org/draft-07/", _/binary>>) ->
-    ?DRAFT_07;
-manifest_draft(<<"http://json-schema.org/draft-06/", _/binary>>) ->
-    ?DRAFT_06.
-
--spec modern_documents() -> [{uri(), file:filename()}].
-modern_documents() ->
-    [{?DRAFT_2020_12, "draft-2020-12/schema.json"},
-     {<<"https://json-schema.org/draft/2020-12/meta/core">>,
-      "draft-2020-12/meta/core.json"},
-     {<<"https://json-schema.org/draft/2020-12/meta/applicator">>,
-      "draft-2020-12/meta/applicator.json"},
-     {<<"https://json-schema.org/draft/2020-12/meta/unevaluated">>,
-      "draft-2020-12/meta/unevaluated.json"},
-     {<<"https://json-schema.org/draft/2020-12/meta/validation">>,
-      "draft-2020-12/meta/validation.json"},
-     {<<"https://json-schema.org/draft/2020-12/meta/meta-data">>,
-      "draft-2020-12/meta/meta-data.json"},
-     {<<"https://json-schema.org/draft/2020-12/meta/format-annotation">>,
-      "draft-2020-12/meta/format-annotation.json"},
-     {<<"https://json-schema.org/draft/2020-12/meta/format-assertion">>,
-      "draft-2020-12/meta/format-assertion.json"},
-     {<<"https://json-schema.org/draft/2020-12/meta/content">>,
-      "draft-2020-12/meta/content.json"}].
-
--spec legacy_documents() -> [{uri(), file:filename()}].
-legacy_documents() ->
-    [{?DRAFT_2019_09, "draft-2019-09/schema.json"},
-     {<<"https://json-schema.org/draft/2019-09/meta/core">>,
-      "draft-2019-09/meta/core.json"},
-     {<<"https://json-schema.org/draft/2019-09/meta/applicator">>,
-      "draft-2019-09/meta/applicator.json"},
-     {<<"https://json-schema.org/draft/2019-09/meta/validation">>,
-      "draft-2019-09/meta/validation.json"},
-     {<<"https://json-schema.org/draft/2019-09/meta/meta-data">>,
-      "draft-2019-09/meta/meta-data.json"},
-     {<<"https://json-schema.org/draft/2019-09/meta/format">>,
-      "draft-2019-09/meta/format.json"},
-     {<<"https://json-schema.org/draft/2019-09/meta/content">>,
-      "draft-2019-09/meta/content.json"}].
-
--spec draft7_documents() -> [{uri(), file:filename()}].
-draft7_documents() ->
-    [{?DRAFT_07, "draft-07/schema.json"}].
-
--spec draft6_documents() -> [{uri(), file:filename()}].
-draft6_documents() ->
-    [{?DRAFT_06, "draft-06/schema.json"}].

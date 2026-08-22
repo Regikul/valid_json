@@ -55,6 +55,18 @@ published_bundles_test() ->
     ?assertEqual(Draft7, maps:get(compiled, Draft7Bundle)),
     ?assertEqual(Draft6, maps:get(compiled, Draft6Bundle)).
 
+embedded_entries_test() ->
+    Entries = valid_json_metaschema_data:entries(),
+    ?assertEqual(18, length(Entries)),
+    ?assertEqual(lists:sort(Entries), Entries),
+    Encoded = valid_json_metaschema_data:entry(?DRAFT_2020_12),
+    ?assert(is_binary(Encoded)),
+    ?assertMatch(#{<<"$id">> := ?DRAFT_2020_12}, json:decode(Encoded)),
+    ?assertEqual(
+       undefined,
+       valid_json_metaschema_data:entry(
+         <<"https://json-schema.org/draft/2020-12/output/schema">>)).
+
 builtin_documents_are_published_test() ->
     ?assertMatch(#document{canonical = ?DRAFT_2020_12},
                  valid_json_metaschema:fetch(?DRAFT_2020_12)),
