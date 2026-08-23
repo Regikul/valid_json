@@ -48,7 +48,7 @@ dependency, pinned to the latest tag:
 
 ```erlang
 {deps, [
-    {valid_json, {git, "https://github.com/Regikul/valid_json.git", {tag, "v0.3.0"}}}
+    {valid_json, {git, "https://github.com/Regikul/valid_json.git", {tag, "v0.4.0"}}}
 ]}.
 ```
 
@@ -402,7 +402,7 @@ tests. In CI, the `ci` profile turns compiler warnings into errors and runs
 
 ## Project status
 
-`valid_json` is version 0.3.0 and is under active development. Draft 6, Draft
+`valid_json` is version 0.4.0 and is under active development. Draft 6, Draft
 7, Draft 2019-09, and Draft 2020-12 are supported within the conformance
 profile declared above; the remaining work is tracked in
 [ROADMAP.md](ROADMAP.md) — the Format-Assertion vocabulary of phase P8, the
