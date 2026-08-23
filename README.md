@@ -35,6 +35,7 @@ stack.
 | Standard output formats | `flag`, `basic`, `detailed`, `verbose` | own error tuples | own error structs |
 | Runtime dependencies | none | none | optional `jason`, `decimal`, `idna` |
 | Network at validation time | never | possible for unknown `$ref` | whatever your loader does |
+| Command-line tool | `valid-json check DIR` | yes, escript and Docker | no |
 
 See the full comparison in [docs/comparison](docs/comparison/index.md) — API,
 architecture, and keyword-by-keyword coverage, measured against jesse 1.8.2 and
@@ -126,6 +127,63 @@ Registered schemas are compiled once and reused. Artifacts are stored in a
 supervised ETS table, so a schema used more than once belongs in a store; a
 schema that arrives with a single request can use `run_schema/3`, at the price
 of compiling it on every call.
+
+## Command line
+
+`rebar3 escriptize` builds `valid-json`, a self-contained escript: the built-in
+meta-schemas are embedded at compile time, so the command needs neither the
+application nor the network.
+
+```shell
+rebar3 escriptize
+_build/default/bin/valid-json check priv/schemas
+```
+
+`check DIRECTORY` reads every `.json` document below the directory and checks it
+against its meta-schema. The documents are registered together, so a `$ref`
+between them resolves. A schema is named by its own `$id`, and by its path below
+the directory when it has none. `--default-dialect URI` names the dialect for
+documents that declare no `$schema`.
+
+Streams are split by what the command is for. Validation results go to stdout as
+one standard output document per line — the specification's `detailed` format,
+one line per schema that failed, each naming its subject in an extra `instance`
+member:
+
+```json
+{
+  "instance": "file:///srv/schemas/user.json",
+  "valid": false,
+  "keywordLocation": "",
+  "instanceLocation": "",
+  "absoluteKeywordLocation": "https://json-schema.org/draft/2020-12/schema#",
+  "errors": [
+    {
+      "valid": false,
+      "keywordLocation": "/allOf/3/$ref/properties/minimum/type",
+      "absoluteKeywordLocation":
+        "https://json-schema.org/draft/2020-12/meta/validation#/properties/minimum/type",
+      "instanceLocation": "/minimum",
+      "error": "expected number, got string"
+    }
+  ]
+}
+```
+
+Pretty-printed here; the stream puts each document on a single line.
+
+Everything the command could not check — a bad argument, an unreadable
+directory, a document that would not register or compile — goes to stderr as
+prose. The exit code follows the same split:
+
+| code | meaning |
+| --- | --- |
+| 0 | every schema passed; nothing is printed |
+| 1 | a schema failed its meta-schema; stdout carries the output documents |
+| 2 | something could not be checked; stderr says what |
+
+An empty directory is exit code 2, not 0: silence there would be
+indistinguishable from a checked set.
 
 ## Features
 
