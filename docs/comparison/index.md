@@ -66,13 +66,15 @@ calling process.
 | `contentEncoding` / `contentMediaType` / `contentSchema` | annotations only | not implemented | checked when enabled |
 | Regular expression dialect | PCRE as-is | PCRE as-is | ECMA-262 patterns are adapted |
 | `multipleOf` arithmetic | doubles | doubles | `decimal` when the dependency is present |
-| Command-line tool | no | yes, escript and Docker | no |
+| Command-line tool | `valid-json check DIR`, an escript that checks every schema in a directory against its meta-schema | yes, escript and Docker; validates instances against a schema | no |
 
 ## Which one to reach for
 
 Take **jesse** if draft 04 or draft 06 is what your schemas are written against,
 if you want a validator that a lot of production Erlang already runs, or if you
-need to validate files from a shell script.
+need to validate instance files from a shell script: the `valid_json` command
+checks that the schemas themselves are well-formed, not that a document matches
+one.
 
 Take **jsonschex** if you are writing Elixir and want Draft 2020-12 with the
 sharp edges filed down: ECMA-262 regular expressions, decimal `multipleOf`,
